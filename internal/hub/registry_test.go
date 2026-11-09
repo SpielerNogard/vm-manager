@@ -41,7 +41,7 @@ func newTestRegistry(t *testing.T, min, max int) (*Registry, *fakeNode, *[]int) 
 }
 
 func validReq() CreateVMRequest {
-	return CreateVMRequest{NodeID: "n1", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, SSHPublicKey: "ssh-ed25519 AAA"}
+	return CreateVMRequest{NodeID: "n1", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, SSHPublicKeys: []string{"ssh-ed25519 AAA"}}
 }
 
 func TestCreateVMSendsCreateAndAllocatesPort(t *testing.T) {
@@ -69,9 +69,41 @@ func TestCreateVMRejectsInvalid(t *testing.T) {
 		"cpus":          func(q *CreateVMRequest) { q.CPUs = 0 },
 		"memory":        func(q *CreateVMRequest) { q.MemoryMB = 256 },
 		"disk":          func(q *CreateVMRequest) { q.DiskGB = 3 },
-		"data disk":     func(q *CreateVMRequest) { q.DataDisksGB = []int{0} },
-		"empty key":     func(q *CreateVMRequest) { q.SSHPublicKey = " " },
-		"unknown node":  func(q *CreateVMRequest) { q.NodeID = "nope" },
+		"disk size": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/data", SizeGB: 0}}
+		},
+		"disk name": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "Data_1", MountPath: "/data", SizeGB: 1}}
+		},
+		"disk name len": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "a234567890123456x", MountPath: "/data", SizeGB: 1}}
+		},
+		"mount root": func(q *CreateVMRequest) { q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/", SizeGB: 1}} },
+		"mount rel":  func(q *CreateVMRequest) { q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "data", SizeGB: 1}} },
+		"mount unclean": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/a/../etc", SizeGB: 1}}
+		},
+		"mount space": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/my data", SizeGB: 1}}
+		},
+		"mount etc": func(q *CreateVMRequest) { q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/etc", SizeGB: 1}} },
+		"mount usr sub": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/usr/local", SizeGB: 1}}
+		},
+		"mount home": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/home/ubuntu", SizeGB: 1}}
+		},
+		"mount ssh": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/home/ubuntu/.ssh", SizeGB: 1}}
+		},
+		"dup disk name": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "a", MountPath: "/a", SizeGB: 1}, {Name: "a", MountPath: "/b", SizeGB: 1}}
+		},
+		"dup mount": func(q *CreateVMRequest) {
+			q.DataDisks = []proto.DataDisk{{Name: "a", MountPath: "/a", SizeGB: 1}, {Name: "b", MountPath: "/a", SizeGB: 1}}
+		},
+		"empty key":    func(q *CreateVMRequest) { q.SSHPublicKeys = nil },
+		"unknown node": func(q *CreateVMRequest) { q.NodeID = "nope" },
 	}
 	for name, mod := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -174,7 +206,7 @@ func TestReRegisterKeepsPort(t *testing.T) {
 	r.OnPortOpen = func(int) error { return nil }
 	rec := func(id string, port int) proto.VMRecord {
 		return proto.VMRecord{
-			Spec:   proto.VMSpec{ID: id, Name: id, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKey: "k", SSHPort: port},
+			Spec:   proto.VMSpec{ID: id, Name: id, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}, SSHPort: port},
 			Status: proto.VMStatus{ID: id, State: proto.StateRunning, IP: "192.168.64.2"},
 		}
 	}
@@ -221,5 +253,18 @@ func TestPortRangeExhausted(t *testing.T) {
 	q.Name = "dev2"
 	if _, err := r.CreateVM(q); !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCreateVMAcceptsDataDisks(t *testing.T) {
+	r, _, _ := newTestRegistry(t, 22000, 22999)
+	q := validReq()
+	q.DataDisks = []proto.DataDisk{
+		{Name: "data", MountPath: "/data", SizeGB: 1},
+		{Name: "cache", MountPath: "/var/cache/build", SizeGB: 1},
+		{Name: "work", MountPath: "/home/ubuntu/work", SizeGB: 1},
+	}
+	if _, err := r.CreateVM(q); err != nil {
+		t.Fatal(err)
 	}
 }

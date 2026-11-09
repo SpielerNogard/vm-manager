@@ -19,14 +19,21 @@ const (
 )
 
 type VMSpec struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	CPUs         int    `json:"cpus"`
-	MemoryMB     int    `json:"memoryMB"`
-	DiskGB       int    `json:"diskGB"`
-	DataDisksGB  []int  `json:"dataDisksGB,omitempty"`
-	SSHPublicKey string `json:"sshPublicKey"`
-	SSHPort      int    `json:"sshPort"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	CPUs          int        `json:"cpus"`
+	MemoryMB      int        `json:"memoryMB"`
+	DiskGB        int        `json:"diskGB"`
+	DataDisks     []DataDisk `json:"dataDisks,omitempty"`
+	SSHPublicKeys []string   `json:"sshPublicKeys"`
+	SSHPort       int        `json:"sshPort"`
+}
+
+// DataDisk is formatted as ext4 labelled Name on first boot and mounted at MountPath.
+type DataDisk struct {
+	Name      string `json:"name"`
+	MountPath string `json:"mountPath"`
+	SizeGB    int    `json:"sizeGB"`
 }
 
 type VMStatus struct {
@@ -48,6 +55,18 @@ type Register struct {
 	CPUs     int        `json:"cpus"`
 	MemoryMB int        `json:"memoryMB"`
 	VMs      []VMRecord `json:"vms,omitempty"`
+	// Config is the node's config file with the hub token removed; shown in the GUI only.
+	Config  json.RawMessage `json:"config,omitempty"`
+	Machine *Machine        `json:"machine,omitempty"`
+}
+
+type Machine struct {
+	OS        string `json:"os"`
+	OSVersion string `json:"osVersion,omitempty"`
+	Arch      string `json:"arch"`
+	CPUModel  string `json:"cpuModel,omitempty"`
+	CPUs      int    `json:"cpus"`
+	MemoryMB  int    `json:"memoryMB,omitempty"`
 }
 
 // Message types: "register" (node→hub), "create"/"delete" (hub→node), "status" (node→hub).

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,5 +76,24 @@ func TestLoadConfigDefaults(t *testing.T) {
 	var vz struct{ ImageURL string }
 	if err := c.ProviderSection(&vz); err != nil || vz.ImageURL != "" {
 		t.Fatalf("missing section: %+v %v", vz, err)
+	}
+}
+
+func TestConfigPublicDropsToken(t *testing.T) {
+	c, err := LoadConfig(writeConfig(t, fullConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := c.Public()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]map[string]any
+	json.Unmarshal(pub, &got)
+	if _, ok := got["hub"]["token"]; ok || got["hub"]["url"] != "ws://hub:8080/api/nodes/connect" || got["vz"]["imageURL"] != "https://example.com/img" {
+		t.Fatalf("public = %s", pub)
+	}
+	if strings.Contains(string(pub), `"t"`) {
+		t.Fatalf("token leaked: %s", pub)
 	}
 }

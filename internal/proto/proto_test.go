@@ -15,7 +15,7 @@ func TestMessageRoundTrip(t *testing.T) {
 		Register: &Register{
 			NodeID: "n1", Hostname: "mac", Provider: "vz", CPUs: 8, MemoryMB: 16384,
 			VMs: []VMRecord{{
-				Spec:   VMSpec{ID: "abc", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, DataDisksGB: []int{5}, SSHPublicKey: "ssh-ed25519 AAA", SSHPort: 22001},
+				Spec:   VMSpec{ID: "abc", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, DataDisks: []DataDisk{{Name: "data", MountPath: "/data", SizeGB: 5}}, SSHPublicKeys: []string{"ssh-ed25519 AAA"}, SSHPort: 22001},
 				Status: VMStatus{ID: "abc", State: StateRunning, IP: "192.168.64.2"},
 			}},
 		},
