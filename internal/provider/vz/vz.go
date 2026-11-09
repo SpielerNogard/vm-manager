@@ -112,7 +112,8 @@ func (p *Provider) vmConfig(f node.VMFile, dir string) (*vz.VirtualMachineConfig
 	}
 	var storage []vz.StorageDeviceConfiguration
 	for _, d := range append(disks, seedISO) {
-		att, err := vz.NewDiskImageStorageDeviceAttachment(filepath.Join(dir, d), d == seedISO)
+		// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
+		att, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d), d == seedISO, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
 		if err != nil {
 			return nil, fmt.Errorf("disk %s: %w", d, err)
 		}

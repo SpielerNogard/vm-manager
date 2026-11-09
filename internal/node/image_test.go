@@ -71,7 +71,7 @@ func TestCreateDataDisks(t *testing.T) {
 func TestCloudInit(t *testing.T) {
 	f := VMFile{Spec: proto.VMSpec{ID: "abc123", Name: "dev", SSHPublicKey: "ssh-ed25519 AAAAkey me@host"}, MAC: "7e:30:17:4e:4a:00"}
 	ud, md, nc := CloudInit(f)
-	for _, want := range []string{"#cloud-config\n", "hostname: dev", "name: ubuntu", "NOPASSWD:ALL", `"ssh-ed25519 AAAAkey me@host"`} {
+	for _, want := range []string{"#cloud-config\n", "hostname: dev", "name: ubuntu", "NOPASSWD:ALL", `"ssh-ed25519 AAAAkey me@host"`, "console=hvc0", "update-grub"} {
 		if !strings.Contains(ud, want) {
 			t.Errorf("user-data missing %q:\n%s", want, ud)
 		}

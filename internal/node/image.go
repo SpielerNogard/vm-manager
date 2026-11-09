@@ -142,6 +142,9 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - %s
+bootcmd:
+  # Kernel and systemd output to the virtio console (console.log); takes effect from the second boot.
+  - [sh, -c, 'test -f /etc/default/grub.d/99-vmm-console.cfg || { echo "GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT console=tty1 console=hvc0\"" > /etc/default/grub.d/99-vmm-console.cfg && update-grub; }']
 `, f.Spec.Name, key)
 	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
 	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
