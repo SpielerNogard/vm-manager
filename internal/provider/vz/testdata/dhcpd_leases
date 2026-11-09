@@ -1,0 +1,21 @@
+{
+	name=other
+	ip_address=192.168.64.9
+	hw_address=1,de:ad:be:ef:0:1
+	identifier=1,de:ad:be:ef:0:1
+	lease=0x6730a1b2
+}
+{
+	name=dev
+	ip_address=192.168.64.3
+	hw_address=1,a2:b3:c:4:5:6
+	identifier=1,a2:b3:c:4:5:6
+	lease=0x6730a000
+}
+{
+	name=dev
+	ip_address=192.168.64.7
+	hw_address=1,a2:b3:c:4:5:6
+	identifier=1,a2:b3:c:4:5:6
+	lease=0x6730a1ff
+}
