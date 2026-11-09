@@ -1,0 +1,293 @@
+package node
+
+import (
+	"bufio"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/hashicorp/yamux"
+
+	"vm-manager/internal/proto"
+)
+
+const (
+	reconnectDelay = 2 * time.Second
+	ipTimeout      = 120 * time.Second
+)
+
+type Agent struct {
+	HubURL, Token, NodeID, VMsDir string
+	CPUs, MemoryMB                int
+	Provider                      Provider
+
+	sshPort int // guest SSH port; overridden in tests
+
+	mu   sync.Mutex
+	vms  map[string]*vmEntry
+	send func(proto.Message) error // nil while disconnected
+}
+
+type vmEntry struct {
+	file   VMFile
+	status proto.VMStatus
+	inst   Instance
+	cancel context.CancelFunc
+	booted chan struct{} // closed once boot has finished starting (or failed)
+}
+
+func (a *Agent) Run(ctx context.Context) error {
+	if a.sshPort == 0 {
+		a.sshPort = 22
+	}
+	a.vms = map[string]*vmEntry{}
+	if err := a.restoreAll(ctx); err != nil {
+		return err
+	}
+	for {
+		if err := a.connect(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("hub connection: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(reconnectDelay):
+		}
+	}
+}
+
+func (a *Agent) restoreAll(ctx context.Context) error {
+	files, err := LoadVMs(a.VMsDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		a.startVM(ctx, f, false)
+	}
+	return nil
+}
+
+func (a *Agent) connect(ctx context.Context) error {
+	c, _, err := websocket.Dial(ctx, a.HubURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + a.Token}},
+	})
+	if err != nil {
+		return err
+	}
+	cfg := yamux.DefaultConfig()
+	cfg.LogOutput = io.Discard
+	sess, err := yamux.Client(websocket.NetConn(ctx, c, websocket.MessageBinary), cfg)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	ctrl, err := sess.Open()
+	if err != nil {
+		return err
+	}
+
+	var encMu sync.Mutex
+	enc := proto.NewEncoder(ctrl)
+	send := func(m proto.Message) error {
+		encMu.Lock()
+		defer encMu.Unlock()
+		return enc.Encode(m)
+	}
+	// Register and installing send happen under a.mu so no status update slips between them.
+	a.mu.Lock()
+	err = send(proto.Message{Type: "register", Register: a.registerMsg()})
+	if err == nil {
+		a.send = send
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	log.Printf("connected to hub %s", a.HubURL)
+	defer func() {
+		a.mu.Lock()
+		a.send = nil
+		a.mu.Unlock()
+	}()
+
+	go a.acceptStreams(sess)
+	dec := json.NewDecoder(ctrl)
+	for {
+		var m proto.Message
+		if err := dec.Decode(&m); err != nil {
+			return err
+		}
+		switch {
+		case m.Type == "create" && m.Create != nil:
+			a.create(ctx, *m.Create)
+		case m.Type == "delete":
+			go a.delete(m.DeleteID)
+		}
+	}
+}
+
+func (a *Agent) registerMsg() *proto.Register {
+	reg := &proto.Register{NodeID: a.NodeID, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB}
+	reg.Hostname, _ = os.Hostname()
+	for _, e := range a.vms {
+		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: e.status})
+	}
+	return reg
+}
+
+func (a *Agent) create(ctx context.Context, spec proto.VMSpec) {
+	a.mu.Lock()
+	_, exists := a.vms[spec.ID]
+	a.mu.Unlock()
+	if exists {
+		return
+	}
+	f := VMFile{Spec: spec, MAC: randomMAC()}
+	if err := SaveVM(a.VMsDir, f); err != nil {
+		a.report(proto.VMStatus{ID: spec.ID, State: proto.StateError, Error: err.Error()})
+		return
+	}
+	a.startVM(ctx, f, true)
+}
+
+func (a *Agent) startVM(ctx context.Context, f VMFile, prepare bool) {
+	bootCtx, cancel := context.WithCancel(ctx)
+	e := &vmEntry{file: f, status: proto.VMStatus{ID: f.Spec.ID, State: proto.StateStarting}, cancel: cancel, booted: make(chan struct{})}
+	a.mu.Lock()
+	a.vms[f.Spec.ID] = e
+	a.mu.Unlock()
+	a.report(e.status)
+	go a.boot(bootCtx, e, prepare)
+}
+
+func (a *Agent) boot(ctx context.Context, e *vmEntry, prepare bool) {
+	id, dir := e.file.Spec.ID, VMDir(a.VMsDir, e.file.Spec.ID)
+	fail := func(step string, err error) {
+		close(e.booted)
+		a.report(proto.VMStatus{ID: id, State: proto.StateError, Error: fmt.Sprintf("%s: %v", step, err)})
+	}
+	if prepare {
+		if err := a.Provider.Prepare(ctx, e.file, dir); err != nil {
+			fail("prepare", err)
+			return
+		}
+	}
+	inst, err := a.Provider.Start(e.file, dir)
+	if err != nil {
+		fail("start", err)
+		return
+	}
+	a.mu.Lock()
+	e.inst = inst
+	a.mu.Unlock()
+	close(e.booted)
+
+	go func() {
+		<-inst.Done()
+		a.report(proto.VMStatus{ID: id, State: proto.StateStopped})
+	}()
+	ipCtx, cancel := context.WithTimeout(ctx, ipTimeout)
+	defer cancel()
+	ip, err := inst.WaitIP(ipCtx)
+	if err != nil {
+		a.report(proto.VMStatus{ID: id, State: proto.StateError, Error: "waiting for IP: " + err.Error()})
+		return
+	}
+	a.report(proto.VMStatus{ID: id, State: proto.StateRunning, IP: ip})
+}
+
+func (a *Agent) delete(id string) {
+	a.mu.Lock()
+	e, ok := a.vms[id]
+	delete(a.vms, id)
+	a.mu.Unlock()
+	if !ok {
+		return
+	}
+	e.cancel()
+	<-e.booted
+	if e.inst != nil {
+		if err := e.inst.Stop(); err != nil {
+			log.Printf("vm %s: stop: %v", id, err)
+		}
+	}
+	if err := DeleteVMDir(a.VMsDir, id); err != nil {
+		log.Printf("vm %s: delete dir: %v", id, err)
+	}
+}
+
+// report records the status and forwards it to the hub; updates for deleted VMs are dropped.
+func (a *Agent) report(st proto.VMStatus) {
+	a.mu.Lock()
+	e, ok := a.vms[st.ID]
+	if ok {
+		e.status = st
+	}
+	send := a.send
+	a.mu.Unlock()
+	if ok && send != nil {
+		if err := send(proto.Message{Type: "status", Status: &st}); err != nil {
+			log.Printf("vm %s: status: %v", st.ID, err)
+		}
+	}
+}
+
+func (a *Agent) acceptStreams(sess *yamux.Session) {
+	for {
+		s, err := sess.Accept()
+		if err != nil {
+			return
+		}
+		go a.handleStream(s)
+	}
+}
+
+func (a *Agent) handleStream(s net.Conn) {
+	br := bufio.NewReader(s)
+	h, err := proto.ReadHeader(br)
+	if err != nil {
+		s.Close()
+		return
+	}
+	a.mu.Lock()
+	var ip string
+	if e, ok := a.vms[h.VMID]; ok {
+		ip = e.status.IP
+	}
+	a.mu.Unlock()
+	if ip == "" {
+		s.Close()
+		return
+	}
+	vm, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(a.sshPort)), 5*time.Second)
+	if err != nil {
+		s.Close()
+		return
+	}
+	proto.Pipe(bufConn{s, br}, vm)
+}
+
+// bufConn keeps bytes already buffered while reading the stream header.
+type bufConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (b bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
+
+func randomMAC() string {
+	b := make([]byte, 6)
+	rand.Read(b)
+	b[0] = b[0]&^0x01 | 0x02 // unicast, locally administered
+	return net.HardwareAddr(b).String()
+}
