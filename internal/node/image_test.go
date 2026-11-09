@@ -69,7 +69,8 @@ func TestCreateDataDisks(t *testing.T) {
 }
 
 func TestCloudInit(t *testing.T) {
-	ud, md := CloudInit(proto.VMSpec{ID: "abc123", Name: "dev", SSHPublicKey: "ssh-ed25519 AAAAkey me@host"})
+	f := VMFile{Spec: proto.VMSpec{ID: "abc123", Name: "dev", SSHPublicKey: "ssh-ed25519 AAAAkey me@host"}, MAC: "7e:30:17:4e:4a:00"}
+	ud, md, nc := CloudInit(f)
 	for _, want := range []string{"#cloud-config\n", "hostname: dev", "name: ubuntu", "NOPASSWD:ALL", `"ssh-ed25519 AAAAkey me@host"`} {
 		if !strings.Contains(ud, want) {
 			t.Errorf("user-data missing %q:\n%s", want, ud)
@@ -77,6 +78,12 @@ func TestCloudInit(t *testing.T) {
 	}
 	if !strings.Contains(md, "instance-id: abc123") || !strings.Contains(md, "local-hostname: dev") {
 		t.Errorf("meta-data = %q", md)
+	}
+	// Ubuntu defaults to a DUID client id, which hides the MAC from macOS' dhcpd_leases.
+	for _, want := range []string{"version: 2", `macaddress: "7e:30:17:4e:4a:00"`, "dhcp4: true", "dhcp-identifier: mac"} {
+		if !strings.Contains(nc, want) {
+			t.Errorf("network-config missing %q:\n%s", want, nc)
+		}
 	}
 }
 

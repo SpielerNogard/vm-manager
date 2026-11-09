@@ -58,7 +58,7 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CreateDataDisks(dir, f.Spec.DataDisksGB); err != nil {
 		return err
 	}
-	return makeSeedISO(ctx, dir, f.Spec)
+	return makeSeedISO(ctx, dir, f)
 }
 
 func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {

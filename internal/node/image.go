@@ -12,8 +12,6 @@ import (
 
 	"github.com/lima-vm/go-qcow2reader"
 	"github.com/lima-vm/go-qcow2reader/convert"
-
-	"vm-manager/internal/proto"
 )
 
 // EnsureBaseImage downloads url once into imagesDir and converts it (qcow2 or raw) to a raw disk.
@@ -134,8 +132,8 @@ func CreateDataDisks(dir string, sizesGB []int) error {
 	return nil
 }
 
-func CloudInit(spec proto.VMSpec) (userData, metaData string) {
-	key, _ := json.Marshal(spec.SSHPublicKey) // JSON string is valid YAML and escapes anything odd in the key
+func CloudInit(f VMFile) (userData, metaData, networkConfig string) {
+	key, _ := json.Marshal(f.Spec.SSHPublicKey) // JSON string is valid YAML and escapes anything odd in the key
 	userData = fmt.Sprintf(`#cloud-config
 hostname: %s
 users:
@@ -144,7 +142,16 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - %s
-`, spec.Name, key)
-	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", spec.ID, spec.Name)
-	return userData, metaData
+`, f.Spec.Name, key)
+	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
+	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
+	networkConfig = fmt.Sprintf(`version: 2
+ethernets:
+  primary:
+    match:
+      macaddress: %q
+    dhcp4: true
+    dhcp-identifier: mac
+`, f.MAC)
+	return userData, metaData, networkConfig
 }
