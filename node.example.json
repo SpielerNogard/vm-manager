@@ -1,0 +1,14 @@
+{
+  "nodeId": "mac-mini-1",
+  "hub": { "url": "ws://localhost:8080/api/nodes/connect", "token": "change-me" },
+  "provider": "vz",
+  "paths": {
+    "vms": "~/.vm-manager/vms",
+    "images": "~/.vm-manager/images"
+  },
+  "capacity": { "cpus": 4, "memoryMB": 8192 },
+  "vz": {
+    "imageURL": "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img",
+    "leasesPath": "/var/db/dhcpd_leases"
+  }
+}

@@ -8,5 +8,9 @@ web:
 hub:
 	go build -o bin/hub ./cmd/hub
 
+node:
+	go build -o bin/node ./cmd/node
+	codesign --force --entitlements node.entitlements -s - bin/node
+
 test:
 	go test ./...
