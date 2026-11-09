@@ -30,6 +30,8 @@ type Agent struct {
 	HubURL, Token, NodeID, VMsDir string
 	CPUs, MemoryMB                int
 	Provider                      Provider
+	Config                        json.RawMessage
+	Machine                       *proto.Machine
 
 	sshPort int // guest SSH port; overridden in tests
 
@@ -138,7 +140,7 @@ func (a *Agent) connect(ctx context.Context) error {
 }
 
 func (a *Agent) registerMsg() *proto.Register {
-	reg := &proto.Register{NodeID: a.NodeID, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB}
+	reg := &proto.Register{NodeID: a.NodeID, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
 		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: e.status})

@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lima-vm/go-qcow2reader"
 	"github.com/lima-vm/go-qcow2reader/convert"
+
+	"vm-manager/internal/proto"
 )
 
 // EnsureBaseImage downloads url once into imagesDir and converts it (qcow2 or raw) to a raw disk.
@@ -117,13 +120,13 @@ func copyFile(src, dst string) error {
 
 func DataDiskName(i int) string { return fmt.Sprintf("data-%d.img", i) }
 
-func CreateDataDisks(dir string, sizesGB []int) error {
-	for i, gb := range sizesGB {
+func CreateDataDisks(dir string, disks []proto.DataDisk) error {
+	for i, d := range disks {
 		f, err := os.Create(filepath.Join(dir, DataDiskName(i)))
 		if err != nil {
 			return err
 		}
-		err = f.Truncate(int64(gb) << 30)
+		err = f.Truncate(int64(d.SizeGB) << 30)
 		f.Close()
 		if err != nil {
 			return err
@@ -133,7 +136,11 @@ func CreateDataDisks(dir string, sizesGB []int) error {
 }
 
 func CloudInit(f VMFile) (userData, metaData, networkConfig string) {
-	key, _ := json.Marshal(f.Spec.SSHPublicKey) // JSON string is valid YAML and escapes anything odd in the key
+	var keys strings.Builder
+	for _, k := range f.Spec.SSHPublicKeys {
+		j, _ := json.Marshal(k) // JSON string is valid YAML and escapes anything odd in the key
+		fmt.Fprintf(&keys, "      - %s\n", j)
+	}
 	userData = fmt.Sprintf(`#cloud-config
 hostname: %s
 users:
@@ -141,11 +148,10 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
-      - %s
-bootcmd:
+%sbootcmd:
   # Kernel and systemd output to the virtio console (console.log); takes effect from the second boot.
   - [sh, -c, 'test -f /etc/default/grub.d/99-vmm-console.cfg || { echo "GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT console=tty1 console=hvc0\"" > /etc/default/grub.d/99-vmm-console.cfg && update-grub; }']
-`, f.Spec.Name, key)
+%s`, f.Spec.Name, keys.String(), diskConfig(f.Spec.DataDisks))
 	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
 	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
 	networkConfig = fmt.Sprintf(`version: 2
@@ -157,4 +163,19 @@ ethernets:
     dhcp-identifier: mac
 `, f.MAC)
 	return userData, metaData, networkConfig
+}
+
+// fs_setup skips a disk that already has a filesystem; data disk i follows the root disk, so it is /dev/vd(b+i).
+func diskConfig(disks []proto.DataDisk) string {
+	if len(disks) == 0 {
+		return ""
+	}
+	var fs, mounts, chown strings.Builder
+	for i, d := range disks {
+		fmt.Fprintf(&fs, "  - {label: %q, filesystem: ext4, device: /dev/vd%c, partition: none}\n", d.Name, 'b'+i)
+		fmt.Fprintf(&mounts, "  - [%q, %q, ext4, \"defaults,nofail\", \"0\", \"2\"]\n", "LABEL="+d.Name, d.MountPath)
+		fmt.Fprintf(&chown, "  - [chown, \"ubuntu:ubuntu\", %q]\n", d.MountPath)
+	}
+	// runcmd runs once per instance, after mounts, so later ownership changes in the guest are kept.
+	return "fs_setup:\n" + fs.String() + "mounts:\n" + mounts.String() + "runcmd:\n" + chown.String()
 }

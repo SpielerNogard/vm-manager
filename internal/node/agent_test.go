@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -149,7 +150,7 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 }
 
 func createReq(name string) hub.CreateVMRequest {
-	return hub.CreateVMRequest{NodeID: "n1", Name: name, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKey: "ssh-ed25519 AAA"}
+	return hub.CreateVMRequest{NodeID: "n1", Name: name, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"ssh-ed25519 AAA"}}
 }
 
 func vmState(reg *hub.Registry, id string) (hub.VM, bool) {
@@ -162,9 +163,13 @@ func vmState(reg *hub.Registry, id string) (hub.VM, bool) {
 }
 
 func TestAgentRegistersProvider(t *testing.T) {
-	env := startEnv(t, nil)
-	if p := env.reg.Nodes()[0].Provider; p != "fake" {
-		t.Fatalf("provider = %q", p)
+	env := startEnv(t, func(a *Agent, _ *fakeProvider) {
+		a.Config = json.RawMessage(`{"provider":"fake"}`)
+		a.Machine = &proto.Machine{OS: "darwin", Arch: "arm64", CPUs: 8}
+	})
+	n := env.reg.Nodes()[0]
+	if n.Provider != "fake" || string(n.Config) != `{"provider":"fake"}` || n.Machine == nil || n.Machine.CPUs != 8 || n.ConnectedAt.IsZero() {
+		t.Fatalf("node = %+v", n)
 	}
 }
 
@@ -221,8 +226,8 @@ func TestAgentRestoreAfterRestart(t *testing.T) {
 	var good, bad VMFile
 	env := startEnv(t, func(a *Agent, p *fakeProvider) {
 		p.failStart["bad"] = true
-		good = VMFile{Spec: proto.VMSpec{ID: "g1", Name: "good", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKey: "k", SSHPort: 0}, MAC: "02:00:00:00:00:01"}
-		bad = VMFile{Spec: proto.VMSpec{ID: "b1", Name: "bad", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKey: "k"}, MAC: "02:00:00:00:00:02"}
+		good = VMFile{Spec: proto.VMSpec{ID: "g1", Name: "good", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}, SSHPort: 0}, MAC: "02:00:00:00:00:01"}
+		bad = VMFile{Spec: proto.VMSpec{ID: "b1", Name: "bad", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:02"}
 		SaveVM(a.VMsDir, good)
 		SaveVM(a.VMsDir, bad)
 	})

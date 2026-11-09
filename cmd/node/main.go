@@ -35,9 +35,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	public, err := cfg.Public()
+	if err != nil {
+		log.Fatal(err)
+	}
 	a := &node.Agent{
 		HubURL: cfg.Hub.URL, Token: cfg.Hub.Token, NodeID: cfg.NodeID, VMsDir: cfg.Paths.VMs,
 		CPUs: cfg.Capacity.CPUs, MemoryMB: cfg.Capacity.MemoryMB, Provider: provider,
+		Config: public, Machine: node.MachineInfo(),
 	}
 	log.Printf("node %s: provider %s, %d CPUs, %d MB", cfg.NodeID, provider.Name(), cfg.Capacity.CPUs, cfg.Capacity.MemoryMB)
 	if err := a.Run(ctx); err != nil && ctx.Err() == nil {

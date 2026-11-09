@@ -1,0 +1,122 @@
+{
+  "nav": {
+    "fleet": "Fleet",
+    "access": "Access",
+    "nodes": {
+      "label": "Nodes",
+      "blurb": "The machines that run VMs, with their provider and free capacity."
+    },
+    "vms": {
+      "label": "VMs",
+      "blurb": "Every VM, the node it runs on, and how to SSH into it."
+    },
+    "keys": {
+      "label": "SSH keys",
+      "blurb": "Stored public keys. Keys of the hub machine are always listed and preselected when you create a VM."
+    }
+  },
+  "topbar": {
+    "menu": "Menu",
+    "closeMenu": "Close menu",
+    "theme": "Theme",
+    "language": "Language"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "close": "close",
+    "delete": "Delete",
+    "actionsFor": "Actions for {name}",
+    "name": "Name",
+    "status": "Status",
+    "hubUnreachable": "Hub unreachable: {error}"
+  },
+  "state": {
+    "online": "online",
+    "offline": "offline",
+    "pending": "pending",
+    "starting": "starting",
+    "running": "running",
+    "stopped": "stopped",
+    "error": "error",
+    "unknown": "unknown"
+  },
+  "nodes": {
+    "emptyTitle": "No nodes connected",
+    "emptyBody": "A node registers with the hub as soon as it is started with the hub's URL and token.",
+    "node": "Node",
+    "provider": "Provider",
+    "capacity": "Capacity",
+    "free": "Free"
+  },
+  "vms": {
+    "new": "New VM",
+    "emptyTitle": "No VMs yet",
+    "emptyBody": "A VM boots on the node you pick when creating it. SSH goes through the hub.",
+    "vm": "VM",
+    "node": "Node",
+    "resources": "Resources",
+    "ip": "IP",
+    "ssh": "SSH",
+    "root": "{size} GB root",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copySsh": "Copy SSH command",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "The VM is stopped and its disks are removed from the node. This cannot be undone.",
+    "deleteConfirm": "Delete VM"
+  },
+  "create": {
+    "title": "New VM",
+    "node": "Node",
+    "cpus": "CPUs",
+    "memory": "RAM (MB)",
+    "rootDisk": "Root disk (GB)",
+    "dataDisks": "Data disks",
+    "dataDisksHint": "Formatted as ext4 on first boot and mounted at the mount path.",
+    "mountPath": "Mount path",
+    "sizeGB": "GB",
+    "diskName": "Disk name",
+    "diskSize": "Size in GB",
+    "removeDisk": "Remove disk",
+    "addDisk": "Add disk",
+    "sshKeys": "SSH keys",
+    "noKeys": "No key stored yet.",
+    "submit": "Create VM"
+  },
+  "keys": {
+    "add": "Add key",
+    "emptyTitle": "No SSH keys yet",
+    "emptyBody": "Add your public key once, e.g. the contents of {file}.",
+    "type": "Type",
+    "fingerprint": "Fingerprint",
+    "hub": "Hub",
+    "hubHint": "From ~/.ssh on the hub machine, read again on every start",
+    "dialogTitle": "Add SSH key",
+    "publicKey": "Public key",
+    "publicKeyHint": "The contents of your {ext} file, e.g. {cmd}.",
+    "upload": "Upload .pub",
+    "save": "Save key",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "The key will no longer be offered for new VMs. VMs already created with it keep it.",
+    "deleteConfirm": "Delete key"
+  },
+  "node": {
+    "notFound": "No node named {id}.",
+    "connectedSince": "connected since {time}",
+    "capacity": "Capacity",
+    "cpu": "CPU",
+    "memory": "Memory",
+    "capacityHint": "Used means reserved by VMs on this node, out of the capacity the node offers.",
+    "machine": "Machine",
+    "os": "OS",
+    "arch": "Architecture",
+    "cpuModel": "CPU model",
+    "hardware": "Hardware",
+    "notReported": "Not reported by this node yet.",
+    "config": "Config",
+    "configHint": "The node's config file as it reported it on connect. The hub token is never sent.",
+    "vms": "VMs on this node",
+    "noVMs": "No VMs on this node",
+    "open": "Open {name}"
+  }
+}

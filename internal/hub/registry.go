@@ -4,13 +4,17 @@ package hub
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"vm-manager/internal/proto"
 )
@@ -22,6 +26,25 @@ var (
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// ext4 labels are limited to 16 bytes.
+var diskNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$`)
+var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
+
+// Mounting here (or below, for the first list) would hide files the guest needs to boot or to let us in via SSH.
+var (
+	reservedMountTrees = []string{"/bin", "/boot", "/dev", "/etc", "/lib", "/proc", "/run", "/sbin", "/sys", "/usr", "/var/lib/cloud", "/home/ubuntu/.ssh"}
+	reservedMountPaths = []string{"/home", "/home/ubuntu", "/root", "/var", "/var/lib"}
+)
+
+func reservedMount(p string) bool {
+	for _, t := range reservedMountTrees {
+		if p == t || strings.HasPrefix(p, t+"/") {
+			return true
+		}
+	}
+	return slices.Contains(reservedMountPaths, p)
+}
 
 type NodeConn interface {
 	Send(proto.Message) error
@@ -37,6 +60,10 @@ type Node struct {
 	FreeCPUs     int    `json:"freeCpus"`
 	FreeMemoryMB int    `json:"freeMemoryMB"`
 	Online       bool   `json:"online"`
+	// ConnectedAt is when the node last registered.
+	ConnectedAt time.Time       `json:"connectedAt"`
+	Config      json.RawMessage `json:"config,omitempty"`
+	Machine     *proto.Machine  `json:"machine,omitempty"`
 }
 
 type VM struct {
@@ -49,13 +76,15 @@ type VM struct {
 }
 
 type CreateVMRequest struct {
-	NodeID       string `json:"nodeId"`
-	Name         string `json:"name"`
-	CPUs         int    `json:"cpus"`
-	MemoryMB     int    `json:"memoryMB"`
-	DiskGB       int    `json:"diskGB"`
-	DataDisksGB  []int  `json:"dataDisksGB"`
-	SSHPublicKey string `json:"sshPublicKey"`
+	NodeID    string           `json:"nodeId"`
+	Name      string           `json:"name"`
+	CPUs      int              `json:"cpus"`
+	MemoryMB  int              `json:"memoryMB"`
+	DiskGB    int              `json:"diskGB"`
+	DataDisks []proto.DataDisk `json:"dataDisks"`
+	SSHKeyIDs []string         `json:"sshKeyIds"`
+	// SSHPublicKeys is resolved from SSHKeyIDs by the API.
+	SSHPublicKeys []string `json:"-"`
 }
 
 type nodeEntry struct {
@@ -90,7 +119,8 @@ func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nodes[reg.NodeID] = &nodeEntry{
-		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, Online: true},
+		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, Online: true,
+			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
 		conn: c,
 	}
 	reported := map[string]bool{}
@@ -166,7 +196,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	}
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
-			DataDisksGB: req.DataDisksGB, SSHPublicKey: strings.TrimSpace(req.SSHPublicKey), SSHPort: port},
+			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, SSHPort: port},
 		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending,
 	}
 	r.vms[id] = vm
@@ -309,13 +339,26 @@ func validate(q CreateVMRequest) error {
 		return fmt.Errorf("%w: memoryMB must be >= 512", ErrInvalid)
 	case q.DiskGB < 4:
 		return fmt.Errorf("%w: diskGB must be >= 4", ErrInvalid)
-	case strings.TrimSpace(q.SSHPublicKey) == "":
-		return fmt.Errorf("%w: sshPublicKey is required", ErrInvalid)
+	case len(q.SSHPublicKeys) == 0:
+		return fmt.Errorf("%w: at least one SSH key is required", ErrInvalid)
 	}
-	for _, d := range q.DataDisksGB {
-		if d < 1 {
-			return fmt.Errorf("%w: data disks must be >= 1 GB", ErrInvalid)
+	names, paths := map[string]bool{}, map[string]bool{}
+	for _, d := range q.DataDisks {
+		switch {
+		case !diskNameRe.MatchString(d.Name):
+			return fmt.Errorf("%w: disk name must match %s", ErrInvalid, diskNameRe)
+		case !mountPathRe.MatchString(d.MountPath) || path.Clean(d.MountPath) != d.MountPath:
+			return fmt.Errorf("%w: disk %q: mountPath must be a clean absolute path other than /", ErrInvalid, d.Name)
+		case reservedMount(d.MountPath):
+			return fmt.Errorf("%w: disk %q: mountPath %s is reserved by the system", ErrInvalid, d.Name, d.MountPath)
+		case d.SizeGB < 1:
+			return fmt.Errorf("%w: disk %q must be >= 1 GB", ErrInvalid, d.Name)
+		case names[d.Name]:
+			return fmt.Errorf("%w: disk name %q is used twice", ErrInvalid, d.Name)
+		case paths[d.MountPath]:
+			return fmt.Errorf("%w: mountPath %q is used twice", ErrInvalid, d.MountPath)
 		}
+		names[d.Name], paths[d.MountPath] = true, true
 	}
 	return nil
 }

@@ -55,7 +55,7 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CloneResize(base, filepath.Join(dir, "root.img"), f.Spec.DiskGB); err != nil {
 		return err
 	}
-	if err := node.CreateDataDisks(dir, f.Spec.DataDisksGB); err != nil {
+	if err := node.CreateDataDisks(dir, f.Spec.DataDisks); err != nil {
 		return err
 	}
 	return makeSeedISO(ctx, dir, f)
@@ -107,7 +107,7 @@ func (p *Provider) vmConfig(f node.VMFile, dir string) (*vz.VirtualMachineConfig
 	cfg.SetPlatformVirtualMachineConfiguration(platform)
 
 	disks := []string{"root.img"}
-	for i := range f.Spec.DataDisksGB {
+	for i := range f.Spec.DataDisks {
 		disks = append(disks, node.DataDiskName(i))
 	}
 	var storage []vz.StorageDeviceConfiguration

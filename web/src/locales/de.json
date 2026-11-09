@@ -1,0 +1,122 @@
+{
+  "nav": {
+    "fleet": "Fleet",
+    "access": "Zugang",
+    "nodes": {
+      "label": "Nodes",
+      "blurb": "Die Maschinen, auf denen VMs laufen, mit Provider und freier Kapazität."
+    },
+    "vms": {
+      "label": "VMs",
+      "blurb": "Jede VM, auf welcher Node sie läuft und wie man per SSH hineinkommt."
+    },
+    "keys": {
+      "label": "SSH-Keys",
+      "blurb": "Gespeicherte Public Keys. Keys der Hub-Maschine stehen immer hier und sind beim Anlegen vorausgewählt."
+    }
+  },
+  "topbar": {
+    "menu": "Menü",
+    "closeMenu": "Menü schließen",
+    "theme": "Theme",
+    "language": "Sprache"
+  },
+  "common": {
+    "cancel": "Abbrechen",
+    "close": "schließen",
+    "delete": "Löschen",
+    "actionsFor": "Aktionen für {name}",
+    "name": "Name",
+    "status": "Status",
+    "hubUnreachable": "Hub nicht erreichbar: {error}"
+  },
+  "state": {
+    "online": "online",
+    "offline": "offline",
+    "pending": "wartet",
+    "starting": "startet",
+    "running": "läuft",
+    "stopped": "gestoppt",
+    "error": "Fehler",
+    "unknown": "unbekannt"
+  },
+  "nodes": {
+    "emptyTitle": "Keine Nodes verbunden",
+    "emptyBody": "Eine Node meldet sich beim Hub an, sobald sie mit dessen URL und Token gestartet wird.",
+    "node": "Node",
+    "provider": "Provider",
+    "capacity": "Kapazität",
+    "free": "Frei"
+  },
+  "vms": {
+    "new": "Neue VM",
+    "emptyTitle": "Noch keine VMs",
+    "emptyBody": "Eine VM bootet auf der Node, die du beim Anlegen wählst. SSH läuft über den Hub.",
+    "vm": "VM",
+    "node": "Node",
+    "resources": "Ressourcen",
+    "ip": "IP",
+    "ssh": "SSH",
+    "root": "{size} GB root",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "copySsh": "SSH-Befehl kopieren",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Die VM wird gestoppt und ihre Disks werden auf der Node entfernt. Das lässt sich nicht rückgängig machen.",
+    "deleteConfirm": "VM löschen"
+  },
+  "create": {
+    "title": "Neue VM",
+    "node": "Node",
+    "cpus": "CPUs",
+    "memory": "RAM (MB)",
+    "rootDisk": "Root-Disk (GB)",
+    "dataDisks": "Daten-Disks",
+    "dataDisksHint": "Werden beim ersten Boot als ext4 formatiert und am Mountpfad eingehängt.",
+    "mountPath": "Mountpfad",
+    "sizeGB": "GB",
+    "diskName": "Disk-Name",
+    "diskSize": "Größe in GB",
+    "removeDisk": "Disk entfernen",
+    "addDisk": "Disk hinzufügen",
+    "sshKeys": "SSH-Keys",
+    "noKeys": "Noch kein Key gespeichert.",
+    "submit": "VM erstellen"
+  },
+  "keys": {
+    "add": "Key hinzufügen",
+    "emptyTitle": "Noch keine SSH-Keys",
+    "emptyBody": "Füge deinen Public Key einmal hinzu, z. B. den Inhalt von {file}.",
+    "type": "Typ",
+    "fingerprint": "Fingerprint",
+    "hub": "Hub",
+    "hubHint": "Aus ~/.ssh der Hub-Maschine, wird bei jedem Start neu eingelesen",
+    "dialogTitle": "SSH-Key hinzufügen",
+    "publicKey": "Public Key",
+    "publicKeyHint": "Der Inhalt deiner {ext}-Datei, z. B. {cmd}.",
+    "upload": ".pub hochladen",
+    "save": "Key speichern",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Der Key steht danach für neue VMs nicht mehr zur Auswahl. VMs, die schon mit ihm angelegt wurden, behalten ihn.",
+    "deleteConfirm": "Key löschen"
+  },
+  "node": {
+    "notFound": "Keine Node mit dem Namen {id}.",
+    "connectedSince": "verbunden seit {time}",
+    "capacity": "Kapazität",
+    "cpu": "CPU",
+    "memory": "Arbeitsspeicher",
+    "capacityHint": "Belegt heißt von VMs auf dieser Node reserviert, gemessen an der Kapazität, die die Node anbietet.",
+    "machine": "Maschine",
+    "os": "Betriebssystem",
+    "arch": "Architektur",
+    "cpuModel": "CPU-Modell",
+    "hardware": "Hardware",
+    "notReported": "Von dieser Node noch nicht gemeldet.",
+    "config": "Config",
+    "configHint": "Die Config-Datei der Node, wie sie sie beim Verbinden gemeldet hat. Der Hub-Token wird nie mitgeschickt.",
+    "vms": "VMs auf dieser Node",
+    "noVMs": "Keine VMs auf dieser Node",
+    "open": "{name} öffnen"
+  }
+}

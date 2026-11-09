@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -11,7 +13,16 @@ import (
 func apiServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	r, _, _ := newTestRegistry(t, 22000, 22999)
-	srv := httptest.NewServer(APIHandler(r))
+	keysPath := filepath.Join(t.TempDir(), "keys.json")
+	seed := `[{"id":"k1","name":"test","publicKey":"` + testKey + `","type":"ssh-ed25519","fingerprint":"` + testFingerprint + `"}]`
+	if err := os.WriteFile(keysPath, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := LoadKeyStore(keysPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(APIHandler(r, keys))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -28,7 +39,7 @@ func postVM(t *testing.T, srv *httptest.Server, body string) (*http.Response, ma
 	return resp, out
 }
 
-const validBody = `{"nodeId":"n1","name":"dev","cpus":2,"memoryMB":2048,"diskGB":20,"sshPublicKey":"ssh-ed25519 AAA"}`
+const validBody = `{"nodeId":"n1","name":"dev","cpus":2,"memoryMB":2048,"diskGB":20,"sshKeyIds":["k1"]}`
 
 func TestAPICreateAndList(t *testing.T) {
 	srv := apiServer(t)
@@ -69,6 +80,8 @@ func TestAPIValidation(t *testing.T) {
 		"cpus":         strings.Replace(validBody, `"cpus":2`, `"cpus":0`, 1),
 		"unknown node": strings.Replace(validBody, `"n1"`, `"nope"`, 1),
 		"bad json":     `{`,
+		"no key":       strings.Replace(validBody, `["k1"]`, `[]`, 1),
+		"unknown key":  strings.Replace(validBody, `"k1"`, `"nope"`, 1),
 	} {
 		resp, out := postVM(t, srv, body)
 		if resp.StatusCode != http.StatusBadRequest || out["error"] == "" || out["error"] == nil {

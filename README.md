@@ -32,12 +32,14 @@ cp node.example.json ~/.vm-manager/node.json  # set hub.url, the same token, pat
 ./bin/node
 ```
 
-Open `http://<hub>:8080`, pick a node, and create a VM. You can also use the API:
+Open `http://<hub>:8080`, add your SSH public key under **SSH-Keys** (the hub machine's own key is already there), then pick a node and create a VM. You can also use the API:
 
 ```sh
+curl -X POST http://<hub>:8080/api/keys -d '{"name": "laptop", "publicKey": "'"$(cat ~/.ssh/id_ed25519.pub)"'"}'
+# → {"id": "<key-id>", ...}
 curl -X POST http://<hub>:8080/api/vms -d '{
   "nodeId": "mac-mini-1", "name": "dev", "cpus": 2, "memoryMB": 2048,
-  "diskGB": 20, "dataDisksGB": [10], "sshPublicKey": "'"$(cat ~/.ssh/id_ed25519.pub)"'"
+  "diskGB": 20, "dataDisks": [{"name": "data", "mountPath": "/data", "sizeGB": 10}], "sshKeyIds": ["<key-id>"]
 }'
 ```
 
@@ -47,7 +49,7 @@ When the VM is `running`:
 ssh -p <sshPort> ubuntu@<hub>
 ```
 
-On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. Data disks are attached as raw block devices (`/dev/vdb`, …) and are not formatted.
+On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. On first boot, cloud-init formats each data disk as ext4, labels it with its `name`, and mounts it at `mountPath`. The mount is owned by `ubuntu`. System paths such as `/etc`, `/usr`, `/home/ubuntu` or `/var` are rejected as mount paths.
 
 ## Config
 
@@ -61,13 +63,17 @@ Provider settings go in a section named after the provider. For `vz` these are `
 
 | Method | Path | |
 |---|---|---|
-| GET | `/api/nodes` | Nodes with provider, capacity, and online state |
+| GET | `/api/nodes` | Nodes with provider, capacity, online state, machine info, and their config file without the hub token |
 | GET | `/api/vms` | VMs with state, IP, and SSH port |
-| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisksGB`, `sshPublicKey`) |
+| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`) |
 | DELETE | `/api/vms/{id}` | Stop the VM and delete its disks |
+| GET | `/api/keys` | Stored SSH public keys with type and fingerprint |
+| POST | `/api/keys` | Store a key (`name`, `publicKey`) |
+| DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
 
 ## Behaviour
 
-- The hub keeps state in memory. After a hub restart, nodes report their VMs again and keep their SSH ports where possible.
+- The hub keeps SSH keys in `keys.json` next to its config file. Everything else is in memory.
+- The hub also lists its own user's default public keys (`~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`, `id_rsa.pub`, …), read on each start. They cannot be deleted through the API and are preselected in the GUI. After a hub restart, nodes report their VMs again and keep their SSH ports where possible.
 - The node stores each VM in `paths.vms/<id>/vm.json`. After a node restart, the node reboots its VMs from their existing disks.
 - The hub is meant for a trusted home network. Node↔hub traffic is plain `ws://` with a shared token, and the GUI and API have no user auth.

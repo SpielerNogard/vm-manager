@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -62,6 +63,24 @@ func LoadConfig(path string) (Config, error) {
 		return c, fmt.Errorf("config: capacity.memoryMB is required on this platform")
 	}
 	return c, nil
+}
+
+// Public returns the config file as written, minus the hub token, for display on the hub.
+func (c Config) Public() (json.RawMessage, error) {
+	raw := maps.Clone(c.Raw)
+	if hub, ok := raw["hub"]; ok {
+		var h map[string]json.RawMessage
+		if err := json.Unmarshal(hub, &h); err != nil {
+			return nil, err
+		}
+		delete(h, "token")
+		b, err := json.Marshal(h)
+		if err != nil {
+			return nil, err
+		}
+		raw["hub"] = b
+	}
+	return json.Marshal(raw)
 }
 
 // ProviderSection decodes the config block named after the provider; a missing block leaves v untouched.
