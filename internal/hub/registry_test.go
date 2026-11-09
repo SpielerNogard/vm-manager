@@ -115,12 +115,12 @@ func TestCreateVMCapacity(t *testing.T) {
 }
 
 func TestNodeOffline(t *testing.T) {
-	r, _, _ := newTestRegistry(t, 22000, 22999)
+	r, n, _ := newTestRegistry(t, 22000, 22999)
 	vm, err := r.CreateVM(validReq())
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.NodeDisconnected("n1")
+	r.NodeDisconnected("n1", n)
 	if r.Nodes()[0].Online {
 		t.Fatal("node still online")
 	}
@@ -199,9 +199,9 @@ func TestReRegisterKeepsPort(t *testing.T) {
 }
 
 func TestReconnectSameNodeKeepsPorts(t *testing.T) {
-	r, _, _ := newTestRegistry(t, 22000, 22999)
+	r, n, _ := newTestRegistry(t, 22000, 22999)
 	vm, _ := r.CreateVM(validReq())
-	r.NodeDisconnected("n1")
+	r.NodeDisconnected("n1", n)
 	spec := vm.VMSpec
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
 		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning}}}}, &fakeNode{})

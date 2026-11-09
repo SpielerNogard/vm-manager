@@ -78,3 +78,14 @@ func ReadHeader(r *bufio.Reader) (StreamHeader, error) {
 	err = json.Unmarshal(line, &h)
 	return h, err
 }
+
+// Pipe copies both directions and closes both ends once either side finishes.
+func Pipe(a, b io.ReadWriteCloser) {
+	done := make(chan struct{}, 2)
+	cp := func(dst io.Writer, src io.Reader) { io.Copy(dst, src); done <- struct{}{} }
+	go cp(a, b)
+	go cp(b, a)
+	<-done
+	a.Close()
+	b.Close()
+}

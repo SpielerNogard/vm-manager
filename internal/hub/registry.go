@@ -117,11 +117,12 @@ func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
 	}
 }
 
-func (r *Registry) NodeDisconnected(nodeID string) {
+// NodeDisconnected ignores c if the node has already reconnected with a newer connection.
+func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n, ok := r.nodes[nodeID]
-	if !ok {
+	if !ok || n.conn != c {
 		return
 	}
 	n.Online, n.conn = false, nil
