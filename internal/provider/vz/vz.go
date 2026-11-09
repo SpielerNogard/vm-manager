@@ -70,11 +70,15 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	inst := &instance{vm: vm, mac: f.MAC, leasesPath: p.LeasesPath, done: make(chan struct{})}
-	go inst.watch()
+	_, prevLease, _, err := LookupLease(p.LeasesPath, f.MAC)
+	if err != nil {
+		return nil, err
+	}
 	if err := vm.Start(); err != nil {
 		return nil, err
 	}
+	inst := &instance{vm: vm, mac: f.MAC, leasesPath: p.LeasesPath, prevLease: prevLease, done: make(chan struct{})}
+	go inst.watch()
 	return inst, nil
 }
 
@@ -165,6 +169,7 @@ type instance struct {
 	vm         *vz.VirtualMachine
 	mac        string
 	leasesPath string
+	prevLease  uint64
 	done       chan struct{}
 }
 
@@ -180,22 +185,7 @@ func (i *instance) watch() {
 func (i *instance) Done() <-chan struct{} { return i.done }
 
 func (i *instance) WaitIP(ctx context.Context) (string, error) {
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for {
-		ip, ok, err := LookupIP(i.leasesPath, i.mac)
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return ip, nil
-		}
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-t.C:
-		}
-	}
+	return waitForLease(ctx, i.leasesPath, i.mac, i.prevLease, 2*time.Second)
 }
 
 // Stop asks the guest to shut down and forces it off after 10s.

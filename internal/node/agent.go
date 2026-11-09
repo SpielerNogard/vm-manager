@@ -60,6 +60,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
+			a.stopAll()
 			return ctx.Err()
 		case <-time.After(reconnectDelay):
 		}
@@ -192,18 +193,52 @@ func (a *Agent) boot(ctx context.Context, e *vmEntry, prepare bool) {
 	a.mu.Unlock()
 	close(e.booted)
 
-	go func() {
-		<-inst.Done()
-		a.report(proto.VMStatus{ID: id, State: proto.StateStopped})
-	}()
 	ipCtx, cancel := context.WithTimeout(ctx, ipTimeout)
-	defer cancel()
+	go func() {
+		select {
+		case <-inst.Done():
+			cancel()
+		case <-ipCtx.Done():
+		}
+	}()
 	ip, err := inst.WaitIP(ipCtx)
-	if err != nil {
-		a.report(proto.VMStatus{ID: id, State: proto.StateError, Error: "waiting for IP: " + err.Error()})
-		return
+	cancel()
+	// Reporting stopped last from this goroutine keeps a late IP result from overwriting it.
+	select {
+	case <-inst.Done():
+	default:
+		if err != nil {
+			a.report(proto.VMStatus{ID: id, State: proto.StateError, Error: "waiting for IP: " + err.Error()})
+		} else {
+			a.report(proto.VMStatus{ID: id, State: proto.StateRunning, IP: ip})
+		}
 	}
-	a.report(proto.VMStatus{ID: id, State: proto.StateRunning, IP: ip})
+	<-inst.Done()
+	a.report(proto.VMStatus{ID: id, State: proto.StateStopped})
+}
+
+// stopAll shuts guests down cleanly; vz VMs live in this process and would otherwise be killed hard.
+func (a *Agent) stopAll() {
+	a.mu.Lock()
+	entries := make([]*vmEntry, 0, len(a.vms))
+	for _, e := range a.vms {
+		entries = append(entries, e)
+	}
+	a.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, e := range entries {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-e.booted
+			if e.inst != nil {
+				if err := e.inst.Stop(); err != nil {
+					log.Printf("vm %s: stop: %v", e.file.Spec.ID, err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (a *Agent) delete(id string) {

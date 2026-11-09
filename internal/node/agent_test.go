@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,13 +21,21 @@ import (
 type fakeInstance struct {
 	once    sync.Once
 	done    chan struct{}
-	stopped bool
+	stopped atomic.Bool
+	staleIP bool // simulates finding the previous boot's lease only after the VM already died
 }
 
-func (i *fakeInstance) WaitIP(context.Context) (string, error) { return "127.0.0.1", nil }
-func (i *fakeInstance) Done() <-chan struct{}                  { return i.done }
+func (i *fakeInstance) WaitIP(context.Context) (string, error) {
+	if i.staleIP {
+		<-i.done
+	}
+	return "127.0.0.1", nil
+}
+func (i *fakeInstance) Done() <-chan struct{} { return i.done }
+func (i *fakeInstance) guestShutdown()        { i.once.Do(func() { close(i.done) }) }
+
 func (i *fakeInstance) Stop() error {
-	i.once.Do(func() { i.stopped = true; close(i.done) })
+	i.once.Do(func() { i.stopped.Store(true); close(i.done) })
 	return nil
 }
 
@@ -36,10 +45,11 @@ type fakeProvider struct {
 	started     map[string]*fakeInstance
 	failPrepare map[string]bool
 	failStart   map[string]bool
+	staleIP     map[string]bool
 }
 
 func newFakeProvider() *fakeProvider {
-	return &fakeProvider{started: map[string]*fakeInstance{}, failPrepare: map[string]bool{}, failStart: map[string]bool{}}
+	return &fakeProvider{started: map[string]*fakeInstance{}, failPrepare: map[string]bool{}, failStart: map[string]bool{}, staleIP: map[string]bool{}}
 }
 
 func (p *fakeProvider) Name() string { return "fake" }
@@ -60,7 +70,7 @@ func (p *fakeProvider) Start(f VMFile, _ string) (Instance, error) {
 	if p.failStart[f.Spec.Name] {
 		return nil, errors.New("start boom")
 	}
-	inst := &fakeInstance{done: make(chan struct{})}
+	inst := &fakeInstance{done: make(chan struct{}), staleIP: p.staleIP[f.Spec.Name]}
 	p.started[f.Spec.Name] = inst
 	return inst, nil
 }
@@ -97,6 +107,8 @@ type testEnv struct {
 	agent    *Agent
 	provider *fakeProvider
 	hubPort  int
+	stop     context.CancelFunc
+	runDone  chan struct{}
 }
 
 func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
@@ -133,7 +145,7 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 		}
 	})
 	eventually(t, "node online", func() bool { n := reg.Nodes(); return len(n) == 1 && n[0].Online })
-	return &testEnv{reg: reg, agent: a, provider: p, hubPort: port}
+	return &testEnv{reg: reg, agent: a, provider: p, hubPort: port, stop: cancel, runDone: done}
 }
 
 func createReq(name string) hub.CreateVMRequest {
@@ -179,7 +191,7 @@ func TestAgentStoppedWhenGuestShutsDown(t *testing.T) {
 	env := startEnv(t, nil)
 	vm, _ := env.reg.CreateVM(createReq("dev"))
 	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
-	close(env.provider.instance("dev").done)
+	env.provider.instance("dev").guestShutdown()
 	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
 }
 
@@ -200,7 +212,7 @@ func TestAgentDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "dir removed", func() bool { _, err := os.Stat(VMDir(env.agent.VMsDir, vm.ID)); return os.IsNotExist(err) })
-	if !env.provider.instance("dev").stopped {
+	if !env.provider.instance("dev").stopped.Load() {
 		t.Fatal("instance not stopped")
 	}
 }
@@ -253,5 +265,31 @@ func TestAgentStreamToVM(t *testing.T) {
 	c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "hello" {
 		t.Fatalf("read %q err %v", buf, err)
+	}
+}
+
+func TestAgentStoppedNotOverwrittenByLateIP(t *testing.T) {
+	env := startEnv(t, func(_ *Agent, p *fakeProvider) { p.staleIP["dev"] = true })
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "started", func() bool { return env.provider.instance("dev") != nil })
+	env.provider.instance("dev").guestShutdown()
+	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	time.Sleep(200 * time.Millisecond)
+	if v, _ := vmState(env.reg, vm.ID); v.State != proto.StateStopped {
+		t.Fatalf("state = %s, want stopped", v.State)
+	}
+}
+
+func TestAgentStopsVMsOnShutdown(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.stop()
+	<-env.runDone
+	if !env.provider.instance("dev").stopped.Load() {
+		t.Fatal("VM not stopped on agent shutdown")
+	}
+	if _, err := os.Stat(VMDir(env.agent.VMsDir, vm.ID)); err != nil {
+		t.Fatalf("vm dir must survive shutdown: %v", err)
 	}
 }
