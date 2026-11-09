@@ -1,0 +1,5 @@
+{
+  "listen": ":8080",
+  "token": "change-me",
+  "sshPorts": { "min": 22000, "max": 22999 }
+}
