@@ -81,8 +81,21 @@ type VM struct {
 	IP       string        `json:"ip,omitempty"`
 	Error    string        `json:"error,omitempty"`
 	Disks    []proto.Disk  `json:"disks,omitempty"`
-	// adoptError pins State to error until the VM is adopted successfully on a later register.
-	adoptError string
+	Power    proto.Power   `json:"power"`
+
+	stopMode    proto.StopMode
+	generation  uint64
+	applied     uint64 // generation the node last reported
+	provisioned bool
+}
+
+func (vm *VM) stored() StoredVM {
+	return StoredVM{Spec: vm.VMSpec, NodeID: vm.NodeID, Provider: vm.Provider, Power: vm.Power, StopMode: vm.stopMode,
+		Generation: vm.generation, Provisioned: vm.provisioned}
+}
+
+func (vm *VM) desired() proto.DesiredVM {
+	return proto.DesiredVM{Spec: vm.VMSpec, Power: vm.Power, StopMode: vm.stopMode, Generation: vm.generation, Provisioned: vm.provisioned}
 }
 
 type CreateVMRequest struct {
@@ -107,17 +120,33 @@ type Registry struct {
 	nodes map[string]*nodeEntry
 	vms   map[string]*VM
 	net   *NetModel
+	store *VMStore
 	cfg   Config
+	// pushMu orders desired messages so a node never receives an older list after a newer one.
+	pushMu sync.Mutex
 }
 
-func NewRegistry(net *NetModel, cfg Config) *Registry {
-	return &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, cfg: cfg}
+func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
+	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg}
+	for _, n := range store.Nodes() {
+		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine}}
+	}
+	for _, s := range store.VMs() {
+		vm := &VM{VMSpec: s.Spec, NodeID: s.NodeID, Provider: s.Provider, State: proto.StateUnknown, Power: s.Power,
+			stopMode: s.StopMode, generation: s.Generation, provisioned: s.Provisioned}
+		// Only a provisioned VM is known to have been applied; anything else stays pending until reported.
+		if s.Provisioned {
+			vm.applied = s.Generation
+		}
+		r.vms[s.Spec.ID] = vm
+	}
+	return r
 }
 
-// NodeConnected adopts the reported VMs and drops ones the node no longer has.
-// The hub's NICs win over reported ones; a reported VM the hub does not know keeps its NICs unless they clash.
+// NodeConnected records the node, takes over statuses of VMs the hub assigned to it and sends it its desired VMs.
 func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
 	underlay := r.nodeConnected(reg, c)
+	r.push(reg.NodeID)
 	if underlay == nil {
 		return
 	}
@@ -134,35 +163,13 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
 		conn: c,
 	}
-	reported := map[string]bool{}
-	for _, rec := range reg.VMs {
-		id := rec.Spec.ID
-		reported[id] = true
-		vm, known := r.vms[id]
-		if !known || vm.NodeID != reg.NodeID {
-			vm = &VM{VMSpec: rec.Spec, NodeID: reg.NodeID}
-			r.vms[id] = vm
-		}
-		vm.Provider = reg.Provider
-		vm.State, vm.IP, vm.Error = rec.Status.State, rec.Status.IP, rec.Status.Error
-		vm.Disks = rec.Status.Disks
-		vm.adoptError = ""
-		if nics := r.net.NICs(id); len(nics) > 0 {
-			vm.NICs = nics
-		} else if err := r.net.AdoptNICs(id, rec.Spec.Name, rec.Spec.NICs); err != nil {
-			vm.NICs = nil
-			vm.adoptError = adoptErrorText(rec.Spec.NICs, err)
-			vm.State, vm.Error = proto.StateError, vm.adoptError
-		} else {
-			vm.NICs = rec.Spec.NICs
-		}
+	if err := r.store.PutNode(StoredNode{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs,
+		MemoryMB: reg.MemoryMB, Machine: reg.Machine}); err != nil {
+		log.Printf("node %s: saving: %v", reg.NodeID, err)
 	}
-	for id, vm := range r.vms {
-		if vm.NodeID == reg.NodeID && !reported[id] {
-			delete(r.vms, id)
-			if err := r.net.Release(id); err != nil {
-				log.Printf("releasing NICs of %s: %v", id, err)
-			}
+	for _, st := range reg.VMs {
+		if vm, ok := r.vms[st.ID]; ok && vm.NodeID == reg.NodeID {
+			r.applyStatus(vm, st)
 		}
 	}
 	if reg.ChassisKey == "" {
@@ -180,20 +187,6 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 		return nil
 	}
 	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}
-}
-
-func adoptErrorText(nics []proto.NIC, err error) string {
-	ip := ""
-	if len(nics) > 0 {
-		ip = nics[0].IP
-	}
-	if errors.Is(err, ErrInvalid) {
-		return strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
-	}
-	if errors.Is(err, ErrConflict) {
-		return fmt.Sprintf("mgmt IP %s already in use", ip)
-	}
-	return err.Error()
 }
 
 // NodeDisconnected ignores c if the node has already reconnected with a newer connection.
@@ -228,10 +221,6 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 			return VM{}, fmt.Errorf("%w: name %q already in use", ErrInvalid, req.Name)
 		}
 	}
-	if !n.Online {
-		r.mu.Unlock()
-		return VM{}, fmt.Errorf("%w: node %q is offline", ErrConflict, n.ID)
-	}
 	freeCPU, freeMem := r.free(n)
 	if req.CPUs > freeCPU || req.MemoryMB > freeMem {
 		r.mu.Unlock()
@@ -246,24 +235,21 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
 			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, NICs: nics},
-		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending,
+		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending, Power: proto.PowerRunning, generation: 1,
+	}
+	if err := r.store.PutVM(vm.stored()); err != nil {
+		r.release(id)
+		r.mu.Unlock()
+		return VM{}, err
 	}
 	r.vms[id] = vm
-	out, conn, spec := *vm, n.conn, vm.VMSpec
+	out := *vm
 	r.mu.Unlock()
-
-	if err := conn.Send(proto.Message{Type: "create", Create: &spec}); err != nil {
-		r.mu.Lock()
-		delete(r.vms, id)
-		if err := r.net.Release(id); err != nil {
-			log.Printf("releasing NICs of %s: %v", id, err)
-		}
-		r.mu.Unlock()
-		return VM{}, fmt.Errorf("%w: sending to node: %v", ErrConflict, err)
-	}
+	r.push(n.ID)
 	return out, nil
 }
 
+// DeleteVM forgets the VM at once; an offline node deletes it as unknown when it reconnects.
 func (r *Registry) DeleteVM(id string) error {
 	r.mu.Lock()
 	vm, ok := r.vms[id]
@@ -271,28 +257,93 @@ func (r *Registry) DeleteVM(id string) error {
 		r.mu.Unlock()
 		return ErrNotFound
 	}
-	n := r.nodes[vm.NodeID]
-	if n == nil || !n.Online {
+	if err := r.store.DeleteVM(id); err != nil {
 		r.mu.Unlock()
-		return fmt.Errorf("%w: node %q is offline", ErrConflict, vm.NodeID)
+		return err
 	}
 	delete(r.vms, id)
+	r.release(id)
+	r.mu.Unlock()
+	r.push(vm.NodeID)
+	return nil
+}
+
+func (r *Registry) release(id string) {
 	if err := r.net.Release(id); err != nil {
 		log.Printf("releasing NICs of %s: %v", id, err)
 	}
-	conn := n.conn
+}
+
+// bump applies f to the VM's desired state as a new generation and sends it to the node.
+func (r *Registry) bump(id string, f func(*VM)) error {
+	r.mu.Lock()
+	vm, ok := r.vms[id]
+	if !ok {
+		r.mu.Unlock()
+		return ErrNotFound
+	}
+	prev := *vm
+	f(vm)
+	vm.generation++
+	if err := r.store.PutVM(vm.stored()); err != nil {
+		*vm = prev
+		r.mu.Unlock()
+		return err
+	}
+	nodeID := vm.NodeID
 	r.mu.Unlock()
-	return conn.Send(proto.Message{Type: "delete", DeleteID: id})
+	r.push(nodeID)
+	return nil
+}
+
+// desiredFor lists the node's desired VMs; r.mu must be held.
+func (r *Registry) desiredFor(nodeID string) []proto.DesiredVM {
+	var out []proto.DesiredVM
+	for _, vm := range r.vms {
+		if vm.NodeID == nodeID {
+			out = append(out, vm.desired())
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Spec.ID < out[j].Spec.ID })
+	return out
+}
+
+// push sends the node its current desired VMs if it is online.
+func (r *Registry) push(nodeID string) {
+	// ponytail: one lock for all nodes, so a node with a stalled connection delays pushes to others; per-node locks if that bites.
+	r.pushMu.Lock()
+	defer r.pushMu.Unlock()
+	r.mu.Lock()
+	n := r.nodes[nodeID]
+	if n == nil || n.conn == nil {
+		r.mu.Unlock()
+		return
+	}
+	conn, desired := n.conn, r.desiredFor(nodeID)
+	r.mu.Unlock()
+	if err := conn.Send(proto.Message{Type: "desired", Desired: desired}); err != nil {
+		log.Printf("node %s: sending desired state: %v", nodeID, err)
+	}
 }
 
 func (r *Registry) UpdateStatus(st proto.VMStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if vm, ok := r.vms[st.ID]; ok && vm.adoptError == "" {
-		vm.State, vm.IP, vm.Error = st.State, st.IP, st.Error
-	}
 	if vm, ok := r.vms[st.ID]; ok {
-		vm.Disks = st.Disks
+		r.applyStatus(vm, st)
+	}
+}
+
+// applyStatus records a reported status; r.mu must be held.
+func (r *Registry) applyStatus(vm *VM, st proto.VMStatus) {
+	vm.State, vm.IP, vm.Error, vm.Disks, vm.applied = st.State, st.IP, st.Error, st.Disks, st.Generation
+	if vm.provisioned || !slices.Contains([]proto.VMState{proto.StateStarting, proto.StateRunning, proto.StateStopped}, st.State) {
+		return
+	}
+	vm.provisioned = true
+	if err := r.store.PutVM(vm.stored()); err != nil {
+		vm.provisioned = false
+		log.Printf("vm %s: saving: %v", vm.ID, err)
 	}
 }
 
@@ -314,7 +365,11 @@ func (r *Registry) VMs() []VM {
 	defer r.mu.Unlock()
 	out := make([]VM, 0, len(r.vms))
 	for _, vm := range r.vms {
-		out = append(out, *vm)
+		v := *vm
+		if v.applied < v.generation {
+			v.State = proto.StatePending
+		}
+		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

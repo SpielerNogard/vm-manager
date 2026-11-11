@@ -178,7 +178,11 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	}
 	var hcfg hub.Config
 	hcfg.Underlay.Port = 51820
-	reg := hub.NewRegistry(net, hcfg)
+	store, err := hub.LoadVMStore(filepath.Join(t.TempDir(), "vms.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := hub.NewRegistry(net, store, hcfg)
 	srv := httptest.NewServer(hub.NodeHandler(reg, "tok"))
 
 	p := newFakeProvider()
@@ -274,27 +278,58 @@ func TestAgentDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "dir removed", func() bool { _, err := os.Stat(VMDir(env.agent.VMsDir, vm.ID)); return os.IsNotExist(err) })
-	if !env.provider.instance("dev").stopped.Load() {
-		t.Fatal("instance not stopped")
+	if !env.provider.instance("dev").killed.Load() {
+		t.Fatal("instance not killed")
 	}
 }
 
-func TestAgentRestoreAfterRestart(t *testing.T) {
-	var good, bad VMFile
-	env := startEnv(t, func(a *Agent, p *fakeProvider) {
-		p.failStart["bad"] = true
-		good = VMFile{Spec: proto.VMSpec{ID: "g1", Name: "good", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:01"}
-		bad = VMFile{Spec: proto.VMSpec{ID: "b1", Name: "bad", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:02"}
-		SaveVM(a.VMsDir, good)
-		SaveVM(a.VMsDir, bad)
+func cachedVM(id, name string) VMFile {
+	return VMFile{Spec: proto.VMSpec{ID: id, Name: name, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}},
+		MAC: "02:00:00:00:00:01", Power: proto.PowerRunning, Generation: 1}
+}
+
+func TestAgentDeletesVMsUnknownToHub(t *testing.T) {
+	env := startEnv(t, func(a *Agent, _ *fakeProvider) {
+		SaveVM(a.VMsDir, cachedVM("g1", "good"))
+		SaveVM(a.VMsDir, cachedVM("s1", "sleepy"))
 	})
-	eventually(t, "both reported", func() bool {
-		g, ok1 := vmState(env.reg, "g1")
-		b, ok2 := vmState(env.reg, "b1")
-		return ok1 && ok2 && g.State == proto.StateRunning && b.State == proto.StateError
-	})
+	for _, id := range []string{"g1", "s1"} {
+		eventually(t, id+" dir removed", func() bool { _, err := os.Stat(VMDir(env.agent.VMsDir, id)); return os.IsNotExist(err) })
+	}
+	if len(env.reg.VMs()) != 0 {
+		t.Fatalf("hub adopted VMs: %+v", env.reg.VMs())
+	}
 	if len(env.provider.prepared) != 0 {
 		t.Fatalf("Prepare called on restore: %v", env.provider.prepared)
+	}
+}
+
+func TestAgentBootsFromCacheWithoutHub(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unreachable := "ws://" + ln.Addr().String() + "/api/nodes/connect"
+	ln.Close()
+	p := newFakeProvider()
+	a := &Agent{HubURL: unreachable, Token: "tok", NodeID: "n1", VMsDir: t.TempDir(), CPUs: 4, MemoryMB: 8192, Provider: p}
+	stopped := cachedVM("s1", "sleepy")
+	stopped.Power = proto.PowerStopped
+	SaveVM(a.VMsDir, cachedVM("g1", "good"))
+	SaveVM(a.VMsDir, stopped)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	eventually(t, "good started", func() bool { return p.instance("good") != nil })
+	time.Sleep(100 * time.Millisecond)
+	if p.instance("sleepy") != nil {
+		t.Fatal("stopped VM started")
+	}
+	for _, id := range []string{"g1", "s1"} {
+		if _, err := os.Stat(VMDir(a.VMsDir, id)); err != nil {
+			t.Fatalf("vm dir %s: %v", id, err)
+		}
 	}
 }
 

@@ -87,18 +87,13 @@ type DesiredVM struct {
 	Provisioned bool     `json:"provisioned"`
 }
 
-type VMRecord struct {
-	Spec   VMSpec   `json:"spec"`
-	Status VMStatus `json:"status"`
-}
-
 type Register struct {
 	NodeID   string     `json:"nodeId"`
 	Hostname string     `json:"hostname"`
 	Provider string     `json:"provider"`
 	CPUs     int        `json:"cpus"`
 	MemoryMB int        `json:"memoryMB"`
-	VMs      []VMRecord `json:"vms,omitempty"`
+	VMs      []VMStatus `json:"vms,omitempty"`
 	// Config is the node's config file with the hub token removed; shown in the GUI only.
 	Config     json.RawMessage `json:"config,omitempty"`
 	Machine    *Machine        `json:"machine,omitempty"`
@@ -122,12 +117,10 @@ type Machine struct {
 	MemoryMB  int    `json:"memoryMB,omitempty"`
 }
 
-// Message types: "register" (node→hub), "create"/"delete"/"underlay" (hub→node), "status" (node→hub).
+// Message types: "register" (node→hub), "desired"/"underlay" (hub→node), "status" (node→hub).
 type Message struct {
 	Type     string    `json:"type"`
 	Register *Register `json:"register,omitempty"`
-	Create   *VMSpec   `json:"create,omitempty"`
-	DeleteID string    `json:"deleteId,omitempty"`
 	Status   *VMStatus `json:"status,omitempty"`
 	Underlay *Underlay `json:"underlay,omitempty"`
 	// Desired (type "desired") is the full VM list for the node; nil means no VMs.

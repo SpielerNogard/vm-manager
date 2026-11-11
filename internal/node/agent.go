@@ -156,12 +156,8 @@ func (a *Agent) connect(ctx context.Context) error {
 			return err
 		}
 		switch {
-		case m.Type == "create" && m.Create != nil:
-			a.create(ctx, *m.Create)
 		case m.Type == "desired":
 			a.reconcile(ctx, m.Desired)
-		case m.Type == "delete":
-			go a.delete(m.DeleteID)
 		case m.Type == "underlay" && m.Underlay != nil:
 			go a.startChassis(ctx, *m.Underlay)
 		}
@@ -218,24 +214,9 @@ func (a *Agent) registerMsg() *proto.Register {
 	for _, e := range a.vms {
 		st := e.status
 		st.Disks = a.disks(e.file)
-		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: st})
+		reg.VMs = append(reg.VMs, st)
 	}
 	return reg
-}
-
-func (a *Agent) create(ctx context.Context, spec proto.VMSpec) {
-	a.mu.Lock()
-	_, exists := a.vms[spec.ID]
-	a.mu.Unlock()
-	if exists {
-		return
-	}
-	f := VMFile{Spec: spec, MAC: randomMAC(), NeedsPrepare: true}
-	if err := SaveVM(a.VMsDir, f); err != nil {
-		a.report(proto.VMStatus{ID: spec.ID, State: proto.StateError, Error: err.Error()})
-		return
-	}
-	a.startVM(ctx, f, true)
 }
 
 func (a *Agent) startVM(ctx context.Context, f VMFile, prepare bool) {
@@ -436,27 +417,6 @@ func (a *Agent) stopAll() {
 	a.chassisWG.Wait()
 	if err := a.Provider.StopChassis(); err != nil {
 		log.Printf("stop chassis: %v", err)
-	}
-}
-
-func (a *Agent) delete(id string) {
-	a.mu.Lock()
-	e, ok := a.vms[id]
-	delete(a.vms, id)
-	a.mu.Unlock()
-	if !ok {
-		return
-	}
-	e.cancel()
-	<-e.booted
-	if inst := a.instance(e); inst != nil {
-		e.stopRequested.Store(true)
-		if err := inst.Stop(); err != nil {
-			log.Printf("vm %s: stop: %v", id, err)
-		}
-	}
-	if err := DeleteVMDir(a.VMsDir, id); err != nil {
-		log.Printf("vm %s: delete dir: %v", id, err)
 	}
 }
 

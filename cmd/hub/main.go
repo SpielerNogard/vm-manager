@@ -38,11 +38,16 @@ func main() {
 		log.Printf("hub SSH key %s (%s)", k.Name, k.Fingerprint)
 	}
 
-	netModel, err := hub.LoadNetModel(filepath.Join(filepath.Dir(expandHome(*configPath, home)), "network.json"))
+	dir := filepath.Dir(expandHome(*configPath, home))
+	netModel, err := hub.LoadNetModel(filepath.Join(dir, "network.json"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	r := hub.NewRegistry(netModel, cfg)
+	vmStore, err := hub.LoadVMStore(filepath.Join(dir, "vms.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	r := hub.NewRegistry(netModel, vmStore, cfg)
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {

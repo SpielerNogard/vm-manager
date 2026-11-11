@@ -162,38 +162,6 @@ func (m *NetModel) AllocNICs(vmID, name string) ([]proto.NIC, error) {
 	return out, err
 }
 
-func validMgmtIP(ip string) bool {
-	a, err := netip.ParseAddr(ip)
-	return err == nil && a.Is4() && a.Compare(netip.MustParseAddr(mgmtFirst)) >= 0 && a.Compare(netip.MustParseAddr(mgmtLast)) <= 0
-}
-
-func (m *NetModel) AdoptNICs(vmID, name string, nics []proto.NIC) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.mutate(func(st *netState) error {
-		if len(nics) > 1 {
-			return fmt.Errorf("%w: %d NICs, at most one is supported", ErrInvalid, len(nics))
-		}
-		for _, n := range nics {
-			switch {
-			case !validMgmtIP(n.IP):
-				return fmt.Errorf("%w: invalid mgmt IP %q", ErrInvalid, n.IP)
-			case n.Network != mgmtNetwork:
-				return fmt.Errorf("%w: unknown network %q", ErrInvalid, n.Network)
-			case n.Port != vmID+"-mgmt":
-				return fmt.Errorf("%w: port %q does not match the VM", ErrInvalid, n.Port)
-			case n.MAC != nicMAC(n.IP):
-				return fmt.Errorf("%w: MAC %q does not match IP %s", ErrInvalid, n.MAC, n.IP)
-			}
-			if owner := mgmtIPOwner(st, n.IP); owner != "" && owner != vmID {
-				return fmt.Errorf("%w: address %s belongs to VM %q", ErrConflict, n.IP, owner)
-			}
-		}
-		st.NICs[vmID], st.Names[vmID] = slices.Clone(nics), name
-		return nil
-	})
-}
-
 func (m *NetModel) NICs(vmID string) []proto.NIC {
 	m.mu.Lock()
 	defer m.mu.Unlock()
