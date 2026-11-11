@@ -109,7 +109,8 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	a.mu.Unlock()
 	f.Power, f.StopMode, f.Generation = d.Power, d.StopMode, d.Generation
 	var reseedErr error
-	if !slices.Equal(f.Spec.NICs, d.Spec.NICs) {
+	halted := !slices.Equal(f.Spec.NICs, d.Spec.NICs)
+	if halted {
 		e = a.halt(e)
 		oldNICs := f.Spec.NICs
 		f.Spec.NICs = d.Spec.NICs
@@ -122,6 +123,9 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	}
 	if err := SaveVM(a.VMsDir, f); err != nil {
 		log.Printf("vm %s: save: %v", f.Spec.ID, err)
+		if halted {
+			a.report(proto.VMStatus{ID: f.Spec.ID, State: proto.StateError, Error: "save: " + err.Error()})
+		}
 		return
 	}
 	a.mu.Lock()

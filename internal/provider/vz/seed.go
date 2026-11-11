@@ -35,11 +35,13 @@ func makeSeedISO(ctx context.Context, dir string, write func(src string) error) 
 	if err := write(src); err != nil {
 		return err
 	}
-	out := filepath.Join(dir, seedISO)
-	os.Remove(out)
-	cmd := exec.CommandContext(ctx, "hdiutil", "makehybrid", "-iso", "-joliet", "-default-volume-name", "cidata", "-o", out, src)
+	// Building beside seed.iso and renaming keeps the old seed bootable if hdiutil fails; hdiutil won't overwrite its -o target.
+	tmp := filepath.Join(dir, "seed-new.iso")
+	os.Remove(tmp)
+	defer os.Remove(tmp)
+	cmd := exec.CommandContext(ctx, "hdiutil", "makehybrid", "-iso", "-joliet", "-default-volume-name", "cidata", "-o", tmp, src)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("hdiutil: %v: %s", err, b)
 	}
-	return nil
+	return os.Rename(tmp, filepath.Join(dir, seedISO))
 }
