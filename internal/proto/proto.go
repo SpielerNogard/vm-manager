@@ -43,11 +43,22 @@ type DataDisk struct {
 	SizeGB    int    `json:"sizeGB"`
 }
 
+// Disk is a block device the node attached to the VM; Name is "root", the data disk's name, or "seed".
+type Disk struct {
+	Name           string `json:"name"`
+	File           string `json:"file"`
+	Device         string `json:"device"`
+	ReadOnly       bool   `json:"readOnly"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	AllocatedBytes int64  `json:"allocatedBytes"`
+}
+
 type VMStatus struct {
 	ID    string  `json:"id"`
 	State VMState `json:"state"`
 	IP    string  `json:"ip,omitempty"`
 	Error string  `json:"error,omitempty"`
+	Disks []Disk  `json:"disks,omitempty"`
 }
 
 type VMRecord struct {

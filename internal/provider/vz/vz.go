@@ -189,16 +189,12 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 	}
 	cfg.SetPlatformVirtualMachineConfiguration(platform)
 
-	disks := []string{"root.img"}
-	for i := range f.Spec.DataDisks {
-		disks = append(disks, node.DataDiskName(i))
-	}
 	var storage []vz.StorageDeviceConfiguration
-	for _, d := range append(disks, seedISO) {
+	for _, d := range attachOrder(f) {
 		// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
-		att, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d), d == seedISO, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
+		att, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.file), d.readOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
 		if err != nil {
-			return nil, fmt.Errorf("disk %s: %w", d, err)
+			return nil, fmt.Errorf("disk %s: %w", d.file, err)
 		}
 		blk, err := vz.NewVirtioBlockDeviceConfiguration(att)
 		if err != nil {

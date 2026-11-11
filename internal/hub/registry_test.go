@@ -399,3 +399,24 @@ func TestAdoptionErrorSurvivesStatusUpdate(t *testing.T) {
 		t.Fatalf("after = %+v", after)
 	}
 }
+
+func TestStatusAndRegisterStoreDisks(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	disks := []proto.Disk{{Name: "root", File: "root.img", Device: "vda", SizeBytes: 10, AllocatedBytes: 4}}
+	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: disks})
+	if got := r.VMs()[0].Disks; len(got) != 1 || got[0].Device != "vda" || got[0].AllocatedBytes != 4 {
+		t.Fatalf("after status: %+v", got)
+	}
+	r.NodeDisconnected("n1", n)
+	more := append(disks, proto.Disk{Name: "seed", Device: "vdb", ReadOnly: true})
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMRecord{{Spec: vm.VMSpec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: more}}}}, &fakeNode{})
+	if got := r.VMs()[0].Disks; len(got) != 2 || !got[1].ReadOnly {
+		t.Fatalf("after register: %+v", got)
+	}
+	b, _ := json.Marshal(r.VMs()[0])
+	if !strings.Contains(string(b), `"disks":[{"name":"root"`) {
+		t.Fatalf("json = %s", b)
+	}
+}

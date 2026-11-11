@@ -2,6 +2,8 @@ import type { VMState } from '@/api'
 
 export const formatMB = (mb: number) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`)
 
+export const formatBytes = (b: number) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.round(b / 1024 ** 2)} MB`)
+
 // Status colours are only ever used for status, and always next to a label.
 export type Tone = 'good' | 'warning' | 'danger' | 'quiet'
 

@@ -80,6 +80,7 @@ type VM struct {
 	State    proto.VMState `json:"state"`
 	IP       string        `json:"ip,omitempty"`
 	Error    string        `json:"error,omitempty"`
+	Disks    []proto.Disk  `json:"disks,omitempty"`
 	// adoptError pins State to error until the VM is adopted successfully on a later register.
 	adoptError string
 }
@@ -144,6 +145,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 		}
 		vm.Provider = reg.Provider
 		vm.State, vm.IP, vm.Error = rec.Status.State, rec.Status.IP, rec.Status.Error
+		vm.Disks = rec.Status.Disks
 		vm.adoptError = ""
 		if nics := r.net.NICs(id); len(nics) > 0 {
 			vm.NICs = nics
@@ -288,6 +290,9 @@ func (r *Registry) UpdateStatus(st proto.VMStatus) {
 	defer r.mu.Unlock()
 	if vm, ok := r.vms[st.ID]; ok && vm.adoptError == "" {
 		vm.State, vm.IP, vm.Error = st.State, st.IP, st.Error
+	}
+	if vm, ok := r.vms[st.ID]; ok {
+		vm.Disks = st.Disks
 	}
 }
 

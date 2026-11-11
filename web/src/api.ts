@@ -39,6 +39,15 @@ export interface DataDisk {
   sizeGB: number
 }
 
+export interface Disk {
+  name: string
+  file: string
+  device: string
+  readOnly: boolean
+  sizeBytes: number
+  allocatedBytes: number
+}
+
 export interface VM {
   id: string
   name: string
@@ -46,6 +55,7 @@ export interface VM {
   memoryMB: number
   diskGB: number
   dataDisks?: DataDisk[]
+  disks?: Disk[]
   sshPublicKeys: string[]
   nics?: NIC[]
   nodeId: string

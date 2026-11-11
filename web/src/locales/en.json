@@ -142,6 +142,8 @@
     "disk": "Disk",
     "device": "Device",
     "size": "Size",
+    "allocated": "Allocated on host",
+    "notReported": "Not reported by the node",
     "filesystem": "Filesystem",
     "mountPath": "Mount path"
   },

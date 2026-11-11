@@ -142,6 +142,8 @@
     "disk": "Disk",
     "device": "Gerät",
     "size": "Größe",
+    "allocated": "Belegt auf dem Host",
+    "notReported": "Vom Node nicht gemeldet",
     "filesystem": "Dateisystem",
     "mountPath": "Mount-Pfad"
   },

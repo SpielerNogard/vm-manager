@@ -26,6 +26,8 @@ const (
 	ipTimeout      = 120 * time.Second
 
 	defaultUnderlayMTU = 1420
+
+	defaultDiskRefresh = 60 * time.Second
 )
 
 type Agent struct {
@@ -38,6 +40,8 @@ type Agent struct {
 	ChassisPrivateKey             string
 	UnderlayEndpoint              string // host:port override of the hub's underlay address
 	UnderlayMTU                   int
+
+	diskRefresh time.Duration // zero means defaultDiskRefresh
 
 	chassisMu       sync.Mutex
 	chassisPending  *Chassis // newest config not yet applied; older ones are superseded
@@ -124,7 +128,10 @@ func (a *Agent) connect(ctx context.Context) error {
 		return err
 	}
 	log.Printf("connected to hub %s", a.HubURL)
+	connCtx, stopRefresh := context.WithCancel(ctx)
+	go a.refreshDisksLoop(connCtx)
 	defer func() {
+		stopRefresh()
 		a.mu.Lock()
 		a.send = nil
 		a.mu.Unlock()
@@ -195,7 +202,9 @@ func (a *Agent) registerMsg() *proto.Register {
 	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
-		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: e.status})
+		st := e.status
+		st.Disks = a.disks(e.file)
+		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: st})
 	}
 	return reg
 }
@@ -326,6 +335,16 @@ func (a *Agent) delete(id string) {
 func (a *Agent) report(st proto.VMStatus) {
 	a.mu.Lock()
 	e, ok := a.vms[st.ID]
+	var f VMFile
+	if ok {
+		f = e.file
+	}
+	a.mu.Unlock()
+	if ok {
+		st.Disks = a.disks(f)
+	}
+	a.mu.Lock()
+	e, ok = a.vms[st.ID]
 	if ok {
 		e.status = st
 	}
@@ -334,6 +353,61 @@ func (a *Agent) report(st proto.VMStatus) {
 	if ok && send != nil {
 		if err := send(proto.Message{Type: "status", Status: &st}); err != nil {
 			log.Printf("vm %s: status: %v", st.ID, err)
+		}
+	}
+}
+
+func (a *Agent) disks(f VMFile) []proto.Disk {
+	disks, err := a.Provider.Disks(f, VMDir(a.VMsDir, f.Spec.ID))
+	if err != nil {
+		log.Printf("vm %s: disks: %v", f.Spec.ID, err)
+		return nil
+	}
+	return disks
+}
+
+func (a *Agent) refreshDisksLoop(ctx context.Context) {
+	interval := a.diskRefresh
+	if interval == 0 {
+		interval = defaultDiskRefresh
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.refreshDisks()
+		}
+	}
+}
+
+// refreshDisks re-sends each running VM's stored status with fresh disks, so a newer state is never overwritten.
+func (a *Agent) refreshDisks() {
+	a.mu.Lock()
+	var running []VMFile
+	for _, e := range a.vms {
+		if e.status.State == proto.StateRunning {
+			running = append(running, e.file)
+		}
+	}
+	a.mu.Unlock()
+	for _, f := range running {
+		disks := a.disks(f)
+		a.mu.Lock()
+		e, ok := a.vms[f.Spec.ID]
+		if !ok || e.status.State != proto.StateRunning {
+			a.mu.Unlock()
+			continue
+		}
+		e.status.Disks = disks
+		st, send := e.status, a.send
+		a.mu.Unlock()
+		if send != nil {
+			if err := send(proto.Message{Type: "status", Status: &st}); err != nil {
+				log.Printf("vm %s: status: %v", f.Spec.ID, err)
+			}
 		}
 	}
 }

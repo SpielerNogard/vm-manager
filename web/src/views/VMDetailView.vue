@@ -7,7 +7,7 @@ import { api, type Network } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import StateBadge from '@/components/StateBadge.vue'
 import { useFleet } from '@/composables/useFleet'
-import { formatMB, VM_TONE } from '@/lib/format'
+import { formatBytes, formatMB, VM_TONE } from '@/lib/format'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -25,19 +25,22 @@ onMounted(async () => {
 const vm = computed(() => vms.value.find((v) => v.id === route.params.id))
 const host = computed(() => vm.value && `${vm.value.name}.mgmt.internal`)
 const sshCommand = computed(() => `ssh ubuntu@${host.value}`)
-// Mirrors the vz attach order (root, data disks, seed ISO last): / lives on vda1, data disk i is vd(b+i).
-const disks = computed(() => {
-  if (!vm.value) return []
-  const root = { name: t('vm.rootDisk'), device: '/dev/vda1', sizeGB: vm.value.diskGB, fs: 'ext4', mountPath: '/' }
-  const data = (vm.value.dataDisks ?? []).map((d, i) => ({
-    name: d.name,
-    device: `/dev/vd${String.fromCharCode(98 + i)}`,
-    sizeGB: d.sizeGB,
-    fs: `ext4 (LABEL=${d.name})`,
-    mountPath: d.mountPath,
-  }))
-  return [root, ...data]
-})
+const disks = computed(() =>
+  (vm.value?.disks ?? [])
+    .filter((d) => d.name !== 'seed')
+    .map((d) => {
+      const root = d.name === 'root'
+      return {
+        key: d.device,
+        name: root ? t('vm.rootDisk') : d.name,
+        device: `/dev/${d.device}`,
+        sizeBytes: d.sizeBytes,
+        allocatedBytes: d.allocatedBytes,
+        fs: root ? 'ext4' : `ext4 (LABEL=${d.name})`,
+        mountPath: root ? '/' : (vm.value?.dataDisks ?? []).find((x) => x.name === d.name)?.mountPath ?? '—',
+      }
+    }),
+)
 const subnet = (name: string) => networks.value.find((n) => n.name === name)?.subnet
 const sshKeys = computed(() =>
   (vm.value?.sshPublicKeys ?? []).map((pk) => {
@@ -143,15 +146,20 @@ async function copy() {
               <th>{{ t('vm.disk') }}</th>
               <th>{{ t('vm.device') }}</th>
               <th class="text-right">{{ t('vm.size') }}</th>
+              <th class="text-right">{{ t('vm.allocated') }}</th>
               <th>{{ t('vm.filesystem') }}</th>
               <th>{{ t('vm.mountPath') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="d in disks" :key="d.device">
+            <tr v-if="!disks.length">
+              <td colspan="6" class="text-base-content/60">{{ t('vm.notReported') }}</td>
+            </tr>
+            <tr v-for="d in disks" :key="d.key">
               <td class="font-medium">{{ d.name }}</td>
               <td class="font-token">{{ d.device }}</td>
-              <td class="text-right tabular-nums">{{ d.sizeGB }} GB</td>
+              <td class="text-right tabular-nums">{{ formatBytes(d.sizeBytes) }}</td>
+              <td class="text-right tabular-nums">{{ formatBytes(d.allocatedBytes) }}</td>
               <td class="font-token">{{ d.fs }}</td>
               <td class="font-token">{{ d.mountPath }}</td>
             </tr>

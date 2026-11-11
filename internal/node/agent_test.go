@@ -56,6 +56,21 @@ type fakeProvider struct {
 	inflight    atomic.Int32
 	maxInflight atomic.Int32
 	events      []string
+	failDisks   bool
+	bigRoot     bool // makes Disks report a different allocation, as if the guest wrote data
+}
+
+func (p *fakeProvider) Disks(f VMFile, _ string) ([]proto.Disk, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.failDisks {
+		return nil, errors.New("disks boom")
+	}
+	d := proto.Disk{Name: "root", File: "root.img", Device: "vda", SizeBytes: int64(f.Spec.DiskGB) << 30}
+	if p.bigRoot {
+		d.AllocatedBytes = 42
+	}
+	return []proto.Disk{d}, nil
 }
 
 func (p *fakeProvider) record(e string) {
@@ -374,4 +389,38 @@ func TestAgentStopChassisWaitsForInFlightStart(t *testing.T) {
 	if len(env.provider.chassis) != 1 {
 		t.Fatal("chassis started after shutdown")
 	}
+}
+
+func TestAgentStatusCarriesDisks(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, err := env.reg.CreateVM(createReq("dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "running with disks", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return v.State == proto.StateRunning && len(v.Disks) == 1 && v.Disks[0].Device == "vda"
+	})
+}
+
+func TestAgentOmitsDisksOnProviderError(t *testing.T) {
+	env := startEnv(t, func(_ *Agent, p *fakeProvider) { p.failDisks = true })
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	if v, _ := vmState(env.reg, vm.ID); len(v.Disks) != 0 {
+		t.Fatalf("disks = %+v", v.Disks)
+	}
+}
+
+func TestAgentRefreshesDisksWhileRunning(t *testing.T) {
+	env := startEnv(t, func(a *Agent, _ *fakeProvider) { a.diskRefresh = 20 * time.Millisecond })
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.provider.mu.Lock()
+	env.provider.bigRoot = true
+	env.provider.mu.Unlock()
+	eventually(t, "refreshed disks", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return len(v.Disks) == 1 && v.Disks[0].AllocatedBytes == 42 && v.State == proto.StateRunning
+	})
 }
