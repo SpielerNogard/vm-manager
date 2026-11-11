@@ -67,6 +67,7 @@ type fakeProvider struct {
 	maxInflight  atomic.Int32
 	events       []string
 	failDisks    bool
+	failReseed   bool
 	bigRoot      bool // makes Disks report a different allocation, as if the guest wrote data
 	afterPrepare func(dir string)
 }
@@ -135,6 +136,16 @@ func (p *fakeProvider) Prepare(_ context.Context, f VMFile, dir string) error {
 	}
 	if p.afterPrepare != nil {
 		p.afterPrepare(dir)
+	}
+	return nil
+}
+
+func (p *fakeProvider) Reseed(_ context.Context, f VMFile, _ string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, "reseed:"+f.Spec.Name)
+	if p.failReseed {
+		return errors.New("reseed boom")
 	}
 	return nil
 }

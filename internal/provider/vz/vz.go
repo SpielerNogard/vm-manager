@@ -70,6 +70,10 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	return makeSeedISO(ctx, dir, writeGuestSeed(f))
 }
 
+func (p *Provider) Reseed(ctx context.Context, f node.VMFile, dir string) error {
+	return makeSeedISO(ctx, dir, writeGuestSeed(f))
+}
+
 func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	var nics []guestNIC
 	closeNICs := func() {

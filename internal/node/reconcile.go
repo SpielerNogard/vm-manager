@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"log"
+	"slices"
 	"sync"
 
 	"vm-manager/internal/proto"
@@ -96,7 +97,7 @@ func (a *Agent) placeholder(d proto.DesiredVM, msg string) {
 func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM) {
 	if e.placeholder {
 		a.mu.Lock()
-		e.file.Power, e.file.StopMode, e.file.Generation = d.Power, d.StopMode, d.Generation
+		e.file.Spec, e.file.Power, e.file.StopMode, e.file.Generation = d.Spec, d.Power, d.StopMode, d.Generation
 		st := e.status
 		a.mu.Unlock()
 		a.report(st)
@@ -106,6 +107,11 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	a.mu.Lock()
 	f := e.file
 	a.mu.Unlock()
+	nicsChanged := !slices.Equal(f.Spec.NICs, d.Spec.NICs)
+	if nicsChanged {
+		e = a.halt(e)
+		f.Spec.NICs = d.Spec.NICs
+	}
 	f.Power, f.StopMode, f.Generation = d.Power, d.StopMode, d.Generation
 	if err := SaveVM(a.VMsDir, f); err != nil {
 		log.Printf("vm %s: save: %v", f.Spec.ID, err)
@@ -115,6 +121,12 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	e.file = f
 	inst, st := e.inst, e.status
 	a.mu.Unlock()
+	if nicsChanged && !f.NeedsPrepare {
+		if err := a.Provider.Reseed(ctx, f, VMDir(a.VMsDir, f.Spec.ID)); err != nil {
+			a.report(proto.VMStatus{ID: f.Spec.ID, State: proto.StateError, Error: "reseed: " + err.Error()})
+			return
+		}
+	}
 	live := inst != nil
 	if live {
 		select {
@@ -143,4 +155,31 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	default:
 		a.report(st)
 	}
+}
+
+// halt stops e's instance and swaps in an idle stopped entry, so e's boot goroutine neither restarts it nor reports over later updates.
+func (a *Agent) halt(e *vmEntry) *vmEntry {
+	e.stopRequested.Store(true)
+	if inst := a.instance(e); inst != nil {
+		select {
+		case <-inst.Done():
+		default:
+			if err := inst.Stop(); err != nil {
+				log.Printf("vm %s: stop: %v", e.file.Spec.ID, err)
+				if err := inst.Kill(); err != nil {
+					log.Printf("vm %s: kill: %v", e.file.Spec.ID, err)
+				}
+			}
+			<-inst.Done()
+		}
+	}
+	// Cancelling only after exit keeps a pending WaitIP from reporting the cancellation as an error.
+	e.cancel()
+	booted := make(chan struct{})
+	close(booted)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	idle := &vmEntry{file: e.file, status: proto.VMStatus{ID: e.file.Spec.ID, State: proto.StateStopped}, cancel: func() {}, booted: booted}
+	a.vms[idle.file.Spec.ID] = idle
+	return idle
 }
