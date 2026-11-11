@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"vm-manager/internal/proto"
 	"vm-manager/internal/wgkey"
@@ -474,5 +475,48 @@ func TestStatusAndRegisterStoreDisks(t *testing.T) {
 	b, _ := json.Marshal(r.VMs()[0])
 	if !strings.Contains(string(b), `"disks":[{"name":"root"`) {
 		t.Fatalf("json = %s", b)
+	}
+}
+
+type blockingNode struct {
+	entered, release chan struct{}
+}
+
+func (b *blockingNode) Send(proto.Message) error {
+	b.entered <- struct{}{}
+	<-b.release
+	return nil
+}
+
+func TestStalledNodeDoesNotBlockOthers(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	stalled := &blockingNode{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192}, stalled)
+		close(done)
+	}()
+	<-stalled.entered
+	defer func() { close(stalled.release); <-done }()
+
+	created := make(chan error, 1)
+	other := &fakeNode{}
+	go func() {
+		r.NodeConnected(proto.Register{NodeID: "n3", Provider: "vz", CPUs: 4, MemoryMB: 8192}, other)
+		q := validReq()
+		q.NodeID = "n3"
+		_, err := r.CreateVM(q)
+		created <- err
+	}()
+	select {
+	case err := <-created:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CreateVM on n3 blocked by stalled n2")
+	}
+	if m := other.last(); m.Type != "desired" || len(m.Desired) != 1 {
+		t.Fatalf("sent = %+v", m)
 	}
 }

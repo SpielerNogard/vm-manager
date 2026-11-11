@@ -122,12 +122,12 @@ type Registry struct {
 	net   *NetModel
 	store *VMStore
 	cfg   Config
-	// pushMu orders desired messages so a node never receives an older list after a newer one.
-	pushMu sync.Mutex
+	// sendMu (per node, kept across reconnects) orders desired lists so a node never receives an older one after a newer one.
+	sendMu map[string]*sync.Mutex
 }
 
 func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
-	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg}
+	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg, sendMu: map[string]*sync.Mutex{}}
 	for _, n := range store.Nodes() {
 		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine}}
 	}
@@ -310,9 +310,15 @@ func (r *Registry) desiredFor(nodeID string) []proto.DesiredVM {
 
 // push sends the node its current desired VMs if it is online.
 func (r *Registry) push(nodeID string) {
-	// ponytail: one lock for all nodes, so a node with a stalled connection delays pushes to others; per-node locks if that bites.
-	r.pushMu.Lock()
-	defer r.pushMu.Unlock()
+	r.mu.Lock()
+	sendMu := r.sendMu[nodeID]
+	if sendMu == nil {
+		sendMu = &sync.Mutex{}
+		r.sendMu[nodeID] = sendMu
+	}
+	r.mu.Unlock()
+	sendMu.Lock()
+	defer sendMu.Unlock()
 	r.mu.Lock()
 	n := r.nodes[nodeID]
 	if n == nil || n.conn == nil {
