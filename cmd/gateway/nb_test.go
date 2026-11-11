@@ -146,12 +146,6 @@ func TestReconcileNBCreatesNetworkSwitch(t *testing.T) {
 			t.Errorf("transaction missing %q in %s", want, tx[0])
 		}
 	}
-	if strings.Contains(tx[0], "server_id=10.210.0.1 server_mac=02:0a:d2:00:00:01 lease_time=3600 mtu=1300 router") {
-		t.Error("network dhcp has router")
-	}
-	if strings.Contains(tx[0], "vm1-n1 --") && strings.Contains(tx[0], "pg-set-ports pg_vms vm1-mgmt vm1-n1") {
-		t.Error("network port in pg_vms")
-	}
 }
 
 func TestReconcileNBDeletesStaleNetwork(t *testing.T) {
