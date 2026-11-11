@@ -8,11 +8,15 @@
     },
     "vms": {
       "label": "VMs",
-      "blurb": "Jede VM, auf welcher Node sie läuft und wie man per SSH hineinkommt."
+      "blurb": "Jede VM, die Node, auf der sie läuft, und ihr Management-Hostname für SSH."
     },
     "keys": {
       "label": "SSH-Keys",
       "blurb": "Gespeicherte Public Keys. Keys der Hub-Maschine stehen immer hier und sind beim Anlegen vorausgewählt."
+    },
+    "devices": {
+      "label": "Geräte",
+      "blurb": "WireGuard-Client-Geräte. Ein Gerät erreicht jede VM über ihren Management-Hostnamen."
     }
   },
   "topbar": {
@@ -46,12 +50,13 @@
     "node": "Node",
     "provider": "Provider",
     "capacity": "Kapazität",
-    "free": "Frei"
+    "free": "Frei",
+    "chassis": "Chassis"
   },
   "vms": {
     "new": "Neue VM",
     "emptyTitle": "Noch keine VMs",
-    "emptyBody": "Eine VM bootet auf der Node, die du beim Anlegen wählst. SSH läuft über den Hub.",
+    "emptyBody": "Eine VM bootet auf der Node, die du beim Anlegen wählst. SSH läuft über ein WireGuard-Gerät mit dem Management-Hostnamen der VM.",
     "vm": "VM",
     "node": "Node",
     "resources": "Ressourcen",
@@ -63,7 +68,8 @@
     "copySsh": "SSH-Befehl kopieren",
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Die VM wird gestoppt und ihre Disks werden auf der Node entfernt. Das lässt sich nicht rückgängig machen.",
-    "deleteConfirm": "VM löschen"
+    "deleteConfirm": "VM löschen",
+    "mgmt": "Management-Host"
   },
   "create": {
     "title": "Neue VM",
@@ -117,6 +123,29 @@
     "configHint": "Die Config-Datei der Node, wie sie sie beim Verbinden gemeldet hat. Der Hub-Token wird nie mitgeschickt.",
     "vms": "VMs auf dieser Node",
     "noVMs": "Keine VMs auf dieser Node",
-    "open": "{name} öffnen"
+    "open": "{name} öffnen",
+    "chassis": "Chassis"
+  },
+  "chassis": {
+    "connected": "verbunden",
+    "handshakeAgo": "Handshake vor {n} s",
+    "noHandshake": "noch kein Handshake",
+    "notRegistered": "nicht registriert"
+  },
+  "devices": {
+    "add": "Gerät hinzufügen",
+    "emptyTitle": "Noch keine Geräte",
+    "emptyBody": "Füge für jeden Laptop oder jedes Handy ein Gerät hinzu, das VMs als NAME.mgmt.internal erreichen soll.",
+    "ip": "VPN-IP",
+    "created": "Erstellt",
+    "dialogTitle": "Gerät hinzufügen",
+    "nameHint": "Kleinbuchstaben, Ziffern und Bindestriche.",
+    "create": "Gerät erstellen",
+    "createdHint": "Importiere diese Konfiguration jetzt in WireGuard. Der Private Key wird nicht gespeichert und kann nicht erneut angezeigt werden; bei Verlust das Gerät löschen und neu anlegen.",
+    "qrAlt": "WireGuard-Konfiguration als QR-Code",
+    "download": ".conf herunterladen",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Das Gerät verliert sofort den Zugriff auf alle VMs.",
+    "deleteConfirm": "Gerät löschen"
   }
 }

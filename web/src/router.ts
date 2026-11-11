@@ -2,12 +2,13 @@ import type { Component } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { NAV_ITEMS, type Section } from '@/nav'
+import DevicesView from '@/views/DevicesView.vue'
 import KeysView from '@/views/KeysView.vue'
 import NodeDetailView from '@/views/NodeDetailView.vue'
 import NodesView from '@/views/NodesView.vue'
 import VMsView from '@/views/VMsView.vue'
 
-const VIEWS: Record<Section, Component> = { nodes: NodesView, vms: VMsView, keys: KeysView }
+const VIEWS: Record<Section, Component> = { nodes: NodesView, vms: VMsView, keys: KeysView, devices: DevicesView }
 
 export const router = createRouter({
   history: createWebHistory(),

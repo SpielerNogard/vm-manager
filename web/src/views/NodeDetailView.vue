@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 
+import ChassisBadge from '@/components/ChassisBadge.vue'
 import DataState from '@/components/DataState.vue'
 import MeterBar from '@/components/MeterBar.vue'
 import StateBadge from '@/components/StateBadge.vue'
@@ -65,6 +66,13 @@ const formatCPUs = (n: number) => `${n} vCPU`
             <template v-if="node.machine.cpuModel">
               <dt class="text-base-content/60">{{ t('node.cpuModel') }}</dt>
               <dd>{{ node.machine.cpuModel }}</dd>
+            </template>
+            <template v-if="node.chassis">
+              <dt class="text-base-content/60">{{ t('node.chassis') }}</dt>
+              <dd class="flex flex-wrap items-center gap-2">
+                <span class="font-token">{{ node.chassis.ip }}</span>
+                <ChassisBadge :chassis="node.chassis" />
+              </dd>
             </template>
             <dt class="text-base-content/60">{{ t('node.hardware') }}</dt>
             <dd class="tabular-nums">

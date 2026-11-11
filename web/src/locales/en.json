@@ -8,11 +8,15 @@
     },
     "vms": {
       "label": "VMs",
-      "blurb": "Every VM, the node it runs on, and how to SSH into it."
+      "blurb": "Every VM, the node it runs on, and its management hostname for SSH."
     },
     "keys": {
       "label": "SSH keys",
       "blurb": "Stored public keys. Keys of the hub machine are always listed and preselected when you create a VM."
+    },
+    "devices": {
+      "label": "Devices",
+      "blurb": "WireGuard client devices. A device reaches every VM by its management hostname."
     }
   },
   "topbar": {
@@ -46,12 +50,13 @@
     "node": "Node",
     "provider": "Provider",
     "capacity": "Capacity",
-    "free": "Free"
+    "free": "Free",
+    "chassis": "Chassis"
   },
   "vms": {
     "new": "New VM",
     "emptyTitle": "No VMs yet",
-    "emptyBody": "A VM boots on the node you pick when creating it. SSH goes through the hub.",
+    "emptyBody": "A VM boots on the node you pick when creating it. SSH goes through a WireGuard device, using the VM's management hostname.",
     "vm": "VM",
     "node": "Node",
     "resources": "Resources",
@@ -63,7 +68,8 @@
     "copySsh": "Copy SSH command",
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The VM is stopped and its disks are removed from the node. This cannot be undone.",
-    "deleteConfirm": "Delete VM"
+    "deleteConfirm": "Delete VM",
+    "mgmt": "Management host"
   },
   "create": {
     "title": "New VM",
@@ -117,6 +123,29 @@
     "configHint": "The node's config file as it reported it on connect. The hub token is never sent.",
     "vms": "VMs on this node",
     "noVMs": "No VMs on this node",
-    "open": "Open {name}"
+    "open": "Open {name}",
+    "chassis": "Chassis"
+  },
+  "chassis": {
+    "connected": "connected",
+    "handshakeAgo": "handshake {n} s ago",
+    "noHandshake": "no handshake yet",
+    "notRegistered": "not registered"
+  },
+  "devices": {
+    "add": "Add device",
+    "emptyTitle": "No devices yet",
+    "emptyBody": "Add a device for each laptop or phone that should reach VMs as NAME.mgmt.internal.",
+    "ip": "VPN IP",
+    "created": "Created",
+    "dialogTitle": "Add device",
+    "nameHint": "Lowercase letters, digits and hyphens.",
+    "create": "Create device",
+    "createdHint": "Import this config into WireGuard now. The private key is not stored and cannot be shown again; delete the device and add it again if you lose it.",
+    "qrAlt": "WireGuard config as QR code",
+    "download": "Download .conf",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "The device loses access to all VMs immediately.",
+    "deleteConfirm": "Delete device"
   }
 }
