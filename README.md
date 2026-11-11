@@ -82,6 +82,14 @@ ssh ubuntu@dev.mgmt.internal
 
 The device config points DNS at the gateway, which resolves `*.mgmt.internal` and forwards other names upstream. Adding devices requires `clients.endpoint` (`CLIENTS_ENDPOINT`).
 
+Client notes:
+- On the hub machine itself, set the peer's `Endpoint` to `127.0.0.1:<CLIENTS_PORT>`. The WireGuard app on macOS doesn't reach the machine's own Tailscale or LAN address.
+- On macOS the WireGuard app uses the tunnel DNS only as a supplemental resolver for split tunnels, so `*.internal` doesn't resolve. Route the zone to the gateway once:
+
+  ```sh
+  sudo sh -c 'mkdir -p /etc/resolver && echo "nameserver 10.201.0.1" > /etc/resolver/internal'
+  ```
+
 On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. On first boot, cloud-init formats each data disk as ext4, labels it with its `name`, and mounts it at `mountPath`. The mount is owned by `ubuntu`. System paths such as `/etc`, `/usr`, `/home/ubuntu` or `/var` are rejected as mount paths.
 
 VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
