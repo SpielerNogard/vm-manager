@@ -92,7 +92,7 @@ Client notes:
 
 ### Networks
 
-Networks are standalone objects (they can be empty) that give VMs private connectivity to each other, also across nodes (OVN Geneve). Create one with `POST /api/networks` or the GUI, and attach VMs at creation (`networkIds` on `POST /api/vms`) or later with `PUT /api/vms/{id}/networks?restartAllowed=true` and `{"networkIds": [...]}`, which sets the full list. Changing the list restarts a running VM.
+Networks are standalone objects (they can be empty) that give VMs private connectivity to each other, also across nodes (OVN Geneve). Create one with `POST /api/networks` or the GUI, and attach VMs at creation (`networkIds` on `POST /api/vms`) or later with `PUT /api/vms/{id}/networks?restartAllowed=true` and `{"networkIds": [...]}`, which sets the full list (`networkIds` is required, `[]` detaches all; a missing field is a 400). Changing the list restarts a running VM.
 
 | | |
 |---|---|
@@ -100,8 +100,8 @@ Networks are standalone objects (they can be empty) that give VMs private connec
 | Overlap | Must not overlap `10.198.0.0/24`, `10.199.0.0/30`, `10.200.0.0/16`, `10.201.0.0/24`, `192.168.64.0/24` or another network |
 | Addresses | VMs get stable addresses from `.10` |
 | Isolation | VMs reach each other only via shared networks. No router, no internet, no device (WireGuard) access, no routing between networks |
-| DNS | `<vm>.<network>.internal` resolves to the VM's IP in that network. Devices resolve these names too but cannot reach the addresses |
-| Guest | Each network is an extra NIC (`net0`, `net1`, ...), DHCP from OVN, no default route |
+| DNS | `<vm>.<network>.internal` resolves to the VM's IP in that network. Devices resolve these names too but cannot reach the addresses. VMs can also resolve all networks' names but reach only their own |
+| Guest | Each network is an extra NIC configured by a netplan entry matched by MAC, DHCP from OVN, no default route. Guest interface names stay kernel names like `enp0s3` |
 
 Guests send only `*.internal` queries to the gateway (`10.201.0.1`, via the management NIC). The management network is built in and cannot be deleted; a network with members cannot be deleted either.
 
@@ -109,7 +109,7 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
 
-Upgrade note: VMs created before the hub became the source of truth are deleted when their node first connects. Recreate them. Upgrade the hub and all nodes together; old and new versions don't work with each other.
+Upgrade note: VMs created before the hub became the source of truth are deleted when their node first connects. Recreate them. Upgrade the hub and all nodes together; old and new versions don't work with each other. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
 
 ## Config
 
@@ -136,7 +136,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`, optional `networkIds`). Also works for an offline node: the VM shows `pending` until the node connects |
 | DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
-| PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
+| PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`, required; `[]` detaches all). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
 | POST | `/api/vms/{id}/start` | Power the VM on |
 | POST | `/api/vms/{id}/shutdown` | ACPI shutdown, hard power-off after 10 s |
 | POST | `/api/vms/{id}/stop` | Immediate hard power-off |
