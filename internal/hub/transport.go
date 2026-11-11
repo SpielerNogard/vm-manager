@@ -15,9 +15,8 @@ import (
 )
 
 type yamuxNode struct {
-	sess *yamux.Session
-	mu   sync.Mutex
-	enc  *json.Encoder
+	mu  sync.Mutex
+	enc *json.Encoder
 }
 
 func (n *yamuxNode) Send(m proto.Message) error {
@@ -54,7 +53,7 @@ func NodeHandler(r *Registry, token string) http.Handler {
 			log.Printf("node %s: expected register message", req.RemoteAddr)
 			return
 		}
-		node := &yamuxNode{sess: sess, enc: proto.NewEncoder(ctrl)}
+		node := &yamuxNode{enc: proto.NewEncoder(ctrl)}
 		id := m.Register.NodeID
 		r.NodeConnected(*m.Register, node)
 		log.Printf("node %s connected (%d VMs)", id, len(m.Register.VMs))

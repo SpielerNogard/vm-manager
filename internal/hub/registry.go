@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path"
 	"regexp"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/wgkey"
 )
 
 var (
@@ -62,6 +64,13 @@ type Node struct {
 	ConnectedAt time.Time       `json:"connectedAt"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Machine     *proto.Machine  `json:"machine,omitempty"`
+	Chassis     *ChassisState   `json:"chassis,omitempty"`
+}
+
+type ChassisState struct {
+	IP            string    `json:"ip"`
+	LastHandshake time.Time `json:"lastHandshake,omitempty"`
+	Registered    bool      `json:"registered"`
 }
 
 type VM struct {
@@ -94,14 +103,27 @@ type Registry struct {
 	mu    sync.Mutex
 	nodes map[string]*nodeEntry
 	vms   map[string]*VM
+	net   *NetModel
+	cfg   Config
 }
 
-func NewRegistry() *Registry {
-	return &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}}
+func NewRegistry(net *NetModel, cfg Config) *Registry {
+	return &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, cfg: cfg}
 }
 
 // NodeConnected adopts the reported VMs and drops ones the node no longer has.
+// The hub's NICs win over reported ones; a reported VM the hub does not know keeps its NICs unless they clash.
 func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
+	underlay := r.nodeConnected(reg, c)
+	if underlay == nil {
+		return
+	}
+	if err := c.Send(proto.Message{Type: "underlay", Underlay: underlay}); err != nil {
+		log.Printf("node %s: sending underlay: %v", reg.NodeID, err)
+	}
+}
+
+func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nodes[reg.NodeID] = &nodeEntry{
@@ -111,20 +133,61 @@ func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
 	}
 	reported := map[string]bool{}
 	for _, rec := range reg.VMs {
-		reported[rec.Spec.ID] = true
-		vm, known := r.vms[rec.Spec.ID]
+		id := rec.Spec.ID
+		reported[id] = true
+		vm, known := r.vms[id]
 		if !known || vm.NodeID != reg.NodeID {
 			vm = &VM{VMSpec: rec.Spec, NodeID: reg.NodeID}
-			r.vms[rec.Spec.ID] = vm
+			r.vms[id] = vm
 		}
 		vm.Provider = reg.Provider
 		vm.State, vm.IP, vm.Error = rec.Status.State, rec.Status.IP, rec.Status.Error
+		if nics := r.net.NICs(id); len(nics) > 0 {
+			vm.NICs = nics
+		} else if err := r.net.AdoptNICs(id, rec.Spec.NICs); err != nil {
+			vm.NICs = nil
+			vm.State, vm.Error = proto.StateError, adoptError(rec.Spec.NICs, err)
+		} else {
+			vm.NICs = rec.Spec.NICs
+		}
 	}
 	for id, vm := range r.vms {
 		if vm.NodeID == reg.NodeID && !reported[id] {
 			delete(r.vms, id)
+			if err := r.net.Release(id); err != nil {
+				log.Printf("releasing NICs of %s: %v", id, err)
+			}
 		}
 	}
+	if reg.ChassisKey == "" {
+		return nil
+	}
+	ch, err := r.net.Enroll(reg.NodeID, reg.ChassisKey)
+	if err != nil {
+		log.Printf("node %s: enrolling chassis: %v", reg.NodeID, err)
+		return nil
+	}
+	underlayPriv, _ := r.net.GatewayKeys()
+	hubKey, err := wgkey.Public(underlayPriv)
+	if err != nil {
+		log.Printf("hub underlay key: %v", err)
+		return nil
+	}
+	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}
+}
+
+func adoptError(nics []proto.NIC, err error) string {
+	ip := ""
+	if len(nics) > 0 {
+		ip = nics[0].IP
+	}
+	if errors.Is(err, ErrInvalid) {
+		return fmt.Sprintf("invalid mgmt IP %q", ip)
+	}
+	if errors.Is(err, ErrConflict) {
+		return fmt.Sprintf("mgmt IP %s already in use", ip)
+	}
+	return err.Error()
 }
 
 // NodeDisconnected ignores c if the node has already reconnected with a newer connection.
@@ -169,9 +232,14 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 		return VM{}, fmt.Errorf("%w: node %q has %d CPUs / %d MB free", ErrConflict, n.ID, freeCPU, freeMem)
 	}
 	id := newID()
+	nics, err := r.net.AllocNICs(id)
+	if err != nil {
+		r.mu.Unlock()
+		return VM{}, err
+	}
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
-			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys},
+			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, NICs: nics},
 		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending,
 	}
 	r.vms[id] = vm
@@ -181,6 +249,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	if err := conn.Send(proto.Message{Type: "create", Create: &spec}); err != nil {
 		r.mu.Lock()
 		delete(r.vms, id)
+		r.net.Release(id)
 		r.mu.Unlock()
 		return VM{}, fmt.Errorf("%w: sending to node: %v", ErrConflict, err)
 	}
@@ -200,6 +269,9 @@ func (r *Registry) DeleteVM(id string) error {
 		return fmt.Errorf("%w: node %q is offline", ErrConflict, vm.NodeID)
 	}
 	delete(r.vms, id)
+	if err := r.net.Release(id); err != nil {
+		log.Printf("releasing NICs of %s: %v", id, err)
+	}
 	conn := n.conn
 	r.mu.Unlock()
 	return conn.Send(proto.Message{Type: "delete", DeleteID: id})

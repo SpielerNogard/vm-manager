@@ -170,11 +170,19 @@ func (m *NetModel) AllocNICs(vmID string) ([]proto.NIC, error) {
 	return out, err
 }
 
+func validMgmtIP(ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && a.Is4() && a.Compare(netip.MustParseAddr(mgmtFirst)) >= 0 && a.Compare(netip.MustParseAddr(mgmtLast)) <= 0
+}
+
 func (m *NetModel) AdoptNICs(vmID string, nics []proto.NIC) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.mutate(func(st *netState) error {
 		for _, n := range nics {
+			if !validMgmtIP(n.IP) {
+				return fmt.Errorf("%w: invalid mgmt address %q", ErrInvalid, n.IP)
+			}
 			if owner := mgmtIPOwner(st, n.IP); owner != "" && owner != vmID {
 				return fmt.Errorf("%w: address %s belongs to VM %q", ErrConflict, n.IP, owner)
 			}

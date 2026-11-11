@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -101,7 +102,11 @@ type testEnv struct {
 
 func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	t.Helper()
-	reg := hub.NewRegistry()
+	net, err := hub.LoadNetModel(filepath.Join(t.TempDir(), "network.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := hub.NewRegistry(net, hub.Config{})
 	srv := httptest.NewServer(hub.NodeHandler(reg, "tok"))
 
 	p := newFakeProvider()

@@ -1,11 +1,15 @@
 package hub
 
 import (
+	"encoding/json"
 	"errors"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/wgkey"
 )
 
 type fakeNode struct {
@@ -26,9 +30,20 @@ func (f *fakeNode) last() proto.Message {
 	return f.sent[len(f.sent)-1]
 }
 
+func newTestNet(t *testing.T) *NetModel {
+	t.Helper()
+	m, err := LoadNetModel(filepath.Join(t.TempDir(), "network.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
 func newTestRegistry(t *testing.T) (*Registry, *fakeNode) {
 	t.Helper()
-	r := NewRegistry()
+	var cfg Config
+	cfg.Underlay.Port = 51820
+	r := NewRegistry(newTestNet(t), cfg)
 	n := &fakeNode{}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n)
 	return r, n
@@ -210,5 +225,108 @@ func TestCreateVMAcceptsDataDisks(t *testing.T) {
 	}
 	if _, err := r.CreateVM(q); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCreateVMAllocatesMgmtNIC(t *testing.T) {
+	r, n := newTestRegistry(t)
+	if _, err := r.CreateVM(validReq()); err != nil {
+		t.Fatal(err)
+	}
+	spec := n.last().Create
+	if len(spec.NICs) != 1 || spec.NICs[0].IP != "10.200.0.10" || spec.NICs[0].MAC != "02:0a:c8:00:00:0a" {
+		t.Fatalf("nics = %+v", spec.NICs)
+	}
+	b, _ := json.Marshal(spec)
+	if strings.Contains(string(b), "sshPort") {
+		t.Fatalf("json has sshPort: %s", b)
+	}
+}
+
+func TestDeleteVMReleasesNIC(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	if err := r.DeleteVM(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.net.NICs(vm.ID); len(got) != 0 {
+		t.Fatalf("nics = %+v", got)
+	}
+}
+
+func TestReRegisterKnownVMKeepsHubNIC(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.NodeDisconnected("n1", n)
+	spec := vm.VMSpec
+	spec.NICs = []proto.NIC{{Network: "mgmt", IP: "10.200.0.99", MAC: "02:0a:c8:00:00:63", Port: vm.ID + "-mgmt"}}
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning}}}}, &fakeNode{})
+	if got := r.VMs()[0].NICs[0].IP; got != "10.200.0.10" {
+		t.Fatalf("ip = %s", got)
+	}
+}
+
+func reportUnknown(r *Registry, id, ip string) {
+	spec := proto.VMSpec{ID: id, Name: id, NICs: []proto.NIC{{Network: "mgmt", IP: ip, MAC: nicMAC("10.200.0.10"), Port: id + "-mgmt"}}}
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: id, State: proto.StateRunning}}}}, &fakeNode{})
+}
+
+func TestAdoptUnknownVMWithTakenIPMarksError(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm1, _ := r.CreateVM(validReq())
+	spec1 := vm1.VMSpec
+	spec2 := proto.VMSpec{ID: "vm2", Name: "vm2", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", Port: "vm2-mgmt"}}}
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, VMs: []proto.VMRecord{
+		{Spec: spec1, Status: proto.VMStatus{ID: vm1.ID, State: proto.StateRunning}},
+		{Spec: spec2, Status: proto.VMStatus{ID: "vm2", State: proto.StateRunning}},
+	}}, n)
+	byName := map[string]VM{}
+	for _, v := range r.VMs() {
+		byName[v.Name] = v
+	}
+	if v := byName["vm2"]; v.State != proto.StateError || !strings.Contains(v.Error, "10.200.0.10") {
+		t.Fatalf("vm2 = %+v", v)
+	}
+	if v := byName["dev"]; v.State != proto.StateRunning || v.NICs[0].IP != "10.200.0.10" {
+		t.Fatalf("vm1 = %+v", v)
+	}
+}
+
+func TestAdoptUnknownVMWithInvalidIPMarksError(t *testing.T) {
+	for _, ip := range []string{"not-an-ip", "10.200.0.5", "10.201.0.20", "::1", "10.200.255.255"} {
+		r, _ := newTestRegistry(t)
+		reportUnknown(r, "vm2", ip)
+		v := r.VMs()[0]
+		if v.State != proto.StateError || !strings.Contains(v.Error, ip) {
+			t.Fatalf("ip %s: vm = %+v", ip, v)
+		}
+		if len(r.net.NICs("vm2")) != 0 {
+			t.Fatalf("ip %s: adopted", ip)
+		}
+	}
+}
+
+func TestAdoptUnknownVMKeepsValidNIC(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	reportUnknown(r, "vm2", "10.200.0.77")
+	if v := r.VMs()[0]; v.State != proto.StateRunning || v.NICs[0].IP != "10.200.0.77" {
+		t.Fatalf("vm = %+v", v)
+	}
+}
+
+func TestNodeConnectedEnrollsChassisAndSendsUnderlay(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	n := &fakeNode{}
+	_, pub, _ := wgkey.Generate()
+	r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192, ChassisKey: pub}, n)
+	m := n.last()
+	if m.Type != "underlay" || m.Underlay == nil || m.Underlay.Address != "10.198.0.11/24" ||
+		m.Underlay.Port != 51820 || m.Underlay.SBRemote != "tcp:10.198.0.1:6642" || m.Underlay.HubKey == "" {
+		t.Fatalf("sent = %+v", m)
+	}
+	if ch := r.net.Chassis(); len(ch) != 1 || ch[0].PublicKey != pub {
+		t.Fatalf("chassis = %+v", ch)
 	}
 }

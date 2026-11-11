@@ -37,7 +37,11 @@ func main() {
 		log.Printf("hub SSH key %s (%s)", k.Name, k.Fingerprint)
 	}
 
-	r := hub.NewRegistry()
+	netModel, err := hub.LoadNetModel(filepath.Join(filepath.Dir(expandHome(*configPath, home)), "network.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	r := hub.NewRegistry(netModel, cfg)
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
