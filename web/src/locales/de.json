@@ -97,7 +97,10 @@
     "sshKeys": "SSH-Keys",
     "noKeys": "Noch kein Key gespeichert.",
     "submit": "VM erstellen",
-    "networks": "Netzwerke"
+    "networks": "Netzwerke",
+    "networksHint": "VMs im selben Netzwerk erreichen sich als NAME.NETZWERK.internal.",
+    "network": "Netzwerk",
+    "removeNetwork": "Netzwerk entfernen"
   },
   "keys": {
     "add": "Key hinzufügen",
