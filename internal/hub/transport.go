@@ -26,9 +26,9 @@ func (n *yamuxNode) Send(m proto.Message) error {
 }
 
 // NodeHandler accepts node connections: WebSocket → yamux, first node-opened stream is the control stream.
-func NodeHandler(r *Registry, token string) http.Handler {
+func NodeHandler(r *Registry, token func() string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Authorization") != "Bearer "+token {
+		if req.Header.Get("Authorization") != "Bearer "+token() {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

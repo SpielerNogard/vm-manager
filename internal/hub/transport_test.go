@@ -65,8 +65,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 func startHub(t *testing.T) (*Registry, *httptest.Server) {
 	t.Helper()
-	r := NewRegistry(newTestNet(t), newTestStore(t), Config{})
-	srv := httptest.NewServer(NodeHandler(r, testToken))
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, Config{}))
+	srv := httptest.NewServer(NodeHandler(r, func() string { return testToken }))
 	t.Cleanup(srv.Close)
 	return r, srv
 }

@@ -50,7 +50,7 @@ type GatewayStatus struct {
 
 func (r *Registry) GatewayState() GatewayState {
 	underlay, clients := r.net.GatewayKeys()
-	st := GatewayState{UnderlayKey: underlay, ClientsKey: clients, GuestMTU: r.cfg.GuestMTU,
+	st := GatewayState{UnderlayKey: underlay, ClientsKey: clients, GuestMTU: r.cfg.Get().GuestMTU,
 		Chassis: r.net.Chassis(), Devices: []DevicePeer{}, Networks: []GatewayNetwork{}, Ports: []GatewayPort{}}
 	for _, d := range r.net.Devices() {
 		st.Devices = append(st.Devices, DevicePeer{PublicKey: d.PublicKey, IP: d.IP})

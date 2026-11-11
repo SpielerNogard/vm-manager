@@ -122,12 +122,12 @@ type Registry struct {
 	vms   map[string]*VM
 	net   *NetModel
 	store *VMStore
-	cfg   Config
+	cfg   *ConfigStore
 	// sendMu (per node, kept across reconnects) orders desired lists so a node never receives an older one after a newer one.
 	sendMu map[string]*sync.Mutex
 }
 
-func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
+func NewRegistry(net *NetModel, store *VMStore, cfg *ConfigStore) *Registry {
 	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg, sendMu: map[string]*sync.Mutex{}}
 	for _, n := range store.Nodes() {
 		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine}}
@@ -210,7 +210,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 		log.Printf("hub underlay key: %v", err)
 		return nil, nil
 	}
-	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}, nil
+	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Get().Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}, nil
 }
 
 // NodeDisconnected ignores c if the node has already reconnected with a newer connection.

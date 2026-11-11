@@ -26,8 +26,9 @@ func testAPIConfig() Config {
 	return cfg
 }
 
-func apiServerWith(t *testing.T, cfg Config) (*httptest.Server, *Registry, *NetModel) {
+func apiServerWith(t *testing.T, c Config) (*httptest.Server, *Registry, *NetModel) {
 	t.Helper()
+	cfg := newTestConfig(t, c)
 	nm := newTestNet(t)
 	r := NewRegistry(nm, newTestStore(t), cfg)
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})

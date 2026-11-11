@@ -13,11 +13,11 @@ import (
 	"vm-manager/internal/proto"
 )
 
-func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Handler {
+func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) http.Handler {
 	mux := http.NewServeMux()
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
-		want := []byte("Bearer " + cfg.Token)
 		return func(w http.ResponseWriter, req *http.Request) {
+			want := []byte("Bearer " + cfg.Get().Token)
 			if subtle.ConstantTimeCompare([]byte(req.Header.Get("Authorization")), want) != 1 {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
@@ -108,7 +108,8 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 			return
 		}
-		if cfg.Clients.Endpoint == "" && !q.OnHub {
+		c := cfg.Get()
+		if c.Clients.Endpoint == "" && !q.OnHub {
 			writeError(w, fmt.Errorf("%w: set clients.endpoint in the hub config before adding devices", ErrConflict))
 			return
 		}
@@ -117,7 +118,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 			writeError(w, err)
 			return
 		}
-		conf, err := deviceConfig(r, d, cfg)
+		conf, err := deviceConfig(r, d, c)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -137,7 +138,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 			writeError(w, fmt.Errorf("%w: device", ErrNotFound))
 			return
 		}
-		conf, err := deviceConfig(r, net.Devices()[i], cfg)
+		conf, err := deviceConfig(r, net.Devices()[i], cfg.Get())
 		if err != nil {
 			writeError(w, err)
 			return

@@ -59,7 +59,7 @@ func newTestRegistry(t *testing.T) (*Registry, *fakeNode) {
 	t.Helper()
 	var cfg Config
 	cfg.Underlay.Port = 51820
-	r := NewRegistry(newTestNet(t), newTestStore(t), cfg)
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, cfg))
 	n := &fakeNode{}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n)
 	return r, n
@@ -181,7 +181,7 @@ func TestHubRestartRestoresVMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2 := NewRegistry(net, store, Config{})
+	r2 := NewRegistry(net, store, newTestConfig(t, Config{}))
 	byID := func() map[string]VM {
 		out := map[string]VM{}
 		for _, v := range r2.VMs() {
@@ -217,7 +217,7 @@ func TestCreateOnStoredOfflineNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2 := NewRegistry(newTestNet(t), store, Config{})
+	r2 := NewRegistry(newTestNet(t), store, newTestConfig(t, Config{}))
 	if _, err := r2.CreateVM(validReq()); err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestNewRegistryReleasesOrphanNICs(t *testing.T) {
 	if _, err := nm.AllocNICs("ghost", "x", nil); err != nil {
 		t.Fatal(err)
 	}
-	r := NewRegistry(nm, newTestStore(t), Config{})
+	r := NewRegistry(nm, newTestStore(t), newTestConfig(t, Config{}))
 	if len(nm.NICs("ghost")) != 0 {
 		t.Fatalf("NICs = %+v", nm.NICs("ghost"))
 	}
