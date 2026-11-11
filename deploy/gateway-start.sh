@@ -53,6 +53,8 @@ rule() { iptables -C "$@" 2>/dev/null || iptables -A "$@"; }
 rule INPUT -i wg-clients -d 10.201.0.1 -p udp --dport 53 -j ACCEPT
 rule INPUT -i wg-clients -d 10.201.0.1 -p tcp --dport 53 -j ACCEPT
 rule INPUT -i wg-clients -j DROP
+rule INPUT -i gw0 -s 10.200.0.0/16 -d 10.201.0.1 -p udp --dport 53 -j ACCEPT
+rule INPUT -i gw0 -s 10.200.0.0/16 -d 10.201.0.1 -p tcp --dport 53 -j ACCEPT
 rule INPUT -i gw0 -j DROP
 rule FORWARD -i wg-clients ! -o gw0 -j DROP
 # VMs may only answer device connections, never open their own
