@@ -37,7 +37,16 @@ make stack                           # docker compose -f deploy/compose.yaml up 
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
 | `HUB_SSH_DIR` | `~/.ssh` | Directory with the default SSH public keys offered as hub keys |
 
-The hub config lives in the `data` volume as `/data/hub.json`, written by the gateway on first start. To run the hub without the stack, copy `hub.example.json` to `~/.vm-manager/hub.json` and start `./bin/hub`. Without the gateway container, VMs get no network.
+The hub config lives in the `data` volume as `/data/hub.json`, written by the gateway on first start from these variables. Editing `.env` later does not change it. To change hub settings afterwards (`guestMTU`, `clients.endpoint`, ports), copy the file out, edit it and copy it back (the gateway image has no editor), then restart the hub:
+
+```sh
+docker compose -f deploy/compose.yaml cp gateway:/data/hub.json hub.json
+$EDITOR hub.json
+docker compose -f deploy/compose.yaml cp hub.json gateway:/data/hub.json
+docker compose -f deploy/compose.yaml restart hub
+```
+
+Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at `CLIENTS_ENDPOINT`. To run the hub without the stack, copy `hub.example.json` to `~/.vm-manager/hub.json` and start `./bin/hub`. Without the gateway container, VMs get no network.
 
 Node (config defaults to `~/.vm-manager/node.json`):
 
@@ -46,7 +55,7 @@ cp node.example.json ~/.vm-manager/node.json  # set hub.url, the same token, pat
 ./bin/node
 ```
 
-A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to the host:port of the hub's underlay WireGuard port. Behind Tailscale also set `underlay.mtu` to 1200 and the hub's `guestMTU` to 1140 or less.
+Set `hub.url` to `ws://<hub>:<HUB_PORT>/api/nodes/connect`. A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to `<host>:<UNDERLAY_PORT>`, using the published host port. By default the node uses the host of `hub.url` and the hub's `underlay.port`. Behind Tailscale also set `underlay.mtu` to 1200 and the hub's `guestMTU` to 1140 or less (edit `/data/hub.json` as above).
 
 Open `http://<hub>:8080`, add your SSH public key under **SSH-Keys** (the hub's own default keys are already there), then pick a node and create a VM. You can also use the API:
 
