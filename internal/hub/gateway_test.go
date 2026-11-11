@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +63,37 @@ func TestDeviceConfig(t *testing.T) {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config lacks %q:\n%s", want, cfg)
 		}
+	}
+}
+
+func TestGatewayStateKeepsPortsAfterHubRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.json")
+	m1, err := LoadNetModel(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1 := NewRegistry(m1, Config{})
+	r1.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})
+	vm, err := r1.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	adopted := proto.VMSpec{ID: "vm2", Name: "db", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.77", MAC: nicMAC("10.200.0.77"), Port: "vm2-mgmt"}}}
+	r1.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, VMs: []proto.VMRecord{
+		{Spec: vm.VMSpec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning}},
+		{Spec: adopted, Status: proto.VMStatus{ID: "vm2", State: proto.StateRunning}},
+	}}, &fakeNode{})
+
+	m2, err := LoadNetModel(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := NewRegistry(m2, Config{}).GatewayState()
+	want := []GatewayPort{
+		{Name: "vm2-mgmt", MAC: "02:0a:c8:00:00:4d", IP: "10.200.0.77", Hostname: "db.mgmt.internal"},
+		{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal"},
+	}
+	if !slices.Equal(st.Ports, want) {
+		t.Fatalf("ports = %+v, want %+v", st.Ports, want)
 	}
 }

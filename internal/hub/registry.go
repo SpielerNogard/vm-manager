@@ -147,7 +147,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 		vm.adoptError = ""
 		if nics := r.net.NICs(id); len(nics) > 0 {
 			vm.NICs = nics
-		} else if err := r.net.AdoptNICs(id, rec.Spec.NICs); err != nil {
+		} else if err := r.net.AdoptNICs(id, rec.Spec.Name, rec.Spec.NICs); err != nil {
 			vm.NICs = nil
 			vm.adoptError = adoptErrorText(rec.Spec.NICs, err)
 			vm.State, vm.Error = proto.StateError, vm.adoptError
@@ -186,7 +186,7 @@ func adoptErrorText(nics []proto.NIC, err error) string {
 		ip = nics[0].IP
 	}
 	if errors.Is(err, ErrInvalid) {
-		return fmt.Sprintf("invalid mgmt IP %q", ip)
+		return strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
 	}
 	if errors.Is(err, ErrConflict) {
 		return fmt.Sprintf("mgmt IP %s already in use", ip)
@@ -236,7 +236,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 		return VM{}, fmt.Errorf("%w: node %q has %d CPUs / %d MB free", ErrConflict, n.ID, freeCPU, freeMem)
 	}
 	id := newID()
-	nics, err := r.net.AllocNICs(id)
+	nics, err := r.net.AllocNICs(id, req.Name)
 	if err != nil {
 		r.mu.Unlock()
 		return VM{}, err

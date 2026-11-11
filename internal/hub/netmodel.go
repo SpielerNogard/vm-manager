@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -45,8 +46,10 @@ type netState struct {
 	UnderlayKey string                 `json:"underlayKey"`
 	ClientsKey  string                 `json:"clientsKey"`
 	NICs        map[string][]proto.NIC `json:"nics"`
-	Chassis     []Chassis              `json:"chassis"`
-	Devices     []Device               `json:"devices"`
+	// Names lets the gateway state (and DNS) be rebuilt after a hub restart before nodes re-register.
+	Names   map[string]string `json:"names"`
+	Chassis []Chassis         `json:"chassis"`
+	Devices []Device          `json:"devices"`
 }
 
 // NetModel owns the hub's address allocations and gateway keys and persists them to a JSON file.
@@ -57,7 +60,7 @@ type NetModel struct {
 }
 
 func LoadNetModel(path string) (*NetModel, error) {
-	m := &NetModel{path: path, st: netState{NICs: map[string][]proto.NIC{}}}
+	m := &NetModel{path: path, st: netState{NICs: map[string][]proto.NIC{}, Names: map[string]string{}}}
 	b, err := os.ReadFile(path)
 	switch {
 	case err == nil:
@@ -66,6 +69,9 @@ func LoadNetModel(path string) (*NetModel, error) {
 		}
 		if m.st.NICs == nil {
 			m.st.NICs = map[string][]proto.NIC{}
+		}
+		if m.st.Names == nil {
+			m.st.Names = map[string]string{}
 		}
 		if m.st.UnderlayKey != "" && m.st.ClientsKey != "" {
 			return m, nil
@@ -96,6 +102,7 @@ func (m *NetModel) mutate(f func(st *netState) error) error {
 	next := netState{
 		UnderlayKey: m.st.UnderlayKey, ClientsKey: m.st.ClientsKey,
 		NICs:    make(map[string][]proto.NIC, len(m.st.NICs)),
+		Names:   maps.Clone(m.st.Names),
 		Chassis: slices.Clone(m.st.Chassis), Devices: slices.Clone(m.st.Devices),
 	}
 	for id, n := range m.st.NICs {
@@ -154,7 +161,7 @@ func mgmtIPOwner(st *netState, ip string) string {
 	return ""
 }
 
-func (m *NetModel) AllocNICs(vmID string) ([]proto.NIC, error) {
+func (m *NetModel) AllocNICs(vmID, name string) ([]proto.NIC, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []proto.NIC
@@ -164,7 +171,7 @@ func (m *NetModel) AllocNICs(vmID string) ([]proto.NIC, error) {
 			return err
 		}
 		out = []proto.NIC{{Network: mgmtNetwork, IP: ip, MAC: nicMAC(ip), Port: vmID + "-mgmt"}}
-		st.NICs[vmID] = out
+		st.NICs[vmID], st.Names[vmID] = out, name
 		return nil
 	})
 	return out, err
@@ -175,19 +182,29 @@ func validMgmtIP(ip string) bool {
 	return err == nil && a.Is4() && a.Compare(netip.MustParseAddr(mgmtFirst)) >= 0 && a.Compare(netip.MustParseAddr(mgmtLast)) <= 0
 }
 
-func (m *NetModel) AdoptNICs(vmID string, nics []proto.NIC) error {
+func (m *NetModel) AdoptNICs(vmID, name string, nics []proto.NIC) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.mutate(func(st *netState) error {
+		if len(nics) > 1 {
+			return fmt.Errorf("%w: %d NICs, at most one is supported", ErrInvalid, len(nics))
+		}
 		for _, n := range nics {
-			if !validMgmtIP(n.IP) {
-				return fmt.Errorf("%w: invalid mgmt address %q", ErrInvalid, n.IP)
+			switch {
+			case !validMgmtIP(n.IP):
+				return fmt.Errorf("%w: invalid mgmt IP %q", ErrInvalid, n.IP)
+			case n.Network != mgmtNetwork:
+				return fmt.Errorf("%w: unknown network %q", ErrInvalid, n.Network)
+			case n.Port != vmID+"-mgmt":
+				return fmt.Errorf("%w: port %q does not match the VM", ErrInvalid, n.Port)
+			case n.MAC != nicMAC(n.IP):
+				return fmt.Errorf("%w: MAC %q does not match IP %s", ErrInvalid, n.MAC, n.IP)
 			}
 			if owner := mgmtIPOwner(st, n.IP); owner != "" && owner != vmID {
 				return fmt.Errorf("%w: address %s belongs to VM %q", ErrConflict, n.IP, owner)
 			}
 		}
-		st.NICs[vmID] = slices.Clone(nics)
+		st.NICs[vmID], st.Names[vmID] = slices.Clone(nics), name
 		return nil
 	})
 }
@@ -208,6 +225,13 @@ func (m *NetModel) AllNICs() map[string][]proto.NIC {
 	return out
 }
 
+// Names maps VM IDs to the VM names stored with their NICs.
+func (m *NetModel) Names() map[string]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return maps.Clone(m.st.Names)
+}
+
 func (m *NetModel) Release(vmID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -216,6 +240,7 @@ func (m *NetModel) Release(vmID string) error {
 	}
 	return m.mutate(func(st *netState) error {
 		delete(st.NICs, vmID)
+		delete(st.Names, vmID)
 		return nil
 	})
 }

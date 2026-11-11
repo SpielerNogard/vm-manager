@@ -46,22 +46,26 @@ func (r *Registry) GatewayState() GatewayState {
 	for _, d := range r.net.Devices() {
 		st.Devices = append(st.Devices, DevicePeer{PublicKey: d.PublicKey, IP: d.IP})
 	}
+	// ports come from the persisted model so a hub restart does not drop LSPs of VMs whose node has not re-registered yet
+	nics, names := r.net.AllNICs(), r.net.Names()
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	type namedPort struct {
-		name string
-		GatewayPort
+	for id, vm := range r.vms {
+		names[id] = vm.Name
 	}
-	var ports []namedPort
-	for _, vm := range r.vms {
-		for _, n := range vm.NICs {
-			ports = append(ports, namedPort{vm.Name, GatewayPort{Name: n.Port, MAC: n.MAC, IP: n.IP, Hostname: vm.Name + ".mgmt.internal"}})
+	r.mu.Unlock()
+	for id, list := range nics {
+		hostname := ""
+		if names[id] != "" {
+			hostname = names[id] + ".mgmt.internal"
+		}
+		for _, n := range list {
+			st.Ports = append(st.Ports, GatewayPort{Name: n.Port, MAC: n.MAC, IP: n.IP, Hostname: hostname})
 		}
 	}
-	sort.Slice(ports, func(i, j int) bool { return ports[i].name < ports[j].name })
-	for _, p := range ports {
-		st.Ports = append(st.Ports, p.GatewayPort)
-	}
+	sort.Slice(st.Ports, func(i, j int) bool {
+		a, b := st.Ports[i], st.Ports[j]
+		return a.Hostname < b.Hostname || a.Hostname == b.Hostname && a.Name < b.Name
+	})
 	return st
 }
 

@@ -268,7 +268,15 @@ func TestReRegisterKnownVMKeepsHubNIC(t *testing.T) {
 }
 
 func reportUnknown(r *Registry, id, ip string) {
-	spec := proto.VMSpec{ID: id, Name: id, NICs: []proto.NIC{{Network: "mgmt", IP: ip, MAC: nicMAC("10.200.0.10"), Port: id + "-mgmt"}}}
+	mac := ""
+	if validMgmtIP(ip) {
+		mac = nicMAC(ip)
+	}
+	reportUnknownNICs(r, id, []proto.NIC{{Network: "mgmt", IP: ip, MAC: mac, Port: id + "-mgmt"}})
+}
+
+func reportUnknownNICs(r *Registry, id string, nics []proto.NIC) {
+	spec := proto.VMSpec{ID: id, Name: id, NICs: nics}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
 		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: id, State: proto.StateRunning}}}}, &fakeNode{})
 }
@@ -277,7 +285,7 @@ func TestAdoptUnknownVMWithTakenIPMarksError(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm1, _ := r.CreateVM(validReq())
 	spec1 := vm1.VMSpec
-	spec2 := proto.VMSpec{ID: "vm2", Name: "vm2", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", Port: "vm2-mgmt"}}}
+	spec2 := proto.VMSpec{ID: "vm2", Name: "vm2", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", MAC: nicMAC("10.200.0.10"), Port: "vm2-mgmt"}}}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, VMs: []proto.VMRecord{
 		{Spec: spec1, Status: proto.VMStatus{ID: vm1.ID, State: proto.StateRunning}},
 		{Spec: spec2, Status: proto.VMStatus{ID: "vm2", State: proto.StateRunning}},
@@ -304,6 +312,29 @@ func TestAdoptUnknownVMWithInvalidIPMarksError(t *testing.T) {
 		}
 		if len(r.net.NICs("vm2")) != 0 {
 			t.Fatalf("ip %s: adopted", ip)
+		}
+	}
+}
+
+func TestAdoptUnknownVMWithBadNICMarksError(t *testing.T) {
+	good := proto.NIC{Network: "mgmt", IP: "10.200.0.77", MAC: nicMAC("10.200.0.77"), Port: "vm2-mgmt"}
+	with := func(f func(n *proto.NIC)) []proto.NIC { n := good; f(&n); return []proto.NIC{n} }
+	cases := map[string][]proto.NIC{
+		"network":      with(func(n *proto.NIC) { n.Network = "lan" }),
+		"foreign port": with(func(n *proto.NIC) { n.Port = "vm1-mgmt" }),
+		"bad port":     with(func(n *proto.NIC) { n.Port = "x;y" }),
+		"mac":          with(func(n *proto.NIC) { n.MAC = "02:0a:c8:00:00:0a" }),
+		"bad mac":      with(func(n *proto.NIC) { n.MAC = "zz" }),
+		"two nics":     {good, {Network: "mgmt", IP: "10.200.0.78", MAC: nicMAC("10.200.0.78"), Port: "vm2-mgmt"}},
+	}
+	for name, nics := range cases {
+		r, _ := newTestRegistry(t)
+		reportUnknownNICs(r, "vm2", nics)
+		if v := r.VMs()[0]; v.State != proto.StateError || v.Error == "" || len(v.NICs) != 0 {
+			t.Errorf("%s: vm = %+v", name, v)
+		}
+		if len(r.net.NICs("vm2")) != 0 {
+			t.Errorf("%s: adopted", name)
 		}
 	}
 }
@@ -337,7 +368,7 @@ func TestHubRestartKeepsStoredNIC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored, err := m1.AllocNICs("vm1")
+	stored, err := m1.AllocNICs("vm1", "vm1")
 	if err != nil {
 		t.Fatal(err)
 	}

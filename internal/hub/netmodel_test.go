@@ -23,7 +23,7 @@ func newModel(t *testing.T) (*NetModel, string) {
 
 func TestNetModelAllocNICs(t *testing.T) {
 	m, _ := newModel(t)
-	n1, err := m.AllocNICs("vm1")
+	n1, err := m.AllocNICs("vm1", "vm1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestNetModelAllocNICs(t *testing.T) {
 	if !reflect.DeepEqual(n1, want) {
 		t.Fatalf("got %+v, want %+v", n1, want)
 	}
-	n2, _ := m.AllocNICs("vm2")
+	n2, _ := m.AllocNICs("vm2", "vm2")
 	if n2[0].IP != "10.200.0.11" {
 		t.Fatalf("second IP = %s", n2[0].IP)
 	}
@@ -39,7 +39,7 @@ func TestNetModelAllocNICs(t *testing.T) {
 
 func TestNetModelReloadKeepsAllocations(t *testing.T) {
 	m, path := newModel(t)
-	nics, _ := m.AllocNICs("vm1")
+	nics, _ := m.AllocNICs("vm1", "vm1")
 	ch, _ := m.Enroll("nodeA", "keyA")
 	dev, err := m.AddDevice("laptop")
 	if err != nil {
@@ -71,15 +71,15 @@ func TestNetModelReloadKeepsAllocations(t *testing.T) {
 
 func TestNetModelReleaseFreesIP(t *testing.T) {
 	m, _ := newModel(t)
-	m.AllocNICs("vm1")
-	m.AllocNICs("vm2")
+	m.AllocNICs("vm1", "vm1")
+	m.AllocNICs("vm2", "vm2")
 	if err := m.Release("vm1"); err != nil {
 		t.Fatal(err)
 	}
 	if len(m.NICs("vm1")) != 0 || len(m.AllNICs()) != 1 {
 		t.Fatal("vm1 NICs not released")
 	}
-	n, _ := m.AllocNICs("vm3")
+	n, _ := m.AllocNICs("vm3", "vm3")
 	if n[0].IP != "10.200.0.10" {
 		t.Fatalf("IP = %s, want reuse of 10.200.0.10", n[0].IP)
 	}
@@ -87,18 +87,18 @@ func TestNetModelReleaseFreesIP(t *testing.T) {
 
 func TestNetModelAdoptConflict(t *testing.T) {
 	m, _ := newModel(t)
-	m.AllocNICs("vm1")
-	err := m.AdoptNICs("vm2", []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", Port: "vm2-mgmt"}})
+	m.AllocNICs("vm1", "vm1")
+	err := m.AdoptNICs("vm2", "vm2", []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", MAC: nicMAC("10.200.0.10"), Port: "vm2-mgmt"}})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
 	}
-	if err := m.AdoptNICs("vm1", m.NICs("vm1")); err != nil {
+	if err := m.AdoptNICs("vm1", "vm1", m.NICs("vm1")); err != nil {
 		t.Fatalf("re-adopting own NICs: %v", err)
 	}
-	if err := m.AdoptNICs("vm2", []proto.NIC{{Network: "mgmt", IP: "10.200.0.30", Port: "vm2-mgmt"}}); err != nil {
+	if err := m.AdoptNICs("vm2", "vm2", []proto.NIC{{Network: "mgmt", IP: "10.200.0.30", MAC: nicMAC("10.200.0.30"), Port: "vm2-mgmt"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := m.AllocNICs("vm3")
+	n, _ := m.AllocNICs("vm3", "vm3")
 	if n[0].IP != "10.200.0.11" {
 		t.Fatalf("IP = %s", n[0].IP)
 	}
