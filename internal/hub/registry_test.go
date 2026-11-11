@@ -330,3 +330,41 @@ func TestNodeConnectedEnrollsChassisAndSendsUnderlay(t *testing.T) {
 		t.Fatalf("chassis = %+v", ch)
 	}
 }
+
+func TestHubRestartKeepsStoredNIC(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network.json")
+	m1, err := LoadNetModel(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := m1.AllocNICs("vm1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2, err := LoadNetModel(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegistry(m2, Config{})
+	spec := proto.VMSpec{ID: "vm1", Name: "vm1", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.99", MAC: nicMAC("10.200.0.99"), Port: "vm1-mgmt"}}}
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: "vm1", State: proto.StateRunning}}}}, &fakeNode{})
+	got := r.VMs()[0].NICs
+	if len(got) != 1 || got[0] != stored[0] {
+		t.Fatalf("nics = %+v, want %+v", got, stored)
+	}
+	if n := m2.NICs("vm1"); len(n) != 1 || n[0].IP != "10.200.0.10" {
+		t.Fatalf("netmodel = %+v", n)
+	}
+}
+
+func TestAdoptionErrorSurvivesStatusUpdate(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	reportUnknown(r, "vm2", "10.200.0.5")
+	before := r.VMs()[0]
+	r.UpdateStatus(proto.VMStatus{ID: "vm2", State: proto.StateRunning})
+	after := r.VMs()[0]
+	if after.State != proto.StateError || after.Error != before.Error || after.Error == "" {
+		t.Fatalf("after = %+v", after)
+	}
+}

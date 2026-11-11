@@ -80,6 +80,8 @@ type VM struct {
 	State    proto.VMState `json:"state"`
 	IP       string        `json:"ip,omitempty"`
 	Error    string        `json:"error,omitempty"`
+	// adoptError pins State to error until the VM is adopted successfully on a later register.
+	adoptError string
 }
 
 type CreateVMRequest struct {
@@ -142,11 +144,13 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 		}
 		vm.Provider = reg.Provider
 		vm.State, vm.IP, vm.Error = rec.Status.State, rec.Status.IP, rec.Status.Error
+		vm.adoptError = ""
 		if nics := r.net.NICs(id); len(nics) > 0 {
 			vm.NICs = nics
 		} else if err := r.net.AdoptNICs(id, rec.Spec.NICs); err != nil {
 			vm.NICs = nil
-			vm.State, vm.Error = proto.StateError, adoptError(rec.Spec.NICs, err)
+			vm.adoptError = adoptErrorText(rec.Spec.NICs, err)
+			vm.State, vm.Error = proto.StateError, vm.adoptError
 		} else {
 			vm.NICs = rec.Spec.NICs
 		}
@@ -176,7 +180,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}
 }
 
-func adoptError(nics []proto.NIC, err error) string {
+func adoptErrorText(nics []proto.NIC, err error) string {
 	ip := ""
 	if len(nics) > 0 {
 		ip = nics[0].IP
@@ -249,7 +253,9 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	if err := conn.Send(proto.Message{Type: "create", Create: &spec}); err != nil {
 		r.mu.Lock()
 		delete(r.vms, id)
-		r.net.Release(id)
+		if err := r.net.Release(id); err != nil {
+			log.Printf("releasing NICs of %s: %v", id, err)
+		}
 		r.mu.Unlock()
 		return VM{}, fmt.Errorf("%w: sending to node: %v", ErrConflict, err)
 	}
@@ -280,7 +286,7 @@ func (r *Registry) DeleteVM(id string) error {
 func (r *Registry) UpdateStatus(st proto.VMStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if vm, ok := r.vms[st.ID]; ok {
+	if vm, ok := r.vms[st.ID]; ok && vm.adoptError == "" {
 		vm.State, vm.IP, vm.Error = st.State, st.IP, st.Error
 	}
 }
