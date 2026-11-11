@@ -39,6 +39,12 @@ type Agent struct {
 	UnderlayEndpoint              string // host:port override of the hub's underlay address
 	UnderlayMTU                   int
 
+	chassisMu       sync.Mutex
+	chassisPending  *Chassis // newest config not yet applied; older ones are superseded
+	chassisRunning  bool
+	chassisStopping bool
+	chassisWG       sync.WaitGroup
+
 	mu   sync.Mutex
 	vms  map[string]*vmEntry
 	send func(proto.Message) error // nil while disconnected
@@ -155,13 +161,34 @@ func (a *Agent) startChassis(ctx context.Context, u proto.Underlay) {
 	if mtu == 0 {
 		mtu = defaultUnderlayMTU
 	}
-	err := a.Provider.StartChassis(ctx, Chassis{
+	c := Chassis{
 		Name: a.NodeID, PrivateKey: a.ChassisPrivateKey, Address: u.Address, HubKey: u.HubKey,
 		Endpoint: endpoint, SBRemote: u.SBRemote, MTU: mtu,
-	})
-	if err != nil {
-		log.Printf("chassis: %v", err)
 	}
+	a.chassisMu.Lock()
+	if a.chassisStopping {
+		a.chassisMu.Unlock()
+		return
+	}
+	a.chassisPending = &c
+	if a.chassisRunning {
+		a.chassisMu.Unlock()
+		return
+	}
+	a.chassisRunning = true
+	a.chassisWG.Add(1)
+	defer a.chassisWG.Done()
+	for a.chassisPending != nil {
+		next := *a.chassisPending
+		a.chassisPending = nil
+		a.chassisMu.Unlock()
+		if err := a.Provider.StartChassis(ctx, next); err != nil {
+			log.Printf("chassis: %v", err)
+		}
+		a.chassisMu.Lock()
+	}
+	a.chassisRunning = false
+	a.chassisMu.Unlock()
 }
 
 func (a *Agent) registerMsg() *proto.Register {
@@ -266,6 +293,10 @@ func (a *Agent) stopAll() {
 		}()
 	}
 	wg.Wait()
+	a.chassisMu.Lock()
+	a.chassisStopping = true
+	a.chassisMu.Unlock()
+	a.chassisWG.Wait()
 	if err := a.Provider.StopChassis(); err != nil {
 		log.Printf("stop chassis: %v", err)
 	}

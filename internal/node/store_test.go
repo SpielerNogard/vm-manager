@@ -47,3 +47,15 @@ func TestLoadVMsMissingDir(t *testing.T) {
 		t.Fatalf("got %v err %v", got, err)
 	}
 }
+
+func TestLoadVMsSkipsFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "chassis.key"), []byte("k"), 0o600)
+	if err := SaveVM(dir, VMFile{Spec: proto.VMSpec{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadVMs(dir)
+	if err != nil || len(got) != 1 || got[0].Spec.ID != "a" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
