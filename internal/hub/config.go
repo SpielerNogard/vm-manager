@@ -51,15 +51,18 @@ func LoadOrCreateConfig(path string, getenv func(string) string) (*ConfigStore, 
 		return nil, err
 	default:
 		if err := json.Unmarshal(b, &c); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, invalidConfigErr(path, err)
 		}
 		if c.Token == "" {
-			return nil, errors.New("config: token is required")
+			return nil, invalidConfigErr(path, errors.New("token is required"))
 		}
 	}
 	if c.Hub.Port == 0 {
+		c.Hub.Port = 8080
 		if _, p, err := net.SplitHostPort(c.Listen); err == nil {
-			c.Hub.Port, _ = strconv.Atoi(p)
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				c.Hub.Port = n
+			}
 		}
 		changed = true
 	}
@@ -85,6 +88,10 @@ func LoadOrCreateConfig(path string, getenv func(string) string) (*ConfigStore, 
 		}
 	}
 	return &ConfigStore{path: path, cfg: c}, nil
+}
+
+func invalidConfigErr(path string, err error) error {
+	return fmt.Errorf("hub.json at %s is invalid (%w); fix or delete it to have a new one created", path, err)
 }
 
 func newToken() (string, error) {

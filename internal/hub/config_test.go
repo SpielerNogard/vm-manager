@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, content string) string {
@@ -78,8 +79,10 @@ func TestLoadOrCreateConfigEnvPorts(t *testing.T) {
 	if c := s.Get(); c.Underlay.Port != 52820 || c.Clients.Port != 52821 {
 		t.Errorf("config = %+v", c)
 	}
-	if _, err := LoadOrCreateConfig(p, envOf(map[string]string{"HUB_PORT": "abc"})); err == nil || !strings.Contains(err.Error(), "HUB_PORT") {
-		t.Errorf("invalid HUB_PORT: err = %v", err)
+	for _, v := range []string{"abc", "0", "65536"} {
+		if _, err := LoadOrCreateConfig(p, envOf(map[string]string{"HUB_PORT": v})); err == nil || !strings.Contains(err.Error(), "HUB_PORT") {
+			t.Errorf("HUB_PORT=%s: err = %v", v, err)
+		}
 	}
 }
 
@@ -93,10 +96,42 @@ func TestLoadOrCreateConfigBareHubPort(t *testing.T) {
 	}
 }
 
+func TestLoadOrCreateConfigBareHubPortWrittenBack(t *testing.T) {
+	p := writeFile(t, `{"listen":":9090","token":"t"}`)
+	if _, err := LoadOrCreateConfig(p, envOf(nil)); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), "9090") || !strings.Contains(string(b), `"hub"`) {
+		t.Errorf("file = %s", b)
+	}
+}
+
+func TestLoadOrCreateConfigNoPortInListenDefaultsAndSettles(t *testing.T) {
+	p := writeFile(t, `{"listen":"localhost","token":"t"}`)
+	s, err := LoadOrCreateConfig(p, envOf(nil))
+	if err != nil || s.Get().Hub.Port != 8080 {
+		t.Fatalf("config = %+v, %v", s.Get(), err)
+	}
+	first, _ := os.Stat(p)
+	if err := os.Chtimes(p, first.ModTime().Add(-time.Hour), first.ModTime().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(p)
+	if _, err := LoadOrCreateConfig(p, envOf(nil)); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.Stat(p)
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("config rewritten on second start")
+	}
+}
+
 func TestLoadOrCreateConfigErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ body, want string }{
 		"missing token": {`{}`, "token"},
-		"bad json":      {`{`, "hub.json"},
+		"bad json":      {`{`, "fix or delete it"},
+		"empty file":    {``, "fix or delete it"},
 	} {
 		_, err := LoadOrCreateConfig(writeFile(t, tc.body), envOf(nil))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -125,6 +160,9 @@ func TestConfigStoreUpdateAtomic(t *testing.T) {
 		t.Errorf("failing f: err = %v, config = %+v", err, s.Get())
 	}
 
+	if os.Getuid() == 0 {
+		return
+	}
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
