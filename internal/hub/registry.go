@@ -141,6 +141,15 @@ func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
 		}
 		r.vms[s.Spec.ID] = vm
 	}
+	// NICs without a VM (deleted pre-upgrade, or a crash between AllocNICs and PutVM) would keep OVN ports and duplicate DNS names.
+	for id := range net.AllNICs() {
+		if _, ok := r.vms[id]; ok {
+			continue
+		}
+		if err := net.Release(id); err != nil {
+			log.Printf("releasing orphan NICs of %s: %v", id, err)
+		}
+	}
 	return r
 }
 

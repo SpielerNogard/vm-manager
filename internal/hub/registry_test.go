@@ -730,3 +730,22 @@ func TestDeleteNetworkAfterDetachOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNewRegistryReleasesOrphanNICs(t *testing.T) {
+	nm := newTestNet(t)
+	if _, err := nm.AllocNICs("ghost", "x", nil); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegistry(nm, newTestStore(t), Config{})
+	if len(nm.NICs("ghost")) != 0 {
+		t.Fatalf("NICs = %+v", nm.NICs("ghost"))
+	}
+	if _, ok := nm.Names()["ghost"]; ok {
+		t.Fatal("name kept")
+	}
+	for _, p := range r.GatewayState().Ports {
+		if p.Name == "ghost-mgmt" {
+			t.Fatalf("orphan port %+v", p)
+		}
+	}
+}
