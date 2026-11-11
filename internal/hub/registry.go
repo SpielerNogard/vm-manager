@@ -247,6 +247,9 @@ func (r *Registry) CreateNode(id string) (Node, error) {
 	if !nameRe.MatchString(id) {
 		return Node{}, fmt.Errorf("%w: id must match %s", ErrInvalid, nameRe)
 	}
+	if id == "connect" {
+		return Node{}, fmt.Errorf("%w: name \"connect\" is reserved", ErrInvalid)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.nodes[id]; ok {
