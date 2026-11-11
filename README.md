@@ -134,6 +134,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 |---|---|---|
 | GET | `/api/nodes` | Nodes with provider, capacity, online state, machine info, chassis state, and their config file without the hub token |
 | GET | `/api/vms` | VMs with state, desired power and IP |
+| GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |
 | POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`, optional `networkIds`). Also works for an offline node: the VM shows `pending` until the node connects |
 | DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
 | PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`, required; `[]` detaches all). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
@@ -144,6 +145,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
 | GET | `/api/networks` | Networks with subnet and members (VM IDs), management network first, marked builtin |
+| GET | `/api/networks/{id}` | One network, same fields as in the list (`mgmt` included); 404 if unknown |
 | POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
 | DELETE | `/api/networks/{id}` | Delete a network. 409 while it has members; the management network cannot be deleted |
 | GET | `/api/devices` | Client devices |

@@ -371,3 +371,47 @@ func TestAPIPowerEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIGetVM(t *testing.T) {
+	srv := apiServer(t)
+	_, vm := postVM(t, srv, validBody)
+	s, body := doJSON(t, "GET", srv.URL+"/api/vms/"+vm["id"].(string), "")
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	if s != http.StatusOK || got["id"] != vm["id"] || got["name"] != "dev" || got["state"] != "pending" {
+		t.Fatalf("status = %d body = %s", s, body)
+	}
+	if s, body := doJSON(t, "GET", srv.URL+"/api/vms/nope", ""); s != http.StatusNotFound {
+		t.Fatalf("unknown: status = %d body = %s", s, body)
+	}
+}
+
+func TestAPIGetNetwork(t *testing.T) {
+	srv, r, _ := apiServerWith(t, testAPIConfig())
+	_, body := doJSON(t, "POST", srv.URL+"/api/networks", `{"name":"a"}`)
+	var a Network
+	json.Unmarshal(body, &a)
+	q := validReq()
+	q.NetworkIDs = []string{a.ID}
+	vm, err := r.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, body := doJSON(t, "GET", srv.URL+"/api/networks/"+a.ID, "")
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	if s != http.StatusOK || got["name"] != "a" || got["subnet"] != "10.210.0.0/24" || got["builtin"] != false {
+		t.Fatalf("status = %d body = %s", s, body)
+	}
+	if m, _ := got["members"].([]any); len(m) != 1 || m[0] != vm.ID {
+		t.Fatalf("members = %v", got["members"])
+	}
+	s, body = doJSON(t, "GET", srv.URL+"/api/networks/mgmt", "")
+	json.Unmarshal(body, &got)
+	if s != http.StatusOK || got["builtin"] != true {
+		t.Fatalf("mgmt: status = %d body = %s", s, body)
+	}
+	if s, body := doJSON(t, "GET", srv.URL+"/api/networks/nope", ""); s != http.StatusNotFound {
+		t.Fatalf("unknown: status = %d body = %s", s, body)
+	}
+}
