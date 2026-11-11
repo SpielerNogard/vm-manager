@@ -92,7 +92,7 @@ func (a *Agent) restoreAll(ctx context.Context) error {
 		return err
 	}
 	for _, f := range files {
-		a.startVM(ctx, f, false)
+		a.startVM(ctx, f, f.NeedsPrepare)
 	}
 	return nil
 }
@@ -224,7 +224,7 @@ func (a *Agent) create(ctx context.Context, spec proto.VMSpec) {
 	if exists {
 		return
 	}
-	f := VMFile{Spec: spec, MAC: randomMAC()}
+	f := VMFile{Spec: spec, MAC: randomMAC(), NeedsPrepare: true}
 	if err := SaveVM(a.VMsDir, f); err != nil {
 		a.report(proto.VMStatus{ID: spec.ID, State: proto.StateError, Error: err.Error()})
 		return
@@ -258,6 +258,13 @@ func (a *Agent) boot(ctx context.Context, e *vmEntry, f VMFile, prepare bool) {
 		if err := a.Provider.Prepare(ctx, f, dir); err != nil {
 			fail("prepare", err)
 			return
+		}
+		a.mu.Lock()
+		e.file.NeedsPrepare = false
+		saved := e.file
+		a.mu.Unlock()
+		if err := SaveVM(a.VMsDir, saved); err != nil {
+			log.Printf("vm %s: save: %v", id, err)
 		}
 	}
 	if f.Power == proto.PowerStopped {

@@ -186,6 +186,29 @@ func TestReconcileStartsStopped(t *testing.T) {
 	}
 }
 
+func TestReconcileRetriesFailedPrepare(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	p.mu.Lock()
+	p.failPrepare["a"] = true
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	waitState(t, a, "a", proto.StateError, 1)
+	if f := loadVM(t, a, "a"); !f.NeedsPrepare {
+		t.Fatalf("vm.json = %+v, want NeedsPrepare after failed Prepare", f)
+	}
+	p.mu.Lock()
+	p.failPrepare["a"] = false
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
+	waitState(t, a, "a", proto.StateRunning, 2)
+	if got := p.gotPrepared(); len(got) != 2 {
+		t.Fatalf("prepared = %v, want twice", got)
+	}
+	if f := loadVM(t, a, "a"); f.NeedsPrepare {
+		t.Fatalf("vm.json = %+v, want prepared", f)
+	}
+}
+
 func TestReconcileSameGenerationNoop(t *testing.T) {
 	a, p := newReconcileAgent(t)
 	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})

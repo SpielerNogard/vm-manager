@@ -37,12 +37,15 @@ func (a *Agent) reconcile(ctx context.Context, desired []proto.DesiredVM) {
 	for _, d := range desired {
 		a.mu.Lock()
 		e, ok := a.vms[d.Spec.ID]
+		var gen uint64
+		if ok {
+			gen = e.file.Generation
+		}
 		a.mu.Unlock()
-		// e.file is only replaced under reconcileMu, so reading it here is safe.
 		switch {
-		case !ok || e.placeholder && !d.Provisioned && d.Generation > e.file.Generation:
+		case !ok || e.placeholder && !d.Provisioned && d.Generation > gen:
 			a.createDesired(ctx, d)
-		case d.Generation > e.file.Generation:
+		case d.Generation > gen:
 			a.updateDesired(ctx, e, d)
 		}
 	}
@@ -68,7 +71,7 @@ func (a *Agent) createDesired(ctx context.Context, d proto.DesiredVM) {
 		a.placeholder(d, proto.ErrVMDirMissing)
 		return
 	}
-	f := VMFile{Spec: d.Spec, MAC: randomMAC(), Power: d.Power, StopMode: d.StopMode, Generation: d.Generation}
+	f := VMFile{Spec: d.Spec, MAC: randomMAC(), Power: d.Power, StopMode: d.StopMode, Generation: d.Generation, NeedsPrepare: true}
 	if err := SaveVM(a.VMsDir, f); err != nil {
 		a.placeholder(d, err.Error())
 		return
@@ -91,17 +94,19 @@ func (a *Agent) placeholder(d proto.DesiredVM, msg string) {
 }
 
 func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM) {
-	f := e.file
-	f.Power, f.StopMode, f.Generation = d.Power, d.StopMode, d.Generation
 	if e.placeholder {
 		a.mu.Lock()
-		e.file = f
+		e.file.Power, e.file.StopMode, e.file.Generation = d.Power, d.StopMode, d.Generation
 		st := e.status
 		a.mu.Unlock()
 		a.report(st)
 		return
 	}
 	<-e.booted
+	a.mu.Lock()
+	f := e.file
+	a.mu.Unlock()
+	f.Power, f.StopMode, f.Generation = d.Power, d.StopMode, d.Generation
 	if err := SaveVM(a.VMsDir, f); err != nil {
 		log.Printf("vm %s: save: %v", f.Spec.ID, err)
 		return
@@ -121,7 +126,7 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	switch {
 	case f.Power != proto.PowerStopped && !live:
 		e.cancel()
-		a.startVM(ctx, f, false)
+		a.startVM(ctx, f, f.NeedsPrepare)
 	case f.Power == proto.PowerStopped && live:
 		e.stopRequested.Store(true)
 		stop := inst.Stop

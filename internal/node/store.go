@@ -18,6 +18,8 @@ type VMFile struct {
 	Power      proto.Power    `json:"power,omitempty"` // empty means running
 	StopMode   proto.StopMode `json:"stopMode,omitempty"`
 	Generation uint64         `json:"generation,omitempty"`
+	// NeedsPrepare is cleared once Prepare succeeds; inverted so vm.json files predating it count as prepared.
+	NeedsPrepare bool `json:"needsPrepare,omitempty"`
 }
 
 func VMDir(vmsDir, id string) string { return filepath.Join(vmsDir, id) }
