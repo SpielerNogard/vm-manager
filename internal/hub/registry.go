@@ -133,7 +133,7 @@ type Registry struct {
 	net   *NetModel
 	store *VMStore
 	cfg   *ConfigStore
-	// sendMu (per node, kept across reconnects) orders desired lists so a node never receives an older one after a newer one.
+	// sendMu (per node, kept across reconnects and node deletion so ordering survives re-registration) orders desired lists so a node never receives an older one after a newer one.
 	sendMu map[string]*sync.Mutex
 }
 
@@ -196,14 +196,18 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	if len(foreign) > 0 {
 		return nil, fmt.Errorf("reports VMs of other nodes: %s; was its nodeId or hostname changed?", strings.Join(foreign, ", "))
 	}
+	if err := r.store.PutNode(StoredNode{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs,
+		MemoryMB: reg.MemoryMB, Machine: reg.Machine}); err != nil {
+		// A pending node must not go online while the store still says pending; the node retries on reconnect.
+		if prev := r.nodes[reg.NodeID]; prev != nil && prev.State == NodePending {
+			return nil, fmt.Errorf("saving node: %w", err)
+		}
+		log.Printf("node %s: saving: %v", reg.NodeID, err)
+	}
 	r.nodes[reg.NodeID] = &nodeEntry{
 		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, State: NodeOnline,
 			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
 		conn: c,
-	}
-	if err := r.store.PutNode(StoredNode{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs,
-		MemoryMB: reg.MemoryMB, Machine: reg.Machine}); err != nil {
-		log.Printf("node %s: saving: %v", reg.NodeID, err)
 	}
 	for _, st := range reg.VMs {
 		if vm, ok := r.vms[st.ID]; ok && vm.NodeID == reg.NodeID {
@@ -277,11 +281,11 @@ func (r *Registry) DeleteNode(id string) error {
 			return fmt.Errorf("%w: node %q still has VMs", ErrConflict, id)
 		}
 	}
-	if err := r.net.ReleaseChassis(id); err != nil {
+	if err := r.store.DeleteNode(id); err != nil {
 		r.mu.Unlock()
 		return err
 	}
-	if err := r.store.DeleteNode(id); err != nil {
+	if err := r.net.ReleaseChassis(id); err != nil {
 		r.mu.Unlock()
 		return err
 	}

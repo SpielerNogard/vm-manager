@@ -3,6 +3,7 @@ package hub
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -925,4 +926,55 @@ func TestNodeConfig(t *testing.T) {
 	if _, err := r.NodeConfig("nope", ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestNodeConfigWithoutEndpointConflicts(t *testing.T) {
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, Config{Token: "t"}))
+	r.CreateNode("mac-x")
+	if _, err := r.NodeConfig("mac-x", ""); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDeleteNodeStoreFailureKeepsNodeAndChassis(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	if _, err := r.net.Enroll("n1", "k"); err != nil {
+		t.Fatal(err)
+	}
+	r.store.path = brokenStorePath(t)
+	if err := r.DeleteNode("n1"); err == nil {
+		t.Fatal("want error")
+	}
+	if _, ok := nodeByID(r, "n1"); !ok || len(r.net.Chassis()) != 1 {
+		t.Errorf("node or chassis lost: chassis = %v", r.net.Chassis())
+	}
+}
+
+func TestPendingNodeStoreFailureRefusesRegistration(t *testing.T) {
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, Config{}))
+	r.CreateNode("mac-x")
+	good := r.store.path
+	r.store.path = brokenStorePath(t)
+	if err := r.NodeConnected(proto.Register{NodeID: "mac-x"}, &fakeNode{}); err == nil {
+		t.Fatal("want error")
+	}
+	if n, _ := nodeByID(r, "mac-x"); n.State != NodePending {
+		t.Errorf("state = %s", n.State)
+	}
+	r.store.path = good
+	if err := r.NodeConnected(proto.Register{NodeID: "mac-x"}, &fakeNode{}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := nodeByID(r, "mac-x"); n.State != NodeOnline || r.store.Nodes()[0].Pending {
+		t.Errorf("node = %+v stored = %+v", n, r.store.Nodes())
+	}
+}
+
+func brokenStorePath(t *testing.T) string {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(f, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(f, "vms.json")
 }
