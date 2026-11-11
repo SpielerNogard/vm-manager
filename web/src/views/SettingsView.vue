@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { api, type Settings, type SettingsPatch } from '@/api'
@@ -30,15 +30,12 @@ function seed(s: Settings) {
   token.value = s.token
   mtu.value = s.guestMTU
 }
-const stop = watch(
-  settings,
-  (s) => {
-    if (!s) return
-    seed(s)
-    stop()
-  },
-  { immediate: true },
-)
+if (settings.value) seed(settings.value)
+const stop = watch(settings, (s) => {
+  if (!s) return
+  seed(s)
+  stop()
+})
 
 const tabs: Tab[] = ['networking', 'security', 'guests']
 const setupPending = computed(() => settings.value?.setupComplete === false)
@@ -69,7 +66,20 @@ function confirm() {
   else if (p === 'regenerate') void apply('security', () => api.regenerateToken())
 }
 
-const copyToken = () => navigator.clipboard?.writeText(token.value)
+const copied = ref(false)
+const tokenInput = ref<HTMLInputElement | null>(null)
+
+async function copyToken() {
+  try {
+    await navigator.clipboard.writeText(token.value)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    showToken.value = true
+    await nextTick()
+    tokenInput.value?.select()
+  }
+}
 
 const dialog = computed(() =>
   pending.value === 'endpoint'
@@ -95,13 +105,15 @@ watch(tab, () => {
     <DataState :loading="!settings" :empty="false" :empty-title="''">
       <div class="flex flex-col gap-6 md:flex-row">
         <ul class="menu menu-sm w-full gap-0.5 p-0 md:w-48 md:shrink-0" role="tablist">
-          <li v-for="id in tabs" :key="id">
+          <li v-for="id in tabs" :key="id" role="presentation">
             <button
+              :id="`tab-${id}`"
               type="button"
               role="tab"
               class="flex items-center gap-2"
               :class="tab === id ? 'menu-active' : ''"
               :aria-selected="tab === id"
+              :aria-controls="`panel-${tab}`"
               @click="tab = id"
             >
               <span class="grow text-left">{{ t(`settings.tabs.${id}`) }}</span>
@@ -110,7 +122,7 @@ watch(tab, () => {
           </li>
         </ul>
 
-        <div class="min-w-0 max-w-xl grow">
+        <div :id="`panel-${tab}`" role="tabpanel" :aria-labelledby="`tab-${tab}`" class="min-w-0 max-w-xl grow">
           <div v-if="error" role="alert" class="alert alert-error alert-soft mb-4 text-sm">{{ error }}</div>
 
           <form v-if="tab === 'networking'" class="flex flex-col gap-4" @submit.prevent="saveEndpoint">
@@ -137,6 +149,7 @@ watch(tab, () => {
               <span class="label-text mb-1 text-sm font-medium">{{ t('settings.token') }}</span>
               <span class="flex gap-2">
                 <input
+                  ref="tokenInput"
                   v-model.trim="token"
                   :type="showToken ? 'text' : 'password'"
                   class="input input-sm input-bordered w-full font-token"
@@ -147,7 +160,7 @@ watch(tab, () => {
                   {{ showToken ? t('settings.hide') : t('settings.show') }}
                 </button>
                 <button type="button" class="btn btn-sm btn-ghost" :title="t('settings.copy')" @click="copyToken">
-                  <AppIcon name="copy" />
+                  <AppIcon :name="copied ? 'check' : 'copy'" />
                 </button>
               </span>
             </label>
