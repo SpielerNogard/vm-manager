@@ -61,6 +61,7 @@ export interface VM {
   nodeId: string
   provider: string
   state: VMState
+  power: 'running' | 'stopped'
   ip?: string
   error?: string
 }
@@ -128,6 +129,9 @@ export const api = {
   vms: () => request<VM[]>('GET', '/api/vms'),
   createVM: (req: CreateVMRequest) => request<VM>('POST', '/api/vms', req),
   deleteVM: (id: string) => request<void>('DELETE', `/api/vms/${id}`),
+  startVM: (id: string) => request<VM>('POST', `/api/vms/${id}/start`),
+  shutdownVM: (id: string) => request<VM>('POST', `/api/vms/${id}/shutdown`),
+  stopVM: (id: string) => request<VM>('POST', `/api/vms/${id}/stop`),
   keys: () => request<SSHKey[]>('GET', '/api/keys'),
   addKey: (name: string, publicKey: string) => request<SSHKey>('POST', '/api/keys', { name, publicKey }),
   deleteKey: (id: string) => request<void>('DELETE', `/api/keys/${id}`),
