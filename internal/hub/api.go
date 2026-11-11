@@ -163,13 +163,17 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 	})
 	mux.HandleFunc("PUT /api/vms/{id}/networks", func(w http.ResponseWriter, req *http.Request) {
 		var q struct {
-			NetworkIDs []string `json:"networkIds"`
+			NetworkIDs *[]string `json:"networkIds"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
 			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 			return
 		}
-		vm, err := r.SetVMNetworks(req.PathValue("id"), q.NetworkIDs, req.URL.Query().Get("restartAllowed") == "true")
+		if q.NetworkIDs == nil {
+			writeError(w, fmt.Errorf("%w: networkIds is required", ErrInvalid))
+			return
+		}
+		vm, err := r.SetVMNetworks(req.PathValue("id"), *q.NetworkIDs, req.URL.Query().Get("restartAllowed") == "true")
 		if err != nil {
 			writeError(w, err)
 			return
