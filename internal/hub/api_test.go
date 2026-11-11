@@ -518,3 +518,10 @@ func TestAPINodesBlockedBeforeSetup(t *testing.T) {
 		t.Fatalf("nodes = %+v", r.Nodes())
 	}
 }
+
+func TestAPICreateNodeMalformedJSON(t *testing.T) {
+	srv, _, _ := apiServerWith(t, testAPIConfig())
+	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{`); code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", code, b)
+	}
+}

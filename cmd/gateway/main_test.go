@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"vm-manager/internal/hub"
 )
@@ -116,5 +117,32 @@ func TestReadToken(t *testing.T) {
 	}
 	if tok, err := readToken(file); err != nil || tok != "t" {
 		t.Errorf("got %q, %v", tok, err)
+	}
+}
+
+func TestWaitForToken(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "hub.json")
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		os.WriteFile(file, []byte(`{"token":"late"}`), 0o600)
+	}()
+	if tok := waitForToken(file); tok != "late" {
+		t.Errorf("token = %q", tok)
+	}
+}
+
+func TestCallHubRereadingTokenDoesNotRetryOtherErrors(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	token := "old"
+	if _, err := callHubRereadingToken(srv.Client(), srv.URL, filepath.Join(t.TempDir(), "none"), &token, "GET", "/state", nil); err == nil {
+		t.Fatal("want error")
+	}
+	if calls != 1 || token != "old" {
+		t.Errorf("calls = %d, token = %q", calls, token)
 	}
 }
