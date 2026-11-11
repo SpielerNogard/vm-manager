@@ -151,6 +151,10 @@ users:
 %sbootcmd:
   # Kernel and systemd output to the virtio console (console.log); takes effect from the second boot.
   - [sh, -c, 'test -f /etc/default/grub.d/99-vmm-console.cfg || { echo "GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT console=tty1 console=hvc0\"" > /etc/default/grub.d/99-vmm-console.cfg && update-grub; }']
+# Reapplies network-config every boot so a reseeded NIC list takes effect.
+updates:
+  network:
+    when: [boot]
 %s`, f.Spec.Name, keys.String(), diskConfig(f.Spec.DataDisks))
 	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
 	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
@@ -162,10 +166,16 @@ ethernets:
     dhcp4: true
     dhcp-identifier: mac
 `, f.MAC)
-	for i, n := range f.Spec.NICs {
+	netIdx := 0
+	for _, n := range f.Spec.NICs {
+		name, dns := "mgmt0", "    nameservers:\n      addresses: [10.201.0.1]\n      search: [\"~internal\"]\n"
+		if n.Network != "mgmt" {
+			name, dns = fmt.Sprintf("net%d", netIdx), ""
+			netIdx++
+		}
 		// Address, MTU and routes come from OVN DHCP; the guest must not take DNS or hostname from it.
-		// IPv6 link-local makes networkd bump the DHCP MTU to 1280, so mgmt is IPv4-only.
-		networkConfig += fmt.Sprintf(`  mgmt%d:
+		// IPv6 link-local makes networkd bump the DHCP MTU to 1280, so OVN NICs are IPv4-only.
+		networkConfig += fmt.Sprintf(`  %s:
     match:
       macaddress: %q
     dhcp4: true
@@ -175,7 +185,7 @@ ethernets:
       use-dns: false
       use-hostname: false
       use-domains: false
-`, i, n.MAC)
+%s`, name, n.MAC, dns)
 	}
 	return userData, metaData, networkConfig
 }
