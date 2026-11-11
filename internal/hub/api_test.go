@@ -310,6 +310,34 @@ func TestAPISetVMNetworks(t *testing.T) {
 	}
 }
 
+func TestAPISetVMNetworksRequiresField(t *testing.T) {
+	srv, r, nm := apiServerWith(t, testAPIConfig())
+	a, err := nm.AddNetwork("a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := srv.URL + "/api/vms/" + vm.ID + "/networks?restartAllowed=true"
+	if s, out := doJSON(t, "PUT", url, `{"networkIds":["`+a.ID+`"]}`); s != http.StatusOK {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	if s, out := doJSON(t, "PUT", url, `{}`); s != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	if n := len(nm.NICs(vm.ID)); n != 2 {
+		t.Fatalf("NICs = %d", n)
+	}
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopHard); err != nil {
+		t.Fatal(err)
+	}
+	if s, out := doJSON(t, "PUT", srv.URL+"/api/vms/"+vm.ID+"/networks", `{"networkIds":[]}`); s != http.StatusOK {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+}
+
 func TestAPIPowerEndpoints(t *testing.T) {
 	srv, reg, _ := apiServerWith(t, testAPIConfig())
 	_, vm := postVM(t, srv, validBody)
