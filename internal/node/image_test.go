@@ -157,4 +157,14 @@ func TestCloudInitMgmtNIC(t *testing.T) {
 	if strings.Contains(nc, "addresses") || strings.Contains(nc, "mtu") {
 		t.Errorf("mgmt nic must not carry static config:\n%s", nc)
 	}
+	mgmt := nc[strings.Index(nc, "mgmt0:"):]
+	primary := nc[:strings.Index(nc, "mgmt0:")]
+	for _, want := range []string{"link-local: []", "accept-ra: false"} {
+		if !strings.Contains(mgmt, want) {
+			t.Errorf("mgmt block missing %q:\n%s", want, nc)
+		}
+		if strings.Contains(primary, want) {
+			t.Errorf("primary block must not contain %q:\n%s", want, nc)
+		}
+	}
 }

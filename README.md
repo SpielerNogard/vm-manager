@@ -59,7 +59,7 @@ cp node.example.json ~/.vm-manager/node.json  # set hub.url, the same token, pat
 ./bin/node
 ```
 
-Set `hub.url` to `ws://<hub>:<HUB_PORT>/api/nodes/connect`. A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to `<host>:<UNDERLAY_PORT>`, using the published host port. By default the node uses the host of `hub.url` and the hub's `underlay.port`. Behind Tailscale also set `underlay.mtu` to 1200 and the hub's `guestMTU` to 1140 or less (edit `/data/hub.json` as above).
+Set `hub.url` to `ws://<hub>:<HUB_PORT>/api/nodes/connect`. A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to `<host>:<UNDERLAY_PORT>`, using the published host port. By default the node uses the host of `hub.url` and the hub's `underlay.port`. Behind Tailscale also set `underlay.mtu` to 1200 and the hub's `guestMTU` to 1140 or less (edit `/data/hub.json` as above). Guest mgmt NICs are IPv4-only (IPv6 is disabled on them), so the DHCP MTU is not raised to 1280.
 
 Open `http://<hub>:8080`, add your SSH public key under **SSH-Keys** (the hub's own default keys are already there), then pick a node and create a VM. You can also use the API:
 
