@@ -90,6 +90,21 @@ Client notes:
   sudo sh -c 'mkdir -p /etc/resolver && echo "nameserver 10.201.0.1" > /etc/resolver/internal'
   ```
 
+### Networks
+
+Networks are standalone objects (they can be empty) that give VMs private connectivity to each other, also across nodes (OVN Geneve). Create one with `POST /api/networks` or the GUI, and attach VMs at creation (`networkIds` on `POST /api/vms`) or later with `PUT /api/vms/{id}/networks?restartAllowed=true` and `{"networkIds": [...]}`, which sets the full list. Changing the list restarts a running VM.
+
+| | |
+|---|---|
+| Subnet | Automatic `/24` from `10.210.0.0/16`, or a custom RFC1918 IPv4 subnet from `/16` to `/28` |
+| Overlap | Must not overlap `10.198.0.0/24`, `10.199.0.0/30`, `10.200.0.0/16`, `10.201.0.0/24`, `192.168.64.0/24` or another network |
+| Addresses | VMs get stable addresses from `.10` |
+| Isolation | VMs reach each other only via shared networks. No router, no internet, no device (WireGuard) access, no routing between networks |
+| DNS | `<vm>.<network>.internal` resolves to the VM's IP in that network. Devices resolve these names too but cannot reach the addresses |
+| Guest | Each network is an extra NIC (`net0`, `net1`, ...), DHCP from OVN, no default route |
+
+Guests send only `*.internal` queries to the gateway (`10.201.0.1`, via the management NIC). The management network is built in and cannot be deleted; a network with members cannot be deleted either.
+
 On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. On first boot, cloud-init formats each data disk as ext4, labels it with its `name`, and mounts it at `mountPath`. The mount is owned by `ubuntu`. System paths such as `/etc`, `/usr`, `/home/ubuntu` or `/var` are rejected as mount paths.
 
 VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
@@ -119,15 +134,18 @@ Provider settings go in a section named after the provider. For `vz` these are `
 |---|---|---|
 | GET | `/api/nodes` | Nodes with provider, capacity, online state, machine info, chassis state, and their config file without the hub token |
 | GET | `/api/vms` | VMs with state, desired power and IP |
-| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`). Also works for an offline node: the VM shows `pending` until the node connects |
+| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`, optional `networkIds`). Also works for an offline node: the VM shows `pending` until the node connects |
 | DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
+| PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
 | POST | `/api/vms/{id}/start` | Power the VM on |
 | POST | `/api/vms/{id}/shutdown` | ACPI shutdown, hard power-off after 10 s |
 | POST | `/api/vms/{id}/stop` | Immediate hard power-off |
 | GET | `/api/keys` | Stored SSH public keys with type and fingerprint |
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
-| GET | `/api/networks` | The management network with subnet and member count |
+| GET | `/api/networks` | Networks with subnet and members (VM IDs), management network first, marked builtin |
+| POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
+| DELETE | `/api/networks/{id}` | Delete a network. 409 while it has members; the management network cannot be deleted |
 | GET | `/api/devices` | Client devices |
 | POST | `/api/devices` | Add a device (`name`), returns the device and its WireGuard config |
 | DELETE | `/api/devices/{id}` | Remove a device |
@@ -146,4 +164,4 @@ Provider settings go in a section named after the provider. For `vz` these are `
 - The hub is meant for a trusted home network. Node↔hub traffic is plain `ws://` with a shared token, and the GUI and API, including device creation, have no user auth.
 - WireGuard devices can only reach the VMs' management IPs and the gateway DNS. The hub API and the OVN databases are firewalled from them.
 - The hub stores device private keys, so configs can be downloaded again.
-- VMs are isolated from each other on the management network only. The vz NAT NIC (`eth0`, internet) is still shared.
+- VMs cannot reach each other on the management network; they talk only via shared networks (see Networks). The vz NAT NIC (`eth0`, internet) is still shared.
