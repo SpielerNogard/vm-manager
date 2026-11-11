@@ -122,12 +122,23 @@ func TestReadToken(t *testing.T) {
 
 func TestWaitForToken(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "hub.json")
+	writeErr := make(chan error, 1)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		os.WriteFile(file, []byte(`{"token":"late"}`), 0o600)
+		writeErr <- os.WriteFile(file, []byte(`{"token":"late"}`), 0o600)
 	}()
-	if tok := waitForToken(file); tok != "late" {
-		t.Errorf("token = %q", tok)
+	tokCh := make(chan string, 1)
+	go func() { tokCh <- waitForToken(file) }()
+	if err := <-writeErr; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case tok := <-tokCh:
+		if tok != "late" {
+			t.Errorf("token = %q", tok)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitForToken did not return")
 	}
 }
 
