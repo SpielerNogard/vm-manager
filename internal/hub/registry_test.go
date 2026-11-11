@@ -783,6 +783,9 @@ func TestCreateNodePending(t *testing.T) {
 	if n, ok := nodeByID(r, "mac-x"); !ok || n.State != "pending" {
 		t.Fatalf("node = %+v ok = %v", n, ok)
 	}
+	if _, err := r.CreateNode("connect"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("connect err = %v", err)
+	}
 	if _, err := r.CreateNode("Mac X"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("err = %v", err)
 	}

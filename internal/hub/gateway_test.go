@@ -131,3 +131,13 @@ func TestGatewayStateNetworks(t *testing.T) {
 		t.Fatalf("after restart: %+v", st2)
 	}
 }
+
+func TestGatewayStateReflectsGuestMTUChange(t *testing.T) {
+	r, _ := gatewayRegistry(t)
+	if _, err := r.cfg.Update(func(c *Config) error { c.GuestMTU = 1200; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.GatewayState().GuestMTU; got != 1200 {
+		t.Fatalf("GuestMTU = %d", got)
+	}
+}
