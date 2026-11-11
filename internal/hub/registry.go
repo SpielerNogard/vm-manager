@@ -241,7 +241,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 		return VM{}, fmt.Errorf("%w: node %q has %d CPUs / %d MB free", ErrConflict, n.ID, freeCPU, freeMem)
 	}
 	id := newID()
-	nics, err := r.net.AllocNICs(id, req.Name)
+	nics, err := r.net.AllocNICs(id, req.Name, nil)
 	if err != nil {
 		r.mu.Unlock()
 		return VM{}, err
