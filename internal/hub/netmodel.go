@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"sync"
@@ -120,21 +119,7 @@ func (m *NetModel) mutate(f func(st *netState) error) error {
 	return nil
 }
 
-// save writes via a temp file and rename so a crash never leaves a half-written file.
-func (m *NetModel) save() error {
-	b, err := json.MarshalIndent(m.st, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(m.path), 0o700); err != nil {
-		return err
-	}
-	tmp := m.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, m.path)
-}
+func (m *NetModel) save() error { return saveJSON(m.path, m.st) }
 
 // nextFree returns the first address in [first, last] that taken does not contain.
 func nextFree(first, last string, taken func(ip string) bool) (string, error) {
@@ -175,38 +160,6 @@ func (m *NetModel) AllocNICs(vmID, name string) ([]proto.NIC, error) {
 		return nil
 	})
 	return out, err
-}
-
-func validMgmtIP(ip string) bool {
-	a, err := netip.ParseAddr(ip)
-	return err == nil && a.Is4() && a.Compare(netip.MustParseAddr(mgmtFirst)) >= 0 && a.Compare(netip.MustParseAddr(mgmtLast)) <= 0
-}
-
-func (m *NetModel) AdoptNICs(vmID, name string, nics []proto.NIC) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.mutate(func(st *netState) error {
-		if len(nics) > 1 {
-			return fmt.Errorf("%w: %d NICs, at most one is supported", ErrInvalid, len(nics))
-		}
-		for _, n := range nics {
-			switch {
-			case !validMgmtIP(n.IP):
-				return fmt.Errorf("%w: invalid mgmt IP %q", ErrInvalid, n.IP)
-			case n.Network != mgmtNetwork:
-				return fmt.Errorf("%w: unknown network %q", ErrInvalid, n.Network)
-			case n.Port != vmID+"-mgmt":
-				return fmt.Errorf("%w: port %q does not match the VM", ErrInvalid, n.Port)
-			case n.MAC != nicMAC(n.IP):
-				return fmt.Errorf("%w: MAC %q does not match IP %s", ErrInvalid, n.MAC, n.IP)
-			}
-			if owner := mgmtIPOwner(st, n.IP); owner != "" && owner != vmID {
-				return fmt.Errorf("%w: address %s belongs to VM %q", ErrConflict, n.IP, owner)
-			}
-		}
-		st.NICs[vmID], st.Names[vmID] = slices.Clone(nics), name
-		return nil
-	})
 }
 
 func (m *NetModel) NICs(vmID string) []proto.NIC {

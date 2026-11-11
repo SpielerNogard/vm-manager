@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -28,6 +29,11 @@ const (
 	defaultUnderlayMTU = 1420
 
 	defaultDiskRefresh = 60 * time.Second
+)
+
+var (
+	restartBackoff = []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second, 15 * time.Second, 30 * time.Second}
+	quickRun       = 60 * time.Second
 )
 
 type Agent struct {
@@ -49,9 +55,12 @@ type Agent struct {
 	chassisStopping bool
 	chassisWG       sync.WaitGroup
 
-	mu   sync.Mutex
-	vms  map[string]*vmEntry
-	send func(proto.Message) error // nil while disconnected
+	reconcileMu sync.Mutex
+
+	mu       sync.Mutex
+	vms      map[string]*vmEntry
+	send     func(proto.Message) error // nil while disconnected
+	stopping bool
 }
 
 type vmEntry struct {
@@ -60,6 +69,9 @@ type vmEntry struct {
 	inst   Instance
 	cancel context.CancelFunc
 	booted chan struct{} // closed once boot has finished starting (or failed)
+	// placeholder entries stand in for provisioned VMs whose directory is gone; they never boot.
+	placeholder   bool
+	stopRequested atomic.Bool // set before node-initiated Stop/Kill so the exit is not treated as a crash
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -86,7 +98,7 @@ func (a *Agent) restoreAll(ctx context.Context) error {
 		return err
 	}
 	for _, f := range files {
-		a.startVM(ctx, f, false)
+		a.startVM(ctx, f, f.NeedsPrepare)
 	}
 	return nil
 }
@@ -144,10 +156,8 @@ func (a *Agent) connect(ctx context.Context) error {
 			return err
 		}
 		switch {
-		case m.Type == "create" && m.Create != nil:
-			a.create(ctx, *m.Create)
-		case m.Type == "delete":
-			go a.delete(m.DeleteID)
+		case m.Type == "desired":
+			a.reconcile(ctx, m.Desired)
 		case m.Type == "underlay" && m.Underlay != nil:
 			go a.startChassis(ctx, *m.Underlay)
 		}
@@ -204,49 +214,46 @@ func (a *Agent) registerMsg() *proto.Register {
 	for _, e := range a.vms {
 		st := e.status
 		st.Disks = a.disks(e.file)
-		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: st})
+		reg.VMs = append(reg.VMs, st)
 	}
 	return reg
 }
 
-func (a *Agent) create(ctx context.Context, spec proto.VMSpec) {
-	a.mu.Lock()
-	_, exists := a.vms[spec.ID]
-	a.mu.Unlock()
-	if exists {
-		return
-	}
-	f := VMFile{Spec: spec, MAC: randomMAC()}
-	if err := SaveVM(a.VMsDir, f); err != nil {
-		a.report(proto.VMStatus{ID: spec.ID, State: proto.StateError, Error: err.Error()})
-		return
-	}
-	a.startVM(ctx, f, true)
-}
-
 func (a *Agent) startVM(ctx context.Context, f VMFile, prepare bool) {
+	state := proto.StateStarting
+	if f.Power == proto.PowerStopped {
+		state = proto.StateStopped
+	}
 	bootCtx, cancel := context.WithCancel(ctx)
-	e := &vmEntry{file: f, status: proto.VMStatus{ID: f.Spec.ID, State: proto.StateStarting}, cancel: cancel, booted: make(chan struct{})}
+	e := &vmEntry{file: f, status: proto.VMStatus{ID: f.Spec.ID, State: state}, cancel: cancel, booted: make(chan struct{})}
 	a.mu.Lock()
 	a.vms[f.Spec.ID] = e
 	a.mu.Unlock()
 	a.report(e.status)
-	go a.boot(bootCtx, e, prepare)
+	go a.boot(bootCtx, e, f, prepare)
 }
 
-func (a *Agent) boot(ctx context.Context, e *vmEntry, prepare bool) {
-	id, dir := e.file.Spec.ID, VMDir(a.VMsDir, e.file.Spec.ID)
+// boot prepares (if asked) and starts f; a stopped f is only prepared. Exited instances are restarted while f should run.
+func (a *Agent) boot(ctx context.Context, e *vmEntry, f VMFile, prepare bool) {
+	backoff, quick := restartBackoff, quickRun
+	id, dir := f.Spec.ID, VMDir(a.VMsDir, f.Spec.ID)
+	report := func(st proto.VMStatus) { a.reportEntry(e, st) }
 	fail := func(step string, err error) {
 		close(e.booted)
-		a.report(proto.VMStatus{ID: id, State: proto.StateError, Error: fmt.Sprintf("%s: %v", step, err)})
+		report(proto.VMStatus{ID: id, State: proto.StateError, Error: fmt.Sprintf("%s: %v", step, err)})
 	}
 	if prepare {
-		if err := a.Provider.Prepare(ctx, e.file, dir); err != nil {
+		if err := a.prepare(ctx, e, f); err != nil {
 			fail("prepare", err)
 			return
 		}
 	}
-	inst, err := a.Provider.Start(e.file, dir)
+	if f.Power == proto.PowerStopped {
+		close(e.booted)
+		report(proto.VMStatus{ID: id, State: proto.StateStopped})
+		return
+	}
+	inst, err := a.Provider.Start(f, dir)
 	if err != nil {
 		fail("start", err)
 		return
@@ -256,6 +263,59 @@ func (a *Agent) boot(ctx context.Context, e *vmEntry, prepare bool) {
 	a.mu.Unlock()
 	close(e.booted)
 
+	failures := 0
+	for {
+		ranAt := time.Now()
+		a.watch(ctx, e, id, inst)
+		ran := time.Since(ranAt)
+		if ran >= quick {
+			failures = 0
+		}
+		reason := fmt.Errorf("exited after %s", ran.Round(time.Second))
+		a.mu.Lock()
+		ok := a.restartable(ctx, e)
+		a.mu.Unlock()
+		if !ok {
+			return
+		}
+		for inst = nil; inst == nil; {
+			if failures == len(backoff) {
+				report(proto.VMStatus{ID: id, State: proto.StateError, Error: "restarting failed repeatedly: " + reason.Error()})
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff[failures]):
+			}
+			// Counted up front; a run longer than quick resets it.
+			failures++
+			inst, err = a.restart(ctx, e)
+			if err != nil {
+				reason = err
+			} else if inst == nil {
+				return
+			}
+		}
+		report(proto.VMStatus{ID: id, State: proto.StateStarting})
+	}
+}
+
+func (a *Agent) prepare(ctx context.Context, e *vmEntry, f VMFile) error {
+	if err := a.Provider.Prepare(ctx, f, VMDir(a.VMsDir, f.Spec.ID)); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	e.file.NeedsPrepare = false
+	saved := e.file
+	a.mu.Unlock()
+	// Booting without the cleared flag on disk would re-prepare (wipe the disks) on the next restart.
+	return SaveVM(a.VMsDir, saved)
+}
+
+// watch reports inst's progress until it exits, reporting stopped last.
+func (a *Agent) watch(ctx context.Context, e *vmEntry, id string, inst Instance) {
+	report := func(st proto.VMStatus) { a.reportEntry(e, st) }
 	ipCtx, cancel := context.WithTimeout(ctx, ipTimeout)
 	go func() {
 		select {
@@ -271,32 +331,79 @@ func (a *Agent) boot(ctx context.Context, e *vmEntry, prepare bool) {
 	case <-inst.Done():
 	default:
 		if err != nil {
-			a.report(proto.VMStatus{ID: id, State: proto.StateError, Error: "waiting for IP: " + err.Error()})
+			report(proto.VMStatus{ID: id, State: proto.StateError, Error: "waiting for IP: " + err.Error()})
 		} else {
-			a.report(proto.VMStatus{ID: id, State: proto.StateRunning, IP: ip})
+			report(proto.VMStatus{ID: id, State: proto.StateRunning, IP: ip})
 		}
 	}
 	<-inst.Done()
-	a.report(proto.VMStatus{ID: id, State: proto.StateStopped})
+	report(proto.VMStatus{ID: id, State: proto.StateStopped})
+}
+
+func (a *Agent) instance(e *vmEntry) Instance {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return e.inst
+}
+
+// restartable reports whether e's exited instance should be started again; a.mu must be held.
+func (a *Agent) restartable(ctx context.Context, e *vmEntry) bool {
+	return ctx.Err() == nil && !a.stopping && !e.stopRequested.Load() && e.file.Power != proto.PowerStopped
+}
+
+// restart starts e again; (nil, nil) means it should no longer run.
+func (a *Agent) restart(ctx context.Context, e *vmEntry) (Instance, error) {
+	// Holding reconcileMu keeps reconcile from starting a second instance while this one comes up.
+	a.reconcileMu.Lock()
+	defer a.reconcileMu.Unlock()
+	a.mu.Lock()
+	f, ok := e.file, a.restartable(ctx, e)
+	a.mu.Unlock()
+	if !ok {
+		return nil, nil
+	}
+	if f.NeedsPrepare {
+		if err := a.prepare(ctx, e, f); err != nil {
+			return nil, fmt.Errorf("prepare: %w", err)
+		}
+	}
+	inst, err := a.Provider.Start(f, VMDir(a.VMsDir, f.Spec.ID))
+	if err != nil {
+		return nil, fmt.Errorf("start: %w", err)
+	}
+	a.mu.Lock()
+	ok = a.restartable(ctx, e)
+	if ok {
+		e.inst = inst
+	}
+	a.mu.Unlock()
+	if !ok {
+		if err := inst.Kill(); err != nil {
+			log.Printf("vm %s: kill: %v", f.Spec.ID, err)
+		}
+		return nil, nil
+	}
+	return inst, nil
 }
 
 // stopAll shuts guests down cleanly; vz VMs live in this process and would otherwise be killed hard.
 func (a *Agent) stopAll() {
 	a.mu.Lock()
-	entries := make([]*vmEntry, 0, len(a.vms))
-	for _, e := range a.vms {
-		entries = append(entries, e)
+	a.stopping = true
+	entries := make(map[string]*vmEntry, len(a.vms))
+	for id, e := range a.vms {
+		entries[id] = e
 	}
 	a.mu.Unlock()
 	var wg sync.WaitGroup
-	for _, e := range entries {
+	for id, e := range entries {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-e.booted
-			if e.inst != nil {
-				if err := e.inst.Stop(); err != nil {
-					log.Printf("vm %s: stop: %v", e.file.Spec.ID, err)
+			if inst := a.instance(e); inst != nil {
+				if err := inst.Stop(); err != nil {
+					log.Printf("vm %s: stop: %v", id, err)
 				}
 			}
 		}()
@@ -311,30 +418,14 @@ func (a *Agent) stopAll() {
 	}
 }
 
-func (a *Agent) delete(id string) {
-	a.mu.Lock()
-	e, ok := a.vms[id]
-	delete(a.vms, id)
-	a.mu.Unlock()
-	if !ok {
-		return
-	}
-	e.cancel()
-	<-e.booted
-	if e.inst != nil {
-		if err := e.inst.Stop(); err != nil {
-			log.Printf("vm %s: stop: %v", id, err)
-		}
-	}
-	if err := DeleteVMDir(a.VMsDir, id); err != nil {
-		log.Printf("vm %s: delete dir: %v", id, err)
-	}
-}
-
 // report records the status and forwards it to the hub; updates for deleted VMs are dropped.
-func (a *Agent) report(st proto.VMStatus) {
+func (a *Agent) report(st proto.VMStatus) { a.reportEntry(nil, st) }
+
+// reportEntry is report that, with want set, also drops updates once want was replaced by a restart.
+func (a *Agent) reportEntry(want *vmEntry, st proto.VMStatus) {
 	a.mu.Lock()
 	e, ok := a.vms[st.ID]
+	ok = ok && (want == nil || e == want)
 	var f VMFile
 	if ok {
 		f = e.file
@@ -345,7 +436,9 @@ func (a *Agent) report(st proto.VMStatus) {
 	}
 	a.mu.Lock()
 	e, ok = a.vms[st.ID]
+	ok = ok && (want == nil || e == want)
 	if ok {
+		st.Generation = e.file.Generation
 		e.status = st
 	}
 	send := a.send

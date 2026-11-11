@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,7 @@ type fakeInstance struct {
 	once    sync.Once
 	done    chan struct{}
 	stopped atomic.Bool
+	killed  atomic.Bool
 	p       *fakeProvider
 	staleIP bool // simulates finding the previous boot's lease only after the VM already died
 }
@@ -44,20 +46,29 @@ func (i *fakeInstance) Stop() error {
 	return nil
 }
 
+func (i *fakeInstance) Kill() error {
+	i.once.Do(func() { i.killed.Store(true); close(i.done) })
+	if i.p != nil {
+		i.p.record("kill-guest")
+	}
+	return nil
+}
+
 type fakeProvider struct {
-	mu          sync.Mutex
-	prepared    []string
-	started     map[string]*fakeInstance
-	failPrepare map[string]bool
-	failStart   map[string]bool
-	staleIP     map[string]bool
-	chassis     []Chassis
-	block       chan struct{} // when set, StartChassis waits for it to close
-	inflight    atomic.Int32
-	maxInflight atomic.Int32
-	events      []string
-	failDisks   bool
-	bigRoot     bool // makes Disks report a different allocation, as if the guest wrote data
+	mu           sync.Mutex
+	prepared     []string
+	started      map[string]*fakeInstance
+	failPrepare  map[string]bool
+	failStart    map[string]bool
+	staleIP      map[string]bool
+	chassis      []Chassis
+	block        chan struct{} // when set, StartChassis waits for it to close
+	inflight     atomic.Int32
+	maxInflight  atomic.Int32
+	events       []string
+	failDisks    bool
+	bigRoot      bool // makes Disks report a different allocation, as if the guest wrote data
+	afterPrepare func(dir string)
 }
 
 func (p *fakeProvider) Disks(f VMFile, _ string) ([]proto.Disk, error) {
@@ -114,12 +125,16 @@ func newFakeProvider() *fakeProvider {
 
 func (p *fakeProvider) Name() string { return "fake" }
 
-func (p *fakeProvider) Prepare(_ context.Context, f VMFile, _ string) error {
+func (p *fakeProvider) Prepare(_ context.Context, f VMFile, dir string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prepared = append(p.prepared, f.Spec.Name)
+	p.events = append(p.events, "prepare:"+f.Spec.Name)
 	if p.failPrepare[f.Spec.Name] {
 		return errors.New("prepare boom")
+	}
+	if p.afterPrepare != nil {
+		p.afterPrepare(dir)
 	}
 	return nil
 }
@@ -168,7 +183,11 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	}
 	var hcfg hub.Config
 	hcfg.Underlay.Port = 51820
-	reg := hub.NewRegistry(net, hcfg)
+	store, err := hub.LoadVMStore(filepath.Join(t.TempDir(), "vms.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := hub.NewRegistry(net, store, hcfg)
 	srv := httptest.NewServer(hub.NodeHandler(reg, "tok"))
 
 	p := newFakeProvider()
@@ -234,12 +253,17 @@ func TestAgentCreateReachesRunning(t *testing.T) {
 	}
 }
 
-func TestAgentStoppedWhenGuestShutsDown(t *testing.T) {
+func TestAgentRestartsWhenGuestShutsDown(t *testing.T) {
+	fastRestarts(t, 10*time.Millisecond)
 	env := startEnv(t, nil)
 	vm, _ := env.reg.CreateVM(createReq("dev"))
 	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
-	env.provider.instance("dev").guestShutdown()
-	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	first := env.provider.instance("dev")
+	first.guestShutdown()
+	eventually(t, "restarted", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return env.provider.instance("dev") != first && v.State == proto.StateRunning
+	})
 }
 
 func TestAgentPrepareFails(t *testing.T) {
@@ -251,6 +275,48 @@ func TestAgentPrepareFails(t *testing.T) {
 	}
 }
 
+func TestAgentPrepareSaveFails(t *testing.T) {
+	env := startEnv(t, func(_ *Agent, p *fakeProvider) {
+		p.afterPrepare = func(dir string) {
+			os.Chmod(dir, 0o555)
+			t.Cleanup(func() { os.Chmod(dir, 0o755) })
+		}
+	})
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "error", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateError })
+	if v, _ := vmState(env.reg, vm.ID); !strings.HasPrefix(v.Error, "prepare: ") {
+		t.Fatalf("error = %q", v.Error)
+	}
+	if env.provider.instance("dev") != nil {
+		t.Fatal("instance started although NeedsPrepare was not saved")
+	}
+}
+
+func TestAgentWithChangedNodeIDKeepsVMs(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.stop()
+	<-env.runDone
+
+	p := newFakeProvider()
+	a := &Agent{HubURL: env.agent.HubURL, Token: "tok", NodeID: "renamed", VMsDir: env.agent.VMsDir, CPUs: 4, MemoryMB: 8192, Provider: p}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	eventually(t, "booted from cache", func() bool { return p.instance("dev") != nil })
+	time.Sleep(300 * time.Millisecond)
+	if _, err := os.Stat(VMDir(a.VMsDir, vm.ID)); err != nil {
+		t.Fatalf("vm dir: %v", err)
+	}
+	for _, n := range env.reg.Nodes() {
+		if n.ID == "renamed" {
+			t.Fatalf("renamed node registered: %+v", n)
+		}
+	}
+}
+
 func TestAgentDelete(t *testing.T) {
 	env := startEnv(t, nil)
 	vm, _ := env.reg.CreateVM(createReq("dev"))
@@ -259,27 +325,58 @@ func TestAgentDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "dir removed", func() bool { _, err := os.Stat(VMDir(env.agent.VMsDir, vm.ID)); return os.IsNotExist(err) })
-	if !env.provider.instance("dev").stopped.Load() {
-		t.Fatal("instance not stopped")
+	if !env.provider.instance("dev").killed.Load() {
+		t.Fatal("instance not killed")
 	}
 }
 
-func TestAgentRestoreAfterRestart(t *testing.T) {
-	var good, bad VMFile
-	env := startEnv(t, func(a *Agent, p *fakeProvider) {
-		p.failStart["bad"] = true
-		good = VMFile{Spec: proto.VMSpec{ID: "g1", Name: "good", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:01"}
-		bad = VMFile{Spec: proto.VMSpec{ID: "b1", Name: "bad", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:02"}
-		SaveVM(a.VMsDir, good)
-		SaveVM(a.VMsDir, bad)
+func cachedVM(id, name string) VMFile {
+	return VMFile{Spec: proto.VMSpec{ID: id, Name: name, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}},
+		MAC: "02:00:00:00:00:01", Power: proto.PowerRunning, Generation: 1}
+}
+
+func TestAgentDeletesVMsUnknownToHub(t *testing.T) {
+	env := startEnv(t, func(a *Agent, _ *fakeProvider) {
+		SaveVM(a.VMsDir, cachedVM("g1", "good"))
+		SaveVM(a.VMsDir, cachedVM("s1", "sleepy"))
 	})
-	eventually(t, "both reported", func() bool {
-		g, ok1 := vmState(env.reg, "g1")
-		b, ok2 := vmState(env.reg, "b1")
-		return ok1 && ok2 && g.State == proto.StateRunning && b.State == proto.StateError
-	})
+	for _, id := range []string{"g1", "s1"} {
+		eventually(t, id+" dir removed", func() bool { _, err := os.Stat(VMDir(env.agent.VMsDir, id)); return os.IsNotExist(err) })
+	}
+	if len(env.reg.VMs()) != 0 {
+		t.Fatalf("hub adopted VMs: %+v", env.reg.VMs())
+	}
 	if len(env.provider.prepared) != 0 {
 		t.Fatalf("Prepare called on restore: %v", env.provider.prepared)
+	}
+}
+
+func TestAgentBootsFromCacheWithoutHub(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unreachable := "ws://" + ln.Addr().String() + "/api/nodes/connect"
+	ln.Close()
+	p := newFakeProvider()
+	a := &Agent{HubURL: unreachable, Token: "tok", NodeID: "n1", VMsDir: t.TempDir(), CPUs: 4, MemoryMB: 8192, Provider: p}
+	stopped := cachedVM("s1", "sleepy")
+	stopped.Power = proto.PowerStopped
+	SaveVM(a.VMsDir, cachedVM("g1", "good"))
+	SaveVM(a.VMsDir, stopped)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	eventually(t, "good started", func() bool { return p.instance("good") != nil })
+	time.Sleep(100 * time.Millisecond)
+	if p.instance("sleepy") != nil {
+		t.Fatal("stopped VM started")
+	}
+	for _, id := range []string{"g1", "s1"} {
+		if _, err := os.Stat(VMDir(a.VMsDir, id)); err != nil {
+			t.Fatalf("vm dir %s: %v", id, err)
+		}
 	}
 }
 
@@ -343,7 +440,7 @@ func TestAgentStopsChassisAfterGuests(t *testing.T) {
 	<-env.runDone
 	env.provider.mu.Lock()
 	defer env.provider.mu.Unlock()
-	if got := strings.Join(env.provider.events, ","); got != "stop-guest,stop-chassis" {
+	if got := strings.Join(env.provider.events, ","); got != "prepare:dev,stop-guest,stop-chassis" {
 		t.Fatalf("events = %s", got)
 	}
 }
@@ -423,4 +520,72 @@ func TestAgentRefreshesDisksWhileRunning(t *testing.T) {
 		v, _ := vmState(env.reg, vm.ID)
 		return len(v.Disks) == 1 && v.Disks[0].AllocatedBytes == 42 && v.State == proto.StateRunning
 	})
+}
+
+func (p *fakeProvider) hasEvent(e string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Contains(p.events, e)
+}
+
+func TestAgentShutdownAndStart(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	first := env.provider.instance("dev")
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	if !env.provider.hasEvent("stop-guest") || env.provider.hasEvent("kill-guest") {
+		t.Fatalf("events = %v", env.provider.events)
+	}
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "running again", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return v.State == proto.StateRunning && env.provider.instance("dev") != first
+	})
+}
+
+func TestAgentHardStop(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerStopped, proto.StopHard); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	if !env.provider.hasEvent("kill-guest") {
+		t.Fatalf("events = %v", env.provider.events)
+	}
+}
+
+func TestAgentRebuildAfterDirMissing(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.stop()
+	<-env.runDone
+	if err := os.RemoveAll(VMDir(env.agent.VMsDir, vm.ID)); err != nil {
+		t.Fatal(err)
+	}
+	old := env.agent
+	restarted := &Agent{HubURL: old.HubURL, Token: old.Token, NodeID: old.NodeID, VMsDir: old.VMsDir, CPUs: old.CPUs, MemoryMB: old.MemoryMB, Provider: env.provider}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { restarted.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	eventually(t, "dir missing", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return v.State == proto.StateError && v.Error == proto.ErrVMDirMissing
+	})
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "running again", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	if n := len(env.provider.prepared); n != 2 {
+		t.Fatalf("prepared = %v", env.provider.prepared)
+	}
 }

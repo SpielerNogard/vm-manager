@@ -68,6 +68,12 @@
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Die VM wird gestoppt und ihre Disks werden auf der Node entfernt. Das lässt sich nicht rückgängig machen.",
     "deleteConfirm": "VM löschen",
+    "start": "Starten",
+    "shutdown": "Herunterfahren",
+    "stop": "Ausschalten",
+    "stopTitle": "{name} ausschalten?",
+    "stopBody": "Sofort ausschalten? Nicht gespeicherte Daten in der VM gehen verloren.",
+    "waitingForNode": "wartet auf Node",
     "mgmt": "Management-Host"
   },
   "create": {

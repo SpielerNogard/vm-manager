@@ -68,6 +68,12 @@
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The VM is stopped and its disks are removed from the node. This cannot be undone.",
     "deleteConfirm": "Delete VM",
+    "start": "Start",
+    "shutdown": "Shut down",
+    "stop": "Stop",
+    "stopTitle": "Stop {name}?",
+    "stopBody": "Power off immediately? Unsaved data in the VM is lost.",
+    "waitingForNode": "waiting for node",
     "mgmt": "Management host"
   },
   "create": {

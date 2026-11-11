@@ -5,13 +5,14 @@ import { RouterLink, useRoute } from 'vue-router'
 
 import { api, type Network } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import StateBadge from '@/components/StateBadge.vue'
 import { useFleet } from '@/composables/useFleet'
 import { formatBytes, formatMB, VM_TONE } from '@/lib/format'
 
 const { t } = useI18n()
 const route = useRoute()
-const { vms, keys, loaded } = useFleet()
+const { vms, keys, loaded, refresh } = useFleet()
 
 const networks = ref<Network[]>([])
 onMounted(async () => {
@@ -54,6 +55,21 @@ function shorten(pk: string) {
   return `${type} ${blob.slice(0, 12)}…${blob.slice(-8)}`
 }
 
+const powerError = ref('')
+const confirmStop = ref(false)
+
+async function power(action: 'startVM' | 'shutdownVM' | 'stopVM') {
+  confirmStop.value = false
+  if (!vm.value) return
+  powerError.value = ''
+  try {
+    await api[action](vm.value.id)
+    await refresh()
+  } catch (e) {
+    powerError.value = (e as Error).message
+  }
+}
+
 const copied = ref(false)
 async function copy() {
   await navigator.clipboard?.writeText(sshCommand.value)
@@ -79,8 +95,17 @@ async function copy() {
       <header class="mb-6">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold tracking-tight">{{ vm.name }}</h1>
-          <StateBadge :label="t(`state.${vm.state}`)" :tone="VM_TONE[vm.state] ?? 'quiet'" :reason="vm.error" />
+          <StateBadge :label="t(`state.${vm.state}`)" :tone="VM_TONE[vm.state] ?? 'quiet'" :reason="vm.error || (vm.state === 'pending' ? t('vms.waitingForNode') : undefined)" />
           <span class="badge badge-sm badge-outline font-token">{{ vm.provider }}</span>
+          <div class="ml-auto flex gap-2">
+            <button v-if="vm.power === 'stopped' || vm.state === 'error'" type="button" class="btn btn-sm" @click="power('startVM')">
+              {{ t('vms.start') }}
+            </button>
+            <template v-if="vm.power === 'running'">
+              <button type="button" class="btn btn-sm" @click="power('shutdownVM')">{{ t('vms.shutdown') }}</button>
+              <button type="button" class="btn btn-sm" @click="confirmStop = true">{{ t('vms.stop') }}</button>
+            </template>
+          </div>
         </div>
         <p class="text-base-content/65 mt-1 text-sm">
           <span class="font-token">{{ vm.id }}</span> ·
@@ -88,6 +113,7 @@ async function copy() {
           <RouterLink :to="{ name: 'node', params: { id: vm.nodeId } }" class="hover:underline">{{ vm.nodeId }}</RouterLink>
         </p>
         <div v-if="vm.error" role="alert" class="alert alert-error alert-soft mt-3 text-sm">{{ vm.error }}</div>
+        <div v-if="powerError" role="alert" class="alert alert-error alert-soft mt-3 text-sm">{{ powerError }}</div>
       </header>
 
       <section class="border-base-300 rounded-box mb-6 border p-4">
@@ -189,6 +215,14 @@ async function copy() {
           <p v-else class="text-base-content/60 text-sm">—</p>
         </section>
       </div>
+      <ConfirmDialog
+        :open="confirmStop"
+        :title="t('vms.stopTitle', { name: vm.name })"
+        :body="t('vms.stopBody')"
+        :confirm-label="t('vms.stop')"
+        @confirm="power('stopVM')"
+        @cancel="confirmStop = false"
+      />
     </template>
   </div>
 </template>

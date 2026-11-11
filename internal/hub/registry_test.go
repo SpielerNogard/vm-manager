@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"vm-manager/internal/proto"
 	"vm-manager/internal/wgkey"
@@ -24,6 +25,12 @@ func (f *fakeNode) Send(m proto.Message) error {
 	return nil
 }
 
+func (f *fakeNode) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sent)
+}
+
 func (f *fakeNode) last() proto.Message {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -39,11 +46,20 @@ func newTestNet(t *testing.T) *NetModel {
 	return m
 }
 
+func newTestStore(t *testing.T) *VMStore {
+	t.Helper()
+	s, err := LoadVMStore(filepath.Join(t.TempDir(), "vms.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func newTestRegistry(t *testing.T) (*Registry, *fakeNode) {
 	t.Helper()
 	var cfg Config
 	cfg.Underlay.Port = 51820
-	r := NewRegistry(newTestNet(t), cfg)
+	r := NewRegistry(newTestNet(t), newTestStore(t), cfg)
 	n := &fakeNode{}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n)
 	return r, n
@@ -53,18 +69,232 @@ func validReq() CreateVMRequest {
 	return CreateVMRequest{NodeID: "n1", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, SSHPublicKeys: []string{"ssh-ed25519 AAA"}}
 }
 
-func TestCreateVMSendsCreate(t *testing.T) {
+func TestCreateVMSendsDesired(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, err := r.CreateVM(validReq())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vm.State != proto.StatePending || vm.Provider != "vz" {
+	if vm.State != proto.StatePending || vm.Provider != "vz" || vm.Power != proto.PowerRunning {
 		t.Fatalf("vm = %+v", vm)
 	}
 	m := n.last()
-	if m.Type != "create" || m.Create == nil || m.Create.ID != vm.ID {
+	if m.Type != "desired" || len(m.Desired) != 1 || m.Desired[0].Spec.ID != vm.ID ||
+		m.Desired[0].Generation != 1 || m.Desired[0].Power != proto.PowerRunning || m.Desired[0].Provisioned {
 		t.Fatalf("sent = %+v", m)
+	}
+}
+
+func TestRegisterSendsDesired(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	n := &fakeNode{}
+	r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n)
+	if m := n.last(); m.Type != "desired" || len(m.Desired) != 0 {
+		t.Fatalf("sent = %+v", m)
+	}
+}
+
+func TestCreateOnOfflineNodeIsPending(t *testing.T) {
+	r, n := newTestRegistry(t)
+	r.NodeDisconnected("n1", n)
+	sent := n.count()
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.count() != sent {
+		t.Fatal("sent to offline node")
+	}
+	if s := r.VMs()[0].State; s != proto.StatePending {
+		t.Fatalf("state = %s", s)
+	}
+	n2 := &fakeNode{}
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n2)
+	if m := n2.last(); m.Type != "desired" || len(m.Desired) != 1 || m.Desired[0].Spec.ID != vm.ID {
+		t.Fatalf("sent = %+v", m)
+	}
+}
+
+func TestDeleteOnOfflineNode(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.NodeDisconnected("n1", n)
+	if err := r.DeleteVM(vm.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.VMs()) != 0 || len(r.store.VMs()) != 0 || len(r.net.NICs(vm.ID)) != 0 {
+		t.Fatalf("vms = %+v store = %+v nics = %+v", r.VMs(), r.store.VMs(), r.net.NICs(vm.ID))
+	}
+}
+
+func TestStaleStatusKeepsPending(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	if s := r.VMs()[0].State; s != proto.StateRunning {
+		t.Fatalf("state = %s", s)
+	}
+	if _, err := r.bump(vm.ID, func(*VM) {}); err != nil {
+		t.Fatal(err)
+	}
+	if m := n.last(); m.Type != "desired" || m.Desired[0].Generation != 2 {
+		t.Fatalf("sent = %+v", m)
+	}
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	if s := r.VMs()[0].State; s != proto.StatePending {
+		t.Fatalf("state = %s", s)
+	}
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 2})
+	if s := r.VMs()[0].State; s != proto.StateRunning {
+		t.Fatalf("state = %s", s)
+	}
+	if _, err := r.bump("nope", func(*VM) {}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBumpRollsBackOnStoreError(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	// a regular file as parent directory makes saving fail
+	r.store.path = filepath.Join(r.net.path, "vms.json")
+	if _, err := r.bump(vm.ID, func(v *VM) { v.Power = proto.PowerStopped }); err == nil {
+		t.Fatal("bump succeeded")
+	}
+	if got := r.VMs()[0]; got.Power != proto.PowerRunning || got.generation != 1 {
+		t.Fatalf("vm = %+v gen %d", got, got.generation)
+	}
+}
+
+func TestHubRestartRestoresVMs(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	q := validReq()
+	q.Name, q.CPUs = "fresh", 1
+	fresh, _ := r.CreateVM(q)
+	net, err := LoadNetModel(r.net.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(net, store, Config{})
+	byID := func() map[string]VM {
+		out := map[string]VM{}
+		for _, v := range r2.VMs() {
+			out[v.ID] = v
+		}
+		return out
+	}
+	vms := byID()
+	// the never-reported VM is still pending; the provisioned one is unknown until its node reports
+	if len(vms) != 2 || vms[vm.ID].State != proto.StateUnknown || vms[vm.ID].NICs[0].IP != "10.200.0.10" ||
+		vms[vm.ID].Power != proto.PowerRunning || vms[fresh.ID].State != proto.StatePending {
+		t.Fatalf("vms = %+v", vms)
+	}
+	nodes := r2.Nodes()
+	if len(nodes) != 1 || nodes[0].ID != "n1" || nodes[0].Online || nodes[0].FreeCPUs != 1 || nodes[0].Provider != "vz" {
+		t.Fatalf("nodes = %+v", nodes)
+	}
+	n := &fakeNode{}
+	r2.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}}, n)
+	if s := byID()[vm.ID].State; s != proto.StateRunning {
+		t.Fatalf("state after reconnect = %s", s)
+	}
+	if m := n.last(); m.Type != "desired" || len(m.Desired) != 2 || !m.Desired[0].Provisioned && !m.Desired[1].Provisioned {
+		t.Fatalf("sent = %+v", m)
+	}
+}
+
+func TestCreateOnStoredOfflineNode(t *testing.T) {
+	r, n := newTestRegistry(t)
+	r.NodeDisconnected("n1", n)
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(newTestNet(t), store, Config{})
+	if _, err := r2.CreateVM(validReq()); err != nil {
+		t.Fatal(err)
+	}
+	q := validReq()
+	q.Name, q.CPUs = "dev2", 3
+	if _, err := r2.CreateVM(q); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUnknownReportedVMIgnored(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMStatus{{ID: "ghost", State: proto.StateRunning}}}, &fakeNode{})
+	if vms := r.VMs(); len(vms) != 0 {
+		t.Fatalf("vms = %+v", vms)
+	}
+}
+
+func TestRegisterRefusedForOtherNodesVM(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	n2 := &fakeNode{}
+	err := r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}}, n2)
+	if err == nil || !strings.Contains(err.Error(), vm.ID) || !strings.Contains(err.Error(), "n1") {
+		t.Fatalf("err = %v", err)
+	}
+	if n2.count() != 0 {
+		t.Fatalf("sent to refused node: %+v", n2.sent)
+	}
+	for _, n := range r.Nodes() {
+		if n.ID == "n2" {
+			t.Fatalf("refused node recorded: %+v", n)
+		}
+	}
+	if v := r.VMs()[0]; v.State != proto.StatePending || v.NodeID != "n1" {
+		t.Fatalf("vm = %+v", v)
+	}
+}
+
+func TestStatusFromOtherNodeIgnored(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n2", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "10.0.0.9", Generation: 1})
+	if v := r.VMs()[0]; v.State != proto.StatePending || v.IP != "" || r.store.VMs()[0].Provisioned {
+		t.Fatalf("vm = %+v", v)
+	}
+}
+
+func TestLateOlderStatusKeepsApplied(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful); err != nil {
+		t.Fatal(err)
+	}
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateStopped, Generation: 2})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateStopped, Generation: 1})
+	if s := r.VMs()[0].State; s != proto.StateStopped {
+		t.Fatalf("state = %s", s)
+	}
+}
+
+func TestStatusMarksProvisioned(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "prepare: boom", Generation: 1})
+	if r.store.VMs()[0].Provisioned {
+		t.Fatal("provisioned after error")
+	}
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.VMs()[0].Provisioned {
+		t.Fatal("not provisioned")
 	}
 }
 
@@ -158,20 +388,13 @@ func TestNodeOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	r.NodeDisconnected("n1", n)
 	if r.Nodes()[0].Online {
 		t.Fatal("node still online")
 	}
 	if s := r.VMs()[0].State; s != proto.StateUnknown {
 		t.Fatalf("state = %s", s)
-	}
-	q := validReq()
-	q.Name = "dev2"
-	if _, err := r.CreateVM(q); !errors.Is(err, ErrConflict) {
-		t.Fatalf("create err = %v", err)
-	}
-	if err := r.DeleteVM(vm.ID); !errors.Is(err, ErrConflict) {
-		t.Fatalf("delete err = %v", err)
 	}
 }
 
@@ -181,7 +404,7 @@ func TestDeleteVM(t *testing.T) {
 	if err := r.DeleteVM(vm.ID); err != nil {
 		t.Fatal(err)
 	}
-	if m := n.last(); m.Type != "delete" || m.DeleteID != vm.ID {
+	if m := n.last(); m.Type != "desired" || len(m.Desired) != 0 {
 		t.Fatalf("sent = %+v", m)
 	}
 	if len(r.VMs()) != 0 {
@@ -195,7 +418,7 @@ func TestDeleteVM(t *testing.T) {
 func TestUpdateStatus(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "192.168.64.5"})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "192.168.64.5", Generation: 1})
 	got := r.VMs()[0]
 	if got.State != proto.StateRunning || got.IP != "192.168.64.5" {
 		t.Fatalf("vm = %+v", got)
@@ -206,11 +429,10 @@ func TestReconnectSameNodeKeepsVMs(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
 	r.NodeDisconnected("n1", n)
-	spec := vm.VMSpec
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
-		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning}}}}, &fakeNode{})
+		VMs: []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}}, &fakeNode{})
 	vms := r.VMs()
-	if len(vms) != 1 || vms[0].State != proto.StateRunning {
+	if len(vms) != 1 || vms[0].State != proto.StateRunning || vms[0].NICs[0].IP != "10.200.0.10" {
 		t.Fatalf("vms = %+v", vms)
 	}
 }
@@ -233,7 +455,7 @@ func TestCreateVMAllocatesMgmtNIC(t *testing.T) {
 	if _, err := r.CreateVM(validReq()); err != nil {
 		t.Fatal(err)
 	}
-	spec := n.last().Create
+	spec := n.last().Desired[0].Spec
 	if len(spec.NICs) != 1 || spec.NICs[0].IP != "10.200.0.10" || spec.NICs[0].MAC != "02:0a:c8:00:00:0a" {
 		t.Fatalf("nics = %+v", spec.NICs)
 	}
@@ -254,99 +476,6 @@ func TestDeleteVMReleasesNIC(t *testing.T) {
 	}
 }
 
-func TestReRegisterKnownVMKeepsHubNIC(t *testing.T) {
-	r, n := newTestRegistry(t)
-	vm, _ := r.CreateVM(validReq())
-	r.NodeDisconnected("n1", n)
-	spec := vm.VMSpec
-	spec.NICs = []proto.NIC{{Network: "mgmt", IP: "10.200.0.99", MAC: "02:0a:c8:00:00:63", Port: vm.ID + "-mgmt"}}
-	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
-		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning}}}}, &fakeNode{})
-	if got := r.VMs()[0].NICs[0].IP; got != "10.200.0.10" {
-		t.Fatalf("ip = %s", got)
-	}
-}
-
-func reportUnknown(r *Registry, id, ip string) {
-	mac := ""
-	if validMgmtIP(ip) {
-		mac = nicMAC(ip)
-	}
-	reportUnknownNICs(r, id, []proto.NIC{{Network: "mgmt", IP: ip, MAC: mac, Port: id + "-mgmt"}})
-}
-
-func reportUnknownNICs(r *Registry, id string, nics []proto.NIC) {
-	spec := proto.VMSpec{ID: id, Name: id, NICs: nics}
-	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
-		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: id, State: proto.StateRunning}}}}, &fakeNode{})
-}
-
-func TestAdoptUnknownVMWithTakenIPMarksError(t *testing.T) {
-	r, n := newTestRegistry(t)
-	vm1, _ := r.CreateVM(validReq())
-	spec1 := vm1.VMSpec
-	spec2 := proto.VMSpec{ID: "vm2", Name: "vm2", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", MAC: nicMAC("10.200.0.10"), Port: "vm2-mgmt"}}}
-	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, VMs: []proto.VMRecord{
-		{Spec: spec1, Status: proto.VMStatus{ID: vm1.ID, State: proto.StateRunning}},
-		{Spec: spec2, Status: proto.VMStatus{ID: "vm2", State: proto.StateRunning}},
-	}}, n)
-	byName := map[string]VM{}
-	for _, v := range r.VMs() {
-		byName[v.Name] = v
-	}
-	if v := byName["vm2"]; v.State != proto.StateError || !strings.Contains(v.Error, "10.200.0.10") {
-		t.Fatalf("vm2 = %+v", v)
-	}
-	if v := byName["dev"]; v.State != proto.StateRunning || v.NICs[0].IP != "10.200.0.10" {
-		t.Fatalf("vm1 = %+v", v)
-	}
-}
-
-func TestAdoptUnknownVMWithInvalidIPMarksError(t *testing.T) {
-	for _, ip := range []string{"not-an-ip", "10.200.0.5", "10.201.0.20", "::1", "10.200.255.255"} {
-		r, _ := newTestRegistry(t)
-		reportUnknown(r, "vm2", ip)
-		v := r.VMs()[0]
-		if v.State != proto.StateError || !strings.Contains(v.Error, ip) {
-			t.Fatalf("ip %s: vm = %+v", ip, v)
-		}
-		if len(r.net.NICs("vm2")) != 0 {
-			t.Fatalf("ip %s: adopted", ip)
-		}
-	}
-}
-
-func TestAdoptUnknownVMWithBadNICMarksError(t *testing.T) {
-	good := proto.NIC{Network: "mgmt", IP: "10.200.0.77", MAC: nicMAC("10.200.0.77"), Port: "vm2-mgmt"}
-	with := func(f func(n *proto.NIC)) []proto.NIC { n := good; f(&n); return []proto.NIC{n} }
-	cases := map[string][]proto.NIC{
-		"network":      with(func(n *proto.NIC) { n.Network = "lan" }),
-		"foreign port": with(func(n *proto.NIC) { n.Port = "vm1-mgmt" }),
-		"bad port":     with(func(n *proto.NIC) { n.Port = "x;y" }),
-		"mac":          with(func(n *proto.NIC) { n.MAC = "02:0a:c8:00:00:0a" }),
-		"bad mac":      with(func(n *proto.NIC) { n.MAC = "zz" }),
-		"two nics":     {good, {Network: "mgmt", IP: "10.200.0.78", MAC: nicMAC("10.200.0.78"), Port: "vm2-mgmt"}},
-	}
-	for name, nics := range cases {
-		r, _ := newTestRegistry(t)
-		reportUnknownNICs(r, "vm2", nics)
-		if v := r.VMs()[0]; v.State != proto.StateError || v.Error == "" || len(v.NICs) != 0 {
-			t.Errorf("%s: vm = %+v", name, v)
-		}
-		if len(r.net.NICs("vm2")) != 0 {
-			t.Errorf("%s: adopted", name)
-		}
-	}
-}
-
-func TestAdoptUnknownVMKeepsValidNIC(t *testing.T) {
-	r, _ := newTestRegistry(t)
-	reportUnknown(r, "vm2", "10.200.0.77")
-	if v := r.VMs()[0]; v.State != proto.StateRunning || v.NICs[0].IP != "10.200.0.77" {
-		t.Fatalf("vm = %+v", v)
-	}
-}
-
 func TestNodeConnectedEnrollsChassisAndSendsUnderlay(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	n := &fakeNode{}
@@ -362,61 +491,124 @@ func TestNodeConnectedEnrollsChassisAndSendsUnderlay(t *testing.T) {
 	}
 }
 
-func TestHubRestartKeepsStoredNIC(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "network.json")
-	m1, err := LoadNetModel(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored, err := m1.AllocNICs("vm1", "vm1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	m2, err := LoadNetModel(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := NewRegistry(m2, Config{})
-	spec := proto.VMSpec{ID: "vm1", Name: "vm1", NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.99", MAC: nicMAC("10.200.0.99"), Port: "vm1-mgmt"}}}
-	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
-		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: "vm1", State: proto.StateRunning}}}}, &fakeNode{})
-	got := r.VMs()[0].NICs
-	if len(got) != 1 || got[0] != stored[0] {
-		t.Fatalf("nics = %+v, want %+v", got, stored)
-	}
-	if n := m2.NICs("vm1"); len(n) != 1 || n[0].IP != "10.200.0.10" {
-		t.Fatalf("netmodel = %+v", n)
-	}
-}
-
-func TestAdoptionErrorSurvivesStatusUpdate(t *testing.T) {
-	r, _ := newTestRegistry(t)
-	reportUnknown(r, "vm2", "10.200.0.5")
-	before := r.VMs()[0]
-	r.UpdateStatus(proto.VMStatus{ID: "vm2", State: proto.StateRunning})
-	after := r.VMs()[0]
-	if after.State != proto.StateError || after.Error != before.Error || after.Error == "" {
-		t.Fatalf("after = %+v", after)
-	}
-}
-
 func TestStatusAndRegisterStoreDisks(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
 	disks := []proto.Disk{{Name: "root", File: "root.img", Device: "vda", SizeBytes: 10, AllocatedBytes: 4}}
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: disks})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: disks, Generation: 1})
 	if got := r.VMs()[0].Disks; len(got) != 1 || got[0].Device != "vda" || got[0].AllocatedBytes != 4 {
 		t.Fatalf("after status: %+v", got)
 	}
 	r.NodeDisconnected("n1", n)
 	more := append(disks, proto.Disk{Name: "seed", Device: "vdb", ReadOnly: true})
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
-		VMs: []proto.VMRecord{{Spec: vm.VMSpec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: more}}}}, &fakeNode{})
+		VMs: []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Disks: more, Generation: 1}}}, &fakeNode{})
 	if got := r.VMs()[0].Disks; len(got) != 2 || !got[1].ReadOnly {
 		t.Fatalf("after register: %+v", got)
 	}
 	b, _ := json.Marshal(r.VMs()[0])
 	if !strings.Contains(string(b), `"disks":[{"name":"root"`) {
 		t.Fatalf("json = %s", b)
+	}
+}
+
+type blockingNode struct {
+	entered, release chan struct{}
+}
+
+func (b *blockingNode) Send(proto.Message) error {
+	b.entered <- struct{}{}
+	<-b.release
+	return nil
+}
+
+func TestStalledNodeDoesNotBlockOthers(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	stalled := &blockingNode{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192}, stalled)
+		close(done)
+	}()
+	<-stalled.entered
+	defer func() { close(stalled.release); <-done }()
+
+	created := make(chan error, 1)
+	other := &fakeNode{}
+	go func() {
+		r.NodeConnected(proto.Register{NodeID: "n3", Provider: "vz", CPUs: 4, MemoryMB: 8192}, other)
+		q := validReq()
+		q.NodeID = "n3"
+		_, err := r.CreateVM(q)
+		created <- err
+	}()
+	select {
+	case err := <-created:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CreateVM on n3 blocked by stalled n2")
+	}
+	if m := other.last(); m.Type != "desired" || len(m.Desired) != 1 {
+		t.Fatalf("sent = %+v", m)
+	}
+}
+
+func TestSetPowerBumpsGeneration(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	got, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Power != proto.PowerStopped || got.generation != 2 {
+		t.Fatalf("vm = %+v", got)
+	}
+	if m := n.last(); m.Desired[0].Generation != 2 || m.Desired[0].StopMode != proto.StopGraceful {
+		t.Fatalf("sent = %+v", m)
+	}
+	if _, err := r.SetPower("nope", proto.PowerRunning, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStartResetsProvisionedOnMissingDir(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: proto.ErrVMDirMissing, Generation: 1})
+	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if d := n.last().Desired[0]; d.Provisioned || d.Generation != 2 {
+		t.Fatalf("desired = %+v", d)
+	}
+}
+
+func TestStartOnOfflineNodeResetsProvisionedOnMissingDir(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: proto.ErrVMDirMissing, Generation: 1})
+	r.NodeDisconnected("n1", n)
+	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if r.store.VMs()[0].Provisioned {
+		t.Fatal("provisioned not reset")
+	}
+}
+
+func TestStartKeepsProvisionedOnOtherError(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "start boom", Generation: 1})
+	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !n.last().Desired[0].Provisioned {
+		t.Fatal("provisioned reset")
 	}
 }

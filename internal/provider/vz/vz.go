@@ -292,3 +292,10 @@ func (i *instance) Stop() error {
 	}
 	return nil
 }
+
+func (i *instance) Kill() error {
+	if i.vm.CanStop() {
+		return i.vm.Stop()
+	}
+	return nil
+}

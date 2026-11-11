@@ -65,7 +65,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 
 func startHub(t *testing.T) (*Registry, *httptest.Server) {
 	t.Helper()
-	r := NewRegistry(newTestNet(t), Config{})
+	r := NewRegistry(newTestNet(t), newTestStore(t), Config{})
 	srv := httptest.NewServer(NodeHandler(r, testToken))
 	t.Cleanup(srv.Close)
 	return r, srv
@@ -81,19 +81,27 @@ func TestNodeRegisterAndCreate(t *testing.T) {
 	}
 	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].Online })
 
-	vm, err := r.CreateVM(validReq())
-	if err != nil {
-		t.Fatal(err)
-	}
 	var m proto.Message
 	if err := n.dec.Decode(&m); err != nil {
 		t.Fatal(err)
 	}
-	if m.Type != "create" || m.Create.ID != vm.ID {
+	if m.Type != "desired" || len(m.Desired) != 0 {
 		t.Fatalf("got %+v", m)
 	}
 
-	if err := n.enc.Encode(proto.Message{Type: "status", Status: &proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "10.0.0.2"}}); err != nil {
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = proto.Message{}
+	if err := n.dec.Decode(&m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Type != "desired" || len(m.Desired) != 1 || m.Desired[0].Spec.ID != vm.ID {
+		t.Fatalf("got %+v", m)
+	}
+
+	if err := n.enc.Encode(proto.Message{Type: "status", Status: &proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "10.0.0.2", Generation: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "running", func() bool { return r.VMs()[0].State == proto.StateRunning })
@@ -122,5 +130,30 @@ func TestStaleDisconnectKeepsNewSessionOnline(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if !r.Nodes()[0].Online {
 		t.Fatal("old session's disconnect took the new session offline")
+	}
+}
+
+func TestRefusedRegisterClosesConnection(t *testing.T) {
+	r, srv := startHub(t)
+	if _, err := dialNode(t, srv.URL, testToken, testReg); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "node online", func() bool { return len(r.Nodes()) == 1 })
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := testReg
+	renamed.NodeID, renamed.VMs = "n2", []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}
+	n, err := dialNode(t, srv.URL, testToken, renamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m proto.Message
+	if err := n.dec.Decode(&m); err == nil {
+		t.Fatalf("refused node got %+v", m)
+	}
+	if len(r.Nodes()) != 1 {
+		t.Fatalf("nodes = %+v", r.Nodes())
 	}
 }

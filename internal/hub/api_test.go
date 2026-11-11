@@ -28,7 +28,7 @@ func testAPIConfig() Config {
 func apiServerWith(t *testing.T, cfg Config) (*httptest.Server, *Registry, *NetModel) {
 	t.Helper()
 	nm := newTestNet(t)
-	r := NewRegistry(nm, cfg)
+	r := NewRegistry(nm, newTestStore(t), cfg)
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})
 	keysPath := filepath.Join(t.TempDir(), "keys.json")
 	seed := `[{"id":"k1","name":"test","publicKey":"` + testKey + `","type":"ssh-ed25519","fingerprint":"` + testFingerprint + `"}]`
@@ -238,5 +238,39 @@ func TestAPINetworks(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&out)
 	if len(out) != 1 || out[0]["name"] != "mgmt" || out[0]["subnet"] != "10.200.0.0/16" || out[0]["members"] != float64(1) {
 		t.Fatalf("networks = %v", out)
+	}
+}
+
+func TestAPIPowerEndpoints(t *testing.T) {
+	srv, reg, _ := apiServerWith(t, testAPIConfig())
+	_, vm := postVM(t, srv, validBody)
+	post := func(id, action string) (int, map[string]any) {
+		resp, err := http.Post(srv.URL+"/api/vms/"+id+"/"+action, "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	for _, c := range []struct {
+		action, power string
+		mode          proto.StopMode
+	}{
+		{"shutdown", "stopped", proto.StopGraceful},
+		{"stop", "stopped", proto.StopHard},
+		{"start", "running", ""},
+	} {
+		s, out := post(vm["id"].(string), c.action)
+		if s != http.StatusOK || out["power"] != c.power {
+			t.Fatalf("%s: status = %d body = %v", c.action, s, out)
+		}
+		if got := reg.store.VMs()[0].StopMode; got != c.mode {
+			t.Fatalf("%s: stop mode = %q", c.action, got)
+		}
+		if s, _ := post("unknown", c.action); s != http.StatusNotFound {
+			t.Fatalf("%s unknown: status = %d", c.action, s)
+		}
 	}
 }

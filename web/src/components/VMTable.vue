@@ -18,6 +18,7 @@ const { t } = useI18n()
 const { refresh } = useFleet()
 
 const pendingDelete = ref<VM | null>(null)
+const pendingStop = ref<VM | null>(null)
 const error = ref('')
 const copiedId = ref('')
 
@@ -30,6 +31,22 @@ async function copy(vm: VM) {
   setTimeout(() => {
     if (copiedId.value === vm.id) copiedId.value = ''
   }, 1600)
+}
+
+async function power(action: 'startVM' | 'shutdownVM' | 'stopVM', vm: VM) {
+  error.value = ''
+  try {
+    await api[action](vm.id)
+    await refresh()
+  } catch (e) {
+    error.value = (e as Error).message
+  }
+}
+
+function stopVM() {
+  const vm = pendingStop.value
+  pendingStop.value = null
+  if (vm) power('stopVM', vm)
 }
 
 async function deleteVM() {
@@ -68,7 +85,7 @@ async function deleteVM() {
           <div class="font-token text-base-content/55 text-[0.7rem]">{{ vm.id }}</div>
         </td>
         <td>
-          <StateBadge :label="t(`state.${vm.state}`)" :tone="VM_TONE[vm.state] ?? 'quiet'" :reason="vm.error" />
+          <StateBadge :label="t(`state.${vm.state}`)" :tone="VM_TONE[vm.state] ?? 'quiet'" :reason="vm.error || (vm.state === 'pending' ? t('vms.waitingForNode') : undefined)" />
           <div v-if="vm.error" class="text-base-content/60 mt-0.5 max-w-52 text-xs">{{ vm.error }}</div>
         </td>
         <td class="text-sm">
@@ -102,6 +119,17 @@ async function deleteVM() {
         </td>
         <td>
           <ActionsMenu :name="vm.name">
+            <li v-if="vm.power === 'stopped' || vm.state === 'error'">
+              <button type="button" @click="power('startVM', vm)">{{ t('vms.start') }}</button>
+            </li>
+            <template v-if="vm.power === 'running'">
+              <li>
+                <button type="button" @click="power('shutdownVM', vm)">{{ t('vms.shutdown') }}</button>
+              </li>
+              <li>
+                <button type="button" @click="pendingStop = vm">{{ t('vms.stop') }}</button>
+              </li>
+            </template>
             <li>
               <button type="button" class="text-error" @click="pendingDelete = vm">{{ t('common.delete') }}</button>
             </li>
@@ -110,6 +138,15 @@ async function deleteVM() {
       </tr>
     </tbody>
   </table>
+
+  <ConfirmDialog
+    :open="pendingStop !== null"
+    :title="t('vms.stopTitle', { name: pendingStop?.name })"
+    :body="t('vms.stopBody')"
+    :confirm-label="t('vms.stop')"
+    @confirm="stopVM"
+    @cancel="pendingStop = null"
+  />
 
   <ConfirmDialog
     :open="pendingDelete !== null"

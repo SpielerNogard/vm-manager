@@ -85,25 +85,6 @@ func TestNetModelReleaseFreesIP(t *testing.T) {
 	}
 }
 
-func TestNetModelAdoptConflict(t *testing.T) {
-	m, _ := newModel(t)
-	m.AllocNICs("vm1", "vm1")
-	err := m.AdoptNICs("vm2", "vm2", []proto.NIC{{Network: "mgmt", IP: "10.200.0.10", MAC: nicMAC("10.200.0.10"), Port: "vm2-mgmt"}})
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("err = %v, want ErrConflict", err)
-	}
-	if err := m.AdoptNICs("vm1", "vm1", m.NICs("vm1")); err != nil {
-		t.Fatalf("re-adopting own NICs: %v", err)
-	}
-	if err := m.AdoptNICs("vm2", "vm2", []proto.NIC{{Network: "mgmt", IP: "10.200.0.30", MAC: nicMAC("10.200.0.30"), Port: "vm2-mgmt"}}); err != nil {
-		t.Fatal(err)
-	}
-	n, _ := m.AllocNICs("vm3", "vm3")
-	if n[0].IP != "10.200.0.11" {
-		t.Fatalf("IP = %s", n[0].IP)
-	}
-}
-
 func TestNetModelEnrollStable(t *testing.T) {
 	m, _ := newModel(t)
 	a, _ := m.Enroll("nodeA", "k1")

@@ -94,6 +94,8 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
 
+Upgrade note: VMs created before the hub became the source of truth are deleted when their node first connects. Recreate them. Upgrade the hub and all nodes together; old and new versions don't work with each other.
+
 ## Config
 
 **Hub** (`-config`, default `~/.vm-manager/hub.json`; `-ssh-dir`, default `~/.ssh`):
@@ -107,7 +109,7 @@ VMs created before this version used per-VM SSH ports and must be recreated. `ss
 | `clients.port` | `51821` | Published clients WireGuard port |
 | `guestMTU` | `1300` | Guest mgmt MTU, delivered by OVN DHCP |
 
-**Node:** the required keys are `hub.url`, `hub.token`, `provider` (`vz`), `paths.vms` and `paths.images`. `nodeId` is optional and defaults to the hostname. `capacity.cpus`/`memoryMB` are optional and default to the hardware, minus 4 GB of RAM. `underlay.endpoint` overrides the hub's WireGuard endpoint (default: the host of `hub.url` plus the hub's underlay port). `underlay.mtu` is the `wg-underlay` MTU (default 1420). The node's WireGuard chassis key is stored in `<paths.vms>/chassis.key`.
+**Node:** the required keys are `hub.url`, `hub.token`, `provider` (`vz`), `paths.vms` and `paths.images`. `nodeId` is optional and defaults to the hostname. Set it explicitly: if it changes (or the hostname changes while it is unset), the hub refuses the node because its VMs belong to the old ID. The node keeps its VMs and retries. `capacity.cpus`/`memoryMB` are optional and default to the hardware, minus 4 GB of RAM. `underlay.endpoint` overrides the hub's WireGuard endpoint (default: the host of `hub.url` plus the hub's underlay port). `underlay.mtu` is the `wg-underlay` MTU (default 1420). The node's WireGuard chassis key is stored in `<paths.vms>/chassis.key`.
 
 Provider settings go in a section named after the provider. For `vz` these are `vz.imageURL` and `vz.leasesPath`.
 
@@ -116,9 +118,12 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | Method | Path | |
 |---|---|---|
 | GET | `/api/nodes` | Nodes with provider, capacity, online state, machine info, chassis state, and their config file without the hub token |
-| GET | `/api/vms` | VMs with state and IP |
-| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`) |
-| DELETE | `/api/vms/{id}` | Stop the VM and delete its disks |
+| GET | `/api/vms` | VMs with state, desired power and IP |
+| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`). Also works for an offline node: the VM shows `pending` until the node connects |
+| DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
+| POST | `/api/vms/{id}/start` | Power the VM on |
+| POST | `/api/vms/{id}/shutdown` | ACPI shutdown, hard power-off after 10 s |
+| POST | `/api/vms/{id}/stop` | Immediate hard power-off |
 | GET | `/api/keys` | Stored SSH public keys with type and fingerprint |
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
@@ -132,9 +137,11 @@ Provider settings go in a section named after the provider. For `vz` these are `
 
 ## Behaviour
 
-- The hub keeps SSH keys in `keys.json` and the network model (WireGuard keys, VM NICs, chassis, devices) in `network.json`, both next to its config file. Everything else is in memory.
-- The hub also lists its own user's default public keys (`~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`, `id_rsa.pub`, …), read on each start. They cannot be deleted through the API and are preselected in the GUI. After a hub restart, nodes report their VMs again.
-- The node stores each VM in `paths.vms/<id>/vm.json`. After a node restart, the node reboots its VMs from their existing disks.
+- The hub keeps SSH keys in `keys.json`, the network model (WireGuard keys, VM NICs, chassis, devices) in `network.json`, and VMs and nodes in `vms.json`, all next to its config file. The hub is the source of truth for VMs.
+- The hub also lists its own user's default public keys (`~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`, `id_rsa.pub`, …), read on each start. They cannot be deleted through the API and are preselected in the GUI.
+- On connect and on every change, the hub pushes the desired VMs and their power state to the node. The node converges to it: it deletes VMs the hub does not know, creates missing ones and applies power. A VM that should run is restarted with backoff, and goes to `error` after repeated quick failures.
+- The node stores each VM in `paths.vms/<id>/vm.json`. If a provisioned VM's directory is missing, it shows `error` ("VM directory missing"), and a start rebuilds it blank.
+- Create, delete and power changes for an offline node are accepted and shown as `pending` until the node connects.
 - Nodes join the gateway over a WireGuard underlay (`10.198.0.0/24`); OVN Geneve tunnels run on top of it. VMs get a management NIC on `10.200.0.0/16`, devices get addresses in `10.201.0.0/24`.
 - The hub is meant for a trusted home network. Node↔hub traffic is plain `ws://` with a shared token, and the GUI and API, including device creation, have no user auth.
 - WireGuard devices can only reach the VMs' management IPs and the gateway DNS. The hub API and the OVN databases are firewalled from them.
