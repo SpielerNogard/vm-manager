@@ -59,6 +59,32 @@ type VMStatus struct {
 	IP    string  `json:"ip,omitempty"`
 	Error string  `json:"error,omitempty"`
 	Disks []Disk  `json:"disks,omitempty"`
+	// Generation echoes the DesiredVM generation this status reflects.
+	Generation uint64 `json:"generation,omitempty"`
+}
+
+type Power string
+
+const (
+	PowerRunning Power = "running"
+	PowerStopped Power = "stopped"
+)
+
+type StopMode string
+
+const (
+	StopGraceful StopMode = "graceful"
+	StopHard     StopMode = "hard"
+)
+
+const ErrVMDirMissing = "VM directory missing"
+
+type DesiredVM struct {
+	Spec        VMSpec   `json:"spec"`
+	Power       Power    `json:"power"`
+	StopMode    StopMode `json:"stopMode,omitempty"`
+	Generation  uint64   `json:"generation"`
+	Provisioned bool     `json:"provisioned"`
 }
 
 type VMRecord struct {
@@ -104,6 +130,8 @@ type Message struct {
 	DeleteID string    `json:"deleteId,omitempty"`
 	Status   *VMStatus `json:"status,omitempty"`
 	Underlay *Underlay `json:"underlay,omitempty"`
+	// Desired (type "desired") is the full VM list for the node; nil means no VMs.
+	Desired []DesiredVM `json:"desired,omitempty"`
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }

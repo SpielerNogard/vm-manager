@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"sync"
@@ -120,21 +119,7 @@ func (m *NetModel) mutate(f func(st *netState) error) error {
 	return nil
 }
 
-// save writes via a temp file and rename so a crash never leaves a half-written file.
-func (m *NetModel) save() error {
-	b, err := json.MarshalIndent(m.st, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(m.path), 0o700); err != nil {
-		return err
-	}
-	tmp := m.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, m.path)
-}
+func (m *NetModel) save() error { return saveJSON(m.path, m.st) }
 
 // nextFree returns the first address in [first, last] that taken does not contain.
 func nextFree(first, last string, taken func(ip string) bool) (string, error) {
