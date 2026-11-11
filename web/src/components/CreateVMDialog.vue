@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
@@ -12,9 +12,9 @@ const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
 const router = useRouter()
-const { onlineNodes, keys, refresh } = useFleet()
+const { onlineNodes, keys, networks, refresh } = useFleet()
 
-const form = ref<CreateVMRequest>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [] })
+const form = ref<CreateVMRequest>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [], networkIds: [] })
 const error = ref('')
 const busy = ref(false)
 
@@ -28,6 +28,8 @@ watch(open, (isOpen) => {
   const only = keys.value.length === 1 ? keys.value[0] : undefined
   f.sshKeyIds = hubKeys.length || !only ? hubKeys : [only.id]
 })
+
+const userNetworks = computed(() => networks.value.filter((n) => !n.builtin))
 
 function addDisk() {
   const n = form.value.dataDisks.length
@@ -47,6 +49,7 @@ async function submit() {
     await api.createVM(form.value)
     form.value.name = ''
     form.value.dataDisks = []
+    form.value.networkIds = []
     open.value = false
     await refresh()
   } catch (e) {
@@ -167,6 +170,19 @@ async function submit() {
               </span>
               <span class="font-token text-base-content/55 block truncate text-[0.7rem]">{{ k.fingerprint }}</span>
             </span>
+          </label>
+        </fieldset>
+
+        <fieldset v-if="userNetworks.length" class="col-span-2">
+          <legend class="mb-1 text-sm font-medium">{{ t('create.networks') }}</legend>
+          <label
+            v-for="n in userNetworks"
+            :key="n.id"
+            class="hover:bg-base-200/50 rounded-field flex cursor-pointer items-center gap-3 px-2 py-1.5"
+          >
+            <input v-model="form.networkIds" type="checkbox" class="checkbox checkbox-sm" :value="n.id" />
+            <span class="text-sm font-medium">{{ n.name }}</span>
+            <span class="font-token text-base-content/55 text-xs">{{ n.subnet }}</span>
           </label>
         </fieldset>
 

@@ -74,9 +74,11 @@ export interface NIC {
 }
 
 export interface Network {
+  id: string
   name: string
   subnet: string
-  members: number
+  builtin: boolean
+  members: string[]
 }
 
 export interface Device {
@@ -104,6 +106,7 @@ export interface CreateVMRequest {
   diskGB: number
   dataDisks: DataDisk[]
   sshKeyIds: string[]
+  networkIds?: string[]
 }
 
 async function text(path: string): Promise<string> {
@@ -136,6 +139,10 @@ export const api = {
   addKey: (name: string, publicKey: string) => request<SSHKey>('POST', '/api/keys', { name, publicKey }),
   deleteKey: (id: string) => request<void>('DELETE', `/api/keys/${id}`),
   networks: () => request<Network[]>('GET', '/api/networks'),
+  createNetwork: (req: { name: string; subnet?: string }) => request<Network>('POST', '/api/networks', req),
+  deleteNetwork: (id: string) => request<void>('DELETE', `/api/networks/${id}`),
+  setVMNetworks: (id: string, networkIds: string[], restartAllowed: boolean) =>
+    request<VM>('PUT', `/api/vms/${id}/networks?restartAllowed=${restartAllowed}`, { networkIds }),
   devices: () => request<Device[]>('GET', '/api/devices'),
   addDevice: (name: string) => request<{ device: Device; config: string }>('POST', '/api/devices', { name }),
   deleteDevice: (id: string) => request<void>('DELETE', `/api/devices/${id}`),

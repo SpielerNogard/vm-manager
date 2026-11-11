@@ -17,6 +17,10 @@
     "devices": {
       "label": "Geräte",
       "blurb": "WireGuard-Client-Geräte. Ein Gerät erreicht jede VM über ihren Management-Hostnamen."
+    },
+    "networks": {
+      "label": "Netzwerke",
+      "blurb": "Private Netzwerke, denen VMs beitreten können. VMs im selben Netzwerk erreichen sich als NAME.NETZWERK.internal."
     }
   },
   "topbar": {
@@ -92,7 +96,8 @@
     "addDisk": "Disk hinzufügen",
     "sshKeys": "SSH-Keys",
     "noKeys": "Noch kein Key gespeichert.",
-    "submit": "VM erstellen"
+    "submit": "VM erstellen",
+    "networks": "Netzwerke"
   },
   "keys": {
     "add": "Key hinzufügen",
@@ -136,12 +141,7 @@
     "onNode": "auf",
     "access": "Zugriff",
     "networks": "Netzwerke",
-    "networksHint": "Die Management-Karte ist von WireGuard-Geräten aus erreichbar. Die NAT-Karte gibt der VM Internetzugang und ist nur von ihrer Node aus erreichbar.",
-    "network": "Netz",
-    "subnet": "Subnetz",
-    "port": "OVN-Port",
-    "nat": "NAT (Internet)",
-    "natHint": "nur Node",
+    "networksHint": "Netzwerke, an die diese VM neben dem Management angebunden ist. Von anderen Mitgliedern erreichbar als NAME.NETZWERK.internal.",
     "rootDisk": "Root-Disk",
     "sshKeys": "SSH-Keys",
     "disks": "Disks",
@@ -151,7 +151,14 @@
     "allocated": "Belegt auf dem Host",
     "notReported": "Vom Node nicht gemeldet",
     "filesystem": "Dateisystem",
-    "mountPath": "Mount-Pfad"
+    "mountPath": "Mount-Pfad",
+    "dnsName": "DNS-Name",
+    "noNetworks": "An kein Netzwerk angebunden.",
+    "editNetworks": "Bearbeiten",
+    "save": "Speichern",
+    "restartTitle": "{name} neu starten?",
+    "restartBody": "Die VM wird neu gestartet, um die Netzwerkänderung anzuwenden.",
+    "restartConfirm": "Speichern und neu starten"
   },
   "chassis": {
     "connected": "verbunden",
@@ -175,5 +182,22 @@
     "deleteBody": "Das Gerät verliert sofort den Zugriff auf alle VMs.",
     "deleteConfirm": "Gerät löschen",
     "qrFailed": "Der QR-Code konnte nicht erzeugt werden. Nutze den Konfigurationstext oder den Download."
+  },
+  "networks": {
+    "add": "Netzwerk hinzufügen",
+    "emptyTitle": "Noch keine Netzwerke",
+    "emptyBody": "Lege ein Netzwerk an, damit VMs sich privat erreichen können.",
+    "subnet": "Subnetz",
+    "automatic": "automatisch",
+    "members": "Mitglieder",
+    "dialogTitle": "Netzwerk hinzufügen",
+    "nameHint": "Kleinbuchstaben, Ziffern und Bindestriche.",
+    "subnetHint": "CIDR, z. B. 10.20.0.0/24. Leer lassen für automatische Wahl.",
+    "create": "Netzwerk erstellen",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Das Netzwerk und sein Subnetz werden entfernt.",
+    "deleteConfirm": "Netzwerk löschen",
+    "inUse": "in Benutzung",
+    "builtin": "integriert"
   }
 }
