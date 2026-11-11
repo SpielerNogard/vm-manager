@@ -50,7 +50,7 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 
 To change a port, set it in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
 
-Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint. To run the hub without the stack, copy `hub.example.json` to `~/.vm-manager/hub.json` and start `./bin/hub`. Without the gateway container, VMs get no network.
+Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint. To run the hub without the stack, start `./bin/hub`; it creates `~/.vm-manager/hub.json` on first start (random token, empty client endpoint) and you finish setup in the GUI. Without the gateway container, VMs get no network.
 
 Add a node: on the **Nodes** page click **Add node** (name: lowercase letters, digits, hyphens). The node appears as `pending` and its detail page shows its `node.json` with copy and download. The hub address in it is editable and defaults to the client endpoint; use `localhost` on the hub's own Mac, or a LAN IP if nodes reach the hub differently. Save it as `~/.vm-manager/node.json` on the node and start it:
 
@@ -120,6 +120,7 @@ Upgrade note: VMs created before the hub became the source of truth are deleted 
 |---|---|---|
 | `token` | random | Shared secret with nodes |
 | `listen` | `:8080` | HTTP listen address |
+| `hub.port` | port of `listen`, or `HUB_PORT` | Published HTTP port, used in generated `node.json` |
 | `underlay.port` | `51820` | Published underlay WireGuard port, handed to nodes |
 | `clients.endpoint` | empty | Address devices connect to; the GUI stays locked until set |
 | `clients.port` | `51821` | Published clients WireGuard port |
@@ -137,9 +138,9 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | POST | `/api/nodes` | Add a node (`{"id"}`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
-| GET | `/api/settings` | Client endpoint, ports, listen address, guest MTU, node token |
-| PUT | `/api/settings` | Update client endpoint and guest MTU |
-| POST | `/api/settings/token` | Regenerate the node token, or set it (`{"token"}`, at least 16 characters) |
+| GET | `/api/settings` | Client endpoint, ports, listen address, guest MTU, node token, plus `setupComplete` and `devices` (device count) |
+| PUT | `/api/settings` | Partial update of `clients.endpoint`, `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
+| POST | `/api/settings/token` | Regenerate the node token (random); returns settings |
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |
 | POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`, optional `networkIds`). Also works for an offline node: the VM shows `pending` until the node connects |
