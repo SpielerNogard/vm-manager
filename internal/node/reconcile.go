@@ -107,12 +107,19 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	a.mu.Lock()
 	f := e.file
 	a.mu.Unlock()
-	nicsChanged := !slices.Equal(f.Spec.NICs, d.Spec.NICs)
-	if nicsChanged {
-		e = a.halt(e)
-		f.Spec.NICs = d.Spec.NICs
-	}
 	f.Power, f.StopMode, f.Generation = d.Power, d.StopMode, d.Generation
+	var reseedErr error
+	if !slices.Equal(f.Spec.NICs, d.Spec.NICs) {
+		e = a.halt(e)
+		oldNICs := f.Spec.NICs
+		f.Spec.NICs = d.Spec.NICs
+		if !f.NeedsPrepare {
+			// Keeping the old NICs on failure leaves a difference, so the next generation retries the reseed.
+			if reseedErr = a.Provider.Reseed(ctx, f, VMDir(a.VMsDir, f.Spec.ID)); reseedErr != nil {
+				f.Spec.NICs = oldNICs
+			}
+		}
+	}
 	if err := SaveVM(a.VMsDir, f); err != nil {
 		log.Printf("vm %s: save: %v", f.Spec.ID, err)
 		return
@@ -121,11 +128,9 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	e.file = f
 	inst, st := e.inst, e.status
 	a.mu.Unlock()
-	if nicsChanged && !f.NeedsPrepare {
-		if err := a.Provider.Reseed(ctx, f, VMDir(a.VMsDir, f.Spec.ID)); err != nil {
-			a.report(proto.VMStatus{ID: f.Spec.ID, State: proto.StateError, Error: "reseed: " + err.Error()})
-			return
-		}
+	if reseedErr != nil {
+		a.report(proto.VMStatus{ID: f.Spec.ID, State: proto.StateError, Error: "reseed: " + reseedErr.Error()})
+		return
 	}
 	live := inst != nil
 	if live {

@@ -409,6 +409,36 @@ func TestReconcileReseedFailure(t *testing.T) {
 	}
 }
 
+func TestReconcileReseedRetriedAfterFailure(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	p.mu.Lock()
+	p.failReseed = true
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
+	waitState(t, a, "a", proto.StateError, 2)
+	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 1 {
+		t.Fatalf("vm.json after failed reseed = %+v, want old NICs", f)
+	}
+	p.mu.Lock()
+	p.failReseed = false
+	p.events = nil
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 3, mgmtNIC, netNIC)})
+	eventually(t, "restarted", func() bool {
+		st, _ := a.vmStatus("a")
+		return p.instance("a") != first && st.State == proto.StateRunning && st.Generation == 3
+	})
+	if !p.hasEvent("reseed:a") {
+		t.Fatalf("events = %v, want reseed retried", p.gotEvents())
+	}
+	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 2 || f.Spec.NICs[1] != netNIC {
+		t.Fatalf("vm.json = %+v", f)
+	}
+}
+
 func TestReconcilePowerOnlyNoReseed(t *testing.T) {
 	a, p := newReconcileAgent(t)
 	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
