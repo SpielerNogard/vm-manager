@@ -130,7 +130,7 @@ func TestDeleteOnOfflineNode(t *testing.T) {
 func TestStaleStatusKeepsPending(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	if s := r.VMs()[0].State; s != proto.StateRunning {
 		t.Fatalf("state = %s", s)
 	}
@@ -140,11 +140,11 @@ func TestStaleStatusKeepsPending(t *testing.T) {
 	if m := n.last(); m.Type != "desired" || m.Desired[0].Generation != 2 {
 		t.Fatalf("sent = %+v", m)
 	}
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	if s := r.VMs()[0].State; s != proto.StatePending {
 		t.Fatalf("state = %s", s)
 	}
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 2})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 2})
 	if s := r.VMs()[0].State; s != proto.StateRunning {
 		t.Fatalf("state = %s", s)
 	}
@@ -169,7 +169,7 @@ func TestBumpRollsBackOnStoreError(t *testing.T) {
 func TestHubRestartRestoresVMs(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	q := validReq()
 	q.Name, q.CPUs = "fresh", 1
 	fresh, _ := r.CreateVM(q)
@@ -237,24 +237,58 @@ func TestUnknownReportedVMIgnored(t *testing.T) {
 	}
 }
 
-func TestReportedVMOfOtherNodeIgnored(t *testing.T) {
+func TestRegisterRefusedForOtherNodesVM(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192,
-		VMs: []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}}, &fakeNode{})
+	n2 := &fakeNode{}
+	err := r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192,
+		VMs: []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}}, n2)
+	if err == nil || !strings.Contains(err.Error(), vm.ID) || !strings.Contains(err.Error(), "n1") {
+		t.Fatalf("err = %v", err)
+	}
+	if n2.count() != 0 {
+		t.Fatalf("sent to refused node: %+v", n2.sent)
+	}
+	for _, n := range r.Nodes() {
+		if n.ID == "n2" {
+			t.Fatalf("refused node recorded: %+v", n)
+		}
+	}
 	if v := r.VMs()[0]; v.State != proto.StatePending || v.NodeID != "n1" {
 		t.Fatalf("vm = %+v", v)
+	}
+}
+
+func TestStatusFromOtherNodeIgnored(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n2", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "10.0.0.9", Generation: 1})
+	if v := r.VMs()[0]; v.State != proto.StatePending || v.IP != "" || r.store.VMs()[0].Provisioned {
+		t.Fatalf("vm = %+v", v)
+	}
+}
+
+func TestLateOlderStatusKeepsApplied(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful); err != nil {
+		t.Fatal(err)
+	}
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateStopped, Generation: 2})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateStopped, Generation: 1})
+	if s := r.VMs()[0].State; s != proto.StateStopped {
+		t.Fatalf("state = %s", s)
 	}
 }
 
 func TestStatusMarksProvisioned(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "prepare: boom", Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "prepare: boom", Generation: 1})
 	if r.store.VMs()[0].Provisioned {
 		t.Fatal("provisioned after error")
 	}
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	store, err := LoadVMStore(r.store.path)
 	if err != nil {
 		t.Fatal(err)
@@ -354,7 +388,7 @@ func TestNodeOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	r.NodeDisconnected("n1", n)
 	if r.Nodes()[0].Online {
 		t.Fatal("node still online")
@@ -384,7 +418,7 @@ func TestDeleteVM(t *testing.T) {
 func TestUpdateStatus(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "192.168.64.5", Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "192.168.64.5", Generation: 1})
 	got := r.VMs()[0]
 	if got.State != proto.StateRunning || got.IP != "192.168.64.5" {
 		t.Fatalf("vm = %+v", got)
@@ -461,7 +495,7 @@ func TestStatusAndRegisterStoreDisks(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
 	disks := []proto.Disk{{Name: "root", File: "root.img", Device: "vda", SizeBytes: 10, AllocatedBytes: 4}}
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: disks, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Disks: disks, Generation: 1})
 	if got := r.VMs()[0].Disks; len(got) != 1 || got[0].Device != "vda" || got[0].AllocatedBytes != 4 {
 		t.Fatalf("after status: %+v", got)
 	}
@@ -542,8 +576,8 @@ func TestSetPowerBumpsGeneration(t *testing.T) {
 func TestStartResetsProvisionedOnMissingDir(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: proto.ErrVMDirMissing, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: proto.ErrVMDirMissing, Generation: 1})
 	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -552,11 +586,25 @@ func TestStartResetsProvisionedOnMissingDir(t *testing.T) {
 	}
 }
 
+func TestStartOnOfflineNodeResetsProvisionedOnMissingDir(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: proto.ErrVMDirMissing, Generation: 1})
+	r.NodeDisconnected("n1", n)
+	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if r.store.VMs()[0].Provisioned {
+		t.Fatal("provisioned not reset")
+	}
+}
+
 func TestStartKeepsProvisionedOnOtherError(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
-	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "start boom", Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "start boom", Generation: 1})
 	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
 		t.Fatal(err)
 	}

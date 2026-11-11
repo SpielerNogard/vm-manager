@@ -144,20 +144,34 @@ func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
 }
 
 // NodeConnected records the node, takes over statuses of VMs the hub assigned to it and sends it its desired VMs.
-func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
-	underlay := r.nodeConnected(reg, c)
+// It refuses a node reporting VMs of another node, as its empty desired list would delete them.
+func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) error {
+	underlay, err := r.nodeConnected(reg, c)
+	if err != nil {
+		return err
+	}
 	r.push(reg.NodeID)
 	if underlay == nil {
-		return
+		return nil
 	}
 	if err := c.Send(proto.Message{Type: "underlay", Underlay: underlay}); err != nil {
 		log.Printf("node %s: sending underlay: %v", reg.NodeID, err)
 	}
+	return nil
 }
 
-func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay {
+func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underlay, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var foreign []string
+	for _, st := range reg.VMs {
+		if vm, ok := r.vms[st.ID]; ok && vm.NodeID != reg.NodeID {
+			foreign = append(foreign, fmt.Sprintf("%s (owned by node %s)", st.ID, vm.NodeID))
+		}
+	}
+	if len(foreign) > 0 {
+		return nil, fmt.Errorf("reports VMs of other nodes: %s; was its nodeId or hostname changed?", strings.Join(foreign, ", "))
+	}
 	r.nodes[reg.NodeID] = &nodeEntry{
 		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, Online: true,
 			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
@@ -173,20 +187,20 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay
 		}
 	}
 	if reg.ChassisKey == "" {
-		return nil
+		return nil, nil
 	}
 	ch, err := r.net.Enroll(reg.NodeID, reg.ChassisKey)
 	if err != nil {
 		log.Printf("node %s: enrolling chassis: %v", reg.NodeID, err)
-		return nil
+		return nil, nil
 	}
 	underlayPriv, _ := r.net.GatewayKeys()
 	hubKey, err := wgkey.Public(underlayPriv)
 	if err != nil {
 		log.Printf("hub underlay key: %v", err)
-		return nil
+		return nil, nil
 	}
-	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}
+	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}, nil
 }
 
 // NodeDisconnected ignores c if the node has already reconnected with a newer connection.
@@ -299,7 +313,8 @@ func (r *Registry) bump(id string, f func(*VM)) (VM, error) {
 func (r *Registry) SetPower(id string, power proto.Power, mode proto.StopMode) (VM, error) {
 	return r.bump(id, func(vm *VM) {
 		vm.Power, vm.stopMode = power, mode
-		if power == proto.PowerRunning && vm.State == proto.StateError && vm.Error == proto.ErrVMDirMissing {
+		// Error survives a disconnect (state unknown), so this also covers starting while the node is offline.
+		if power == proto.PowerRunning && vm.Error == proto.ErrVMDirMissing {
 			vm.provisioned = false
 		}
 	})
@@ -341,17 +356,18 @@ func (r *Registry) push(nodeID string) {
 	}
 }
 
-func (r *Registry) UpdateStatus(st proto.VMStatus) {
+// UpdateStatus ignores statuses of VMs that do not belong to nodeID.
+func (r *Registry) UpdateStatus(nodeID string, st proto.VMStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if vm, ok := r.vms[st.ID]; ok {
+	if vm, ok := r.vms[st.ID]; ok && vm.NodeID == nodeID {
 		r.applyStatus(vm, st)
 	}
 }
 
 // applyStatus records a reported status; r.mu must be held.
 func (r *Registry) applyStatus(vm *VM, st proto.VMStatus) {
-	vm.State, vm.IP, vm.Error, vm.Disks, vm.applied = st.State, st.IP, st.Error, st.Disks, st.Generation
+	vm.State, vm.IP, vm.Error, vm.Disks, vm.applied = st.State, st.IP, st.Error, st.Disks, max(vm.applied, st.Generation)
 	if vm.provisioned || !slices.Contains([]proto.VMState{proto.StateStarting, proto.StateRunning, proto.StateStopped}, st.State) {
 		return
 	}

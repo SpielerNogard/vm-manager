@@ -55,7 +55,10 @@ func NodeHandler(r *Registry, token string) http.Handler {
 		}
 		node := &yamuxNode{enc: proto.NewEncoder(ctrl)}
 		id := m.Register.NodeID
-		r.NodeConnected(*m.Register, node)
+		if err := r.NodeConnected(*m.Register, node); err != nil {
+			log.Printf("node %s refused: %v", id, err)
+			return
+		}
 		log.Printf("node %s connected (%d VMs)", id, len(m.Register.VMs))
 		defer func() {
 			r.NodeDisconnected(id, node)
@@ -67,7 +70,7 @@ func NodeHandler(r *Registry, token string) http.Handler {
 				return
 			}
 			if m.Type == "status" && m.Status != nil {
-				r.UpdateStatus(*m.Status)
+				r.UpdateStatus(id, *m.Status)
 			}
 		}
 	})

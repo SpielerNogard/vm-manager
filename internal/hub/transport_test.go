@@ -132,3 +132,28 @@ func TestStaleDisconnectKeepsNewSessionOnline(t *testing.T) {
 		t.Fatal("old session's disconnect took the new session offline")
 	}
 }
+
+func TestRefusedRegisterClosesConnection(t *testing.T) {
+	r, srv := startHub(t)
+	if _, err := dialNode(t, srv.URL, testToken, testReg); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "node online", func() bool { return len(r.Nodes()) == 1 })
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := testReg
+	renamed.NodeID, renamed.VMs = "n2", []proto.VMStatus{{ID: vm.ID, State: proto.StateRunning, Generation: 1}}
+	n, err := dialNode(t, srv.URL, testToken, renamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m proto.Message
+	if err := n.dec.Decode(&m); err == nil {
+		t.Fatalf("refused node got %+v", m)
+	}
+	if len(r.Nodes()) != 1 {
+		t.Fatalf("nodes = %+v", r.Nodes())
+	}
+}
