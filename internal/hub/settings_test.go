@@ -53,6 +53,9 @@ func TestSettingsPutValidation(t *testing.T) {
 	for _, b := range []string{
 		`{"clients":{"endpoint":"http://x"}}`, `{"clients":{"endpoint":"x:51821"}}`, `{"clients":{"endpoint":"a b"}}`,
 		`{"token":""}`, `{"token":"short"}`, `{"token":"has space 0123456789"}`, `{"guestMTU":100}`, `{"guestMTU":9001}`,
+		`{"clients":{"endpoint":""}}`, `{"clients":{"endpoint":"-"}}`, `{"clients":{"endpoint":"a..b"}}`, `{"clients":{"endpoint":"*"}}`,
+		`{"clients":{"endpoint":"a=b"}}`, `{"clients":{"endpoint":"a,b"}}`, `{"clients":{"endpoint":"[::1]"}}`, `{"clients":{"endpoint":"-a.b"}}`,
+		`{"clients":{"endpoint":"a-.b"}}`, `{"clients":{"endpoint":".a"}}`, `{"clients":{"endpoint":"a."}}`, `{"clients":{"endpoint":"fe80::1%eth0"}}`,
 		`{"listen":":9"}`, `{"clients":{"port":1}}`, `{"hub":{"port":1}}`,
 	} {
 		if s, body := doJSON(t, "PUT", srv.URL+"/api/settings", b); s != 400 {
@@ -131,10 +134,27 @@ func TestSetupGuard(t *testing.T) {
 			waitFor(t, "node offline", func() bool { ns := r.Nodes(); return len(ns) == 1 && !ns[0].Online })
 		}()
 	}
+	if s := status("DELETE", "/api/keys/k1", ""); s != 409 {
+		t.Errorf("DELETE keys = %d", s)
+	}
+	if s := status("POST", "/api/settings/token", ""); s != 200 {
+		t.Errorf("POST settings/token = %d", s)
+	}
 	if s := status("PUT", "/api/settings", `{"clients":{"endpoint":"vmm.lan"}}`); s != 200 {
 		t.Fatalf("PUT settings = %d", s)
 	}
 	if s := status("POST", "/api/keys", `{}`); s == 409 {
 		t.Errorf("POST keys still locked")
+	}
+}
+
+func TestSettingsIPv6EndpointInDeviceConfig(t *testing.T) {
+	srv, _, _ := settingsServer(t, freshConfig())
+	if s, body := doJSON(t, "PUT", srv.URL+"/api/settings", `{"clients":{"endpoint":"fd00::1"}}`); s != 200 {
+		t.Fatalf("PUT = %d %s", s, body)
+	}
+	_, created := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"laptop"}`)
+	if !strings.Contains(string(created), "Endpoint = [fd00::1]:51821") {
+		t.Fatalf("device = %s", created)
 	}
 }

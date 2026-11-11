@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -23,13 +24,13 @@ type settingsPatch struct {
 	GuestMTU *int    `json:"guestMTU"`
 }
 
+var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
+
 func validEndpoint(s string) error {
-	bad := s == "" || strings.ContainsFunc(s, unicode.IsSpace) || strings.ContainsAny(s, "/@?#") ||
-		(strings.Contains(s, ":") && net.ParseIP(s) == nil)
-	if bad {
-		return fmt.Errorf("%w: clients.endpoint must be a host name or IP without scheme or port", ErrInvalid)
+	if net.ParseIP(s) != nil || (len(s) <= 253 && hostName.MatchString(s)) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("%w: clients.endpoint must be a host name or IP without scheme or port", ErrInvalid)
 }
 
 func validToken(s string) error {
@@ -99,7 +100,7 @@ func setupGuard(cfg *ConfigStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		p := req.URL.Path
 		mutating := req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions
-		exempt := strings.HasPrefix(p, "/api/settings") || strings.HasPrefix(p, "/api/gateway/") || p == "/api/nodes/connect"
+		exempt := p == "/api/settings" || strings.HasPrefix(p, "/api/settings/") || strings.HasPrefix(p, "/api/gateway/") || p == "/api/nodes/connect"
 		if mutating && strings.HasPrefix(p, "/api/") && !exempt && cfg.Get().Clients.Endpoint == "" {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "setup incomplete: set the client endpoint in settings"})
 			return

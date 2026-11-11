@@ -210,7 +210,7 @@ func TestAPIDevicesLifecycle(t *testing.T) {
 	}
 }
 
-func TestAPIDeviceNeedsEndpoint(t *testing.T) {
+func TestAPIDeviceBlockedBeforeSetup(t *testing.T) {
 	cfg := testAPIConfig()
 	cfg.Clients.Endpoint = ""
 	srv, _, nm := apiServerWith(t, cfg)

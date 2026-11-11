@@ -109,10 +109,6 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 			return
 		}
 		c := cfg.Get()
-		if c.Clients.Endpoint == "" && !q.OnHub {
-			writeError(w, fmt.Errorf("%w: set clients.endpoint in the hub config before adding devices", ErrConflict))
-			return
-		}
 		d, err := net.AddDevice(q.Name, q.OnHub)
 		if err != nil {
 			writeError(w, err)

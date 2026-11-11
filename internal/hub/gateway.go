@@ -2,6 +2,8 @@ package hub
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"slices"
 	"sort"
 	"time"
@@ -109,10 +111,10 @@ MTU = %d
 
 [Peer]
 PublicKey = %s
-Endpoint = %s:%d
+Endpoint = %s
 AllowedIPs = 10.200.0.0/16, 10.201.0.0/24
 PersistentKeepalive = 25
-`, d.IP, d.PrivateKey, mtu, clientsPub, endpoint, port)
+`, d.IP, d.PrivateKey, mtu, clientsPub, net.JoinHostPort(endpoint, strconv.Itoa(port)))
 }
 
 func (r *Registry) clientsPublicKey() (string, error) {
