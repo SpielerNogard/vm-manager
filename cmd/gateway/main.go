@@ -62,21 +62,7 @@ func main() {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	call := func(method, path string, body []byte) ([]byte, error) {
-		req, err := http.NewRequest(method, *hubURL+path, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Authorization", "Bearer "+cfg.Token)
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("%s %s: %s", method, path, resp.Status)
-		}
-		return b, nil
+		return callHub(client, *hubURL, cfg.Token, method, path, body)
 	}
 
 	var lastHash [32]byte
@@ -168,4 +154,22 @@ func validateState(st hub.GatewayState) error {
 		return errors.New("incomplete gateway state (missing keys or guest MTU)")
 	}
 	return nil
+}
+
+func callHub(client *http.Client, baseURL, token, method, path string, body []byte) ([]byte, error) {
+	req, err := http.NewRequest(method, baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("%s %s: %s", method, path, resp.Status)
+	}
+	return b, nil
 }

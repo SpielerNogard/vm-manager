@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -42,3 +44,27 @@ type testErr struct{}
 func (testErr) Error() string { return "boom" }
 
 var errTest = testErr{}
+
+func TestCallHubAcceptsAny2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/status" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	if _, err := callHub(srv.Client(), srv.URL, "tok", "POST", "/status", nil); err != nil {
+		t.Fatalf("204: %v", err)
+	}
+	if b, err := callHub(srv.Client(), srv.URL, "tok", "GET", "/state", nil); err != nil || string(b) != "ok" {
+		t.Fatalf("200: %q, %v", b, err)
+	}
+	if _, err := callHub(srv.Client(), srv.URL, "bad", "GET", "/state", nil); err == nil {
+		t.Fatal("401 accepted")
+	}
+}
