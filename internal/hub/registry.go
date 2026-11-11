@@ -68,9 +68,9 @@ type Node struct {
 }
 
 type ChassisState struct {
-	IP            string    `json:"ip"`
-	LastHandshake time.Time `json:"lastHandshake,omitempty"`
-	Registered    bool      `json:"registered"`
+	IP            string     `json:"ip"`
+	LastHandshake *time.Time `json:"lastHandshake,omitempty"`
+	Registered    bool       `json:"registered"`
 }
 
 type VM struct {

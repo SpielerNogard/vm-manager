@@ -49,7 +49,7 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, cfg.Token))
-	mux.Handle("/api/", hub.APIHandler(r, keys))
+	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg))
 	mux.Handle("/", spa(dist))
 
 	log.Printf("hub listening on %s, keys in %s", cfg.Listen, keysPath)
