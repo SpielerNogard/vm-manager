@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import NetworkRows from '@/components/NetworkRows.vue'
 import StateBadge from '@/components/StateBadge.vue'
 import { useFleet } from '@/composables/useFleet'
 import { formatBytes, formatMB, VM_TONE } from '@/lib/format'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const { vms, keys, networks, loaded, refresh } = useFleet()
 
 const vm = computed(() => vms.value.find((v) => v.id === route.params.id))
@@ -168,15 +170,7 @@ async function copy() {
         </div>
 
         <form v-if="editingNetworks" class="space-y-2" @submit.prevent="saveNetworks">
-          <label
-            v-for="n in attachable"
-            :key="n.id"
-            class="hover:bg-base-200/50 rounded-field flex cursor-pointer items-center gap-3 px-2 py-1.5"
-          >
-            <input v-model="selectedNetworks" type="checkbox" class="checkbox checkbox-sm" :value="n.id" />
-            <span class="text-sm font-medium">{{ n.name }}</span>
-            <span class="font-token text-base-content/55 text-xs">{{ n.subnet }}</span>
-          </label>
+          <NetworkRows v-model="selectedNetworks" :networks="attachable" @manage="router.push({ name: 'networks' })" />
           <div v-if="networkError" role="alert" class="alert alert-error alert-soft text-sm">{{ networkError }}</div>
           <div class="flex justify-end gap-2">
             <button type="button" class="btn btn-sm btn-ghost" @click="editingNetworks = false">{{ t('common.cancel') }}</button>

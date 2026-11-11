@@ -7,6 +7,7 @@ import { api, type CreateVMRequest } from '@/api'
 import { useFleet } from '@/composables/useFleet'
 
 import AppIcon from './AppIcon.vue'
+import NetworkRows from './NetworkRows.vue'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -14,7 +15,7 @@ const { t } = useI18n()
 const router = useRouter()
 const { onlineNodes, keys, networks, refresh } = useFleet()
 
-const form = ref<CreateVMRequest>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [], networkIds: [] })
+const form = ref<CreateVMRequest & { networkIds: string[] }>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [], networkIds: [] })
 const error = ref('')
 const busy = ref(false)
 
@@ -40,6 +41,11 @@ function addDisk() {
 function goToKeys() {
   open.value = false
   void router.push({ name: 'keys', query: { add: '1' } })
+}
+
+function goToNetworks() {
+  open.value = false
+  void router.push({ name: 'networks' })
 }
 
 async function submit() {
@@ -150,6 +156,12 @@ async function submit() {
         </fieldset>
 
         <fieldset class="col-span-2">
+          <legend class="mb-1 text-sm font-medium">{{ t('create.networks') }}</legend>
+          <p class="text-base-content/60 mb-2 text-xs">{{ t('create.networksHint') }}</p>
+          <NetworkRows v-model="form.networkIds" :networks="userNetworks" @manage="goToNetworks" />
+        </fieldset>
+
+        <fieldset class="col-span-2">
           <legend class="mb-1 text-sm font-medium">{{ t('create.sshKeys') }}</legend>
           <div
             v-if="!keys.length"
@@ -170,19 +182,6 @@ async function submit() {
               </span>
               <span class="font-token text-base-content/55 block truncate text-[0.7rem]">{{ k.fingerprint }}</span>
             </span>
-          </label>
-        </fieldset>
-
-        <fieldset v-if="userNetworks.length" class="col-span-2">
-          <legend class="mb-1 text-sm font-medium">{{ t('create.networks') }}</legend>
-          <label
-            v-for="n in userNetworks"
-            :key="n.id"
-            class="hover:bg-base-200/50 rounded-field flex cursor-pointer items-center gap-3 px-2 py-1.5"
-          >
-            <input v-model="form.networkIds" type="checkbox" class="checkbox checkbox-sm" :value="n.id" />
-            <span class="text-sm font-medium">{{ n.name }}</span>
-            <span class="font-token text-base-content/55 text-xs">{{ n.subnet }}</span>
           </label>
         </fieldset>
 

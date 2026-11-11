@@ -97,7 +97,10 @@
     "sshKeys": "SSH keys",
     "noKeys": "No key stored yet.",
     "submit": "Create VM",
-    "networks": "Networks"
+    "networks": "Networks",
+    "networksHint": "VMs on the same network reach each other as NAME.NETWORK.internal.",
+    "network": "Network",
+    "removeNetwork": "Remove network"
   },
   "keys": {
     "add": "Add key",
