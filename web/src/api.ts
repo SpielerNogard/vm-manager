@@ -62,6 +62,12 @@ export interface NIC {
   port: string
 }
 
+export interface Network {
+  name: string
+  subnet: string
+  members: number
+}
+
 export interface Device {
   id: string
   name: string
@@ -115,6 +121,7 @@ export const api = {
   keys: () => request<SSHKey[]>('GET', '/api/keys'),
   addKey: (name: string, publicKey: string) => request<SSHKey>('POST', '/api/keys', { name, publicKey }),
   deleteKey: (id: string) => request<void>('DELETE', `/api/keys/${id}`),
+  networks: () => request<Network[]>('GET', '/api/networks'),
   devices: () => request<Device[]>('GET', '/api/devices'),
   addDevice: (name: string) => request<{ device: Device; config: string }>('POST', '/api/devices', { name }),
   deleteDevice: (id: string) => request<void>('DELETE', `/api/devices/${id}`),

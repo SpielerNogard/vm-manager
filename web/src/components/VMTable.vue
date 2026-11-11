@@ -64,7 +64,7 @@ async function deleteVM() {
     <tbody>
       <tr v-for="vm in vms" :key="vm.id">
         <td>
-          <div class="font-medium">{{ vm.name }}</div>
+          <RouterLink :to="{ name: 'vm', params: { id: vm.id } }" class="font-medium hover:underline">{{ vm.name }}</RouterLink>
           <div class="font-token text-base-content/55 text-[0.7rem]">{{ vm.id }}</div>
         </td>
         <td>

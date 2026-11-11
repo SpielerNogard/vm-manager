@@ -125,6 +125,26 @@
     "open": "{name} öffnen",
     "chassis": "Chassis"
   },
+  "vm": {
+    "notFound": "Keine VM mit der ID {id}.",
+    "onNode": "auf",
+    "access": "Zugriff",
+    "networks": "Netzwerke",
+    "networksHint": "Die Management-Karte ist von WireGuard-Geräten aus erreichbar. Die NAT-Karte gibt der VM Internetzugang und ist nur von ihrer Node aus erreichbar.",
+    "network": "Netz",
+    "subnet": "Subnetz",
+    "port": "OVN-Port",
+    "nat": "NAT (Internet)",
+    "natHint": "nur Node",
+    "rootDisk": "Root-Disk",
+    "sshKeys": "SSH-Keys",
+    "disks": "Disks",
+    "disk": "Disk",
+    "device": "Gerät",
+    "size": "Größe",
+    "filesystem": "Dateisystem",
+    "mountPath": "Mount-Pfad"
+  },
   "chassis": {
     "connected": "verbunden",
     "handshakeAgo": "Handshake vor {n} s",

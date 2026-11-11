@@ -125,6 +125,26 @@
     "open": "Open {name}",
     "chassis": "Chassis"
   },
+  "vm": {
+    "notFound": "No VM with ID {id}.",
+    "onNode": "on",
+    "access": "Access",
+    "networks": "Networks",
+    "networksHint": "The management NIC is reachable from WireGuard devices. The NAT NIC gives the VM internet access and is only reachable from its node.",
+    "network": "Network",
+    "subnet": "Subnet",
+    "port": "OVN port",
+    "nat": "NAT (internet)",
+    "natHint": "node only",
+    "rootDisk": "Root disk",
+    "sshKeys": "SSH keys",
+    "disks": "Disks",
+    "disk": "Disk",
+    "device": "Device",
+    "size": "Size",
+    "filesystem": "Filesystem",
+    "mountPath": "Mount path"
+  },
   "chassis": {
     "connected": "connected",
     "handshakeAgo": "handshake {n} s ago",
