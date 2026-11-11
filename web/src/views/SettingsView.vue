@@ -31,11 +31,13 @@ function seed(s: Settings) {
   mtu.value = s.guestMTU
 }
 if (settings.value) seed(settings.value)
-const stop = watch(settings, (s) => {
-  if (!s) return
-  seed(s)
-  stop()
-})
+else {
+  const stop = watch(settings, (s) => {
+    if (!s) return
+    seed(s)
+    stop()
+  })
+}
 
 const tabs: Tab[] = ['networking', 'security', 'guests']
 const setupPending = computed(() => settings.value?.setupComplete === false)
@@ -113,7 +115,7 @@ watch(tab, () => {
               class="flex items-center gap-2"
               :class="tab === id ? 'menu-active' : ''"
               :aria-selected="tab === id"
-              :aria-controls="`panel-${tab}`"
+              :aria-controls="`panel-${id}`"
               @click="tab = id"
             >
               <span class="grow text-left">{{ t(`settings.tabs.${id}`) }}</span>
