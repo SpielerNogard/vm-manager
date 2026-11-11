@@ -22,7 +22,10 @@ const { nodes, vms, settings, loaded, refresh } = useFleet()
 const node = computed(() => nodes.value.find((n) => n.id === route.params.id))
 const nodeVMs = computed(() => vms.value.filter((vm) => vm.nodeId === route.params.id))
 const config = computed(() => flatten(node.value?.config ?? {}))
-const connectedAt = computed(() => node.value && new Date(node.value.connectedAt).toLocaleString(locale.value))
+const connectedAt = computed(() => {
+  const d = node.value && node.value.state !== 'pending' ? new Date(node.value.connectedAt) : null
+  return d && d.getFullYear() > 1 ? d.toLocaleString(locale.value) : ''
+})
 const formatCPUs = (n: number) => `${n} vCPU`
 
 const DEBOUNCE_MS = 300
@@ -109,7 +112,7 @@ async function deleteNode() {
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold tracking-tight">{{ node.id }}</h1>
           <StateBadge :label="t(`state.${node.state}`)" :tone="node.state === 'online' ? 'good' : 'quiet'" />
-          <span class="badge badge-sm badge-outline font-token">{{ node.provider }}</span>
+          <span v-if="node.provider" class="badge badge-sm badge-outline font-token">{{ node.provider }}</span>
         </div>
         <p class="text-base-content/65 mt-1 text-sm">
           <span class="font-token">{{ node.hostname }}</span>
@@ -120,9 +123,12 @@ async function deleteNode() {
       <div class="mb-6 grid gap-4 lg:grid-cols-2">
         <section class="border-base-300 rounded-box space-y-4 border p-4">
           <h2 class="font-semibold">{{ t('node.capacity') }}</h2>
-          <MeterBar :label="t('node.cpu')" :used="node.cpus - node.freeCpus" :total="node.cpus" :format="formatCPUs" />
-          <MeterBar :label="t('node.memory')" :used="node.memoryMB - node.freeMemoryMB" :total="node.memoryMB" :format="formatMB" />
-          <p class="text-base-content/60 text-xs">{{ t('node.capacityHint') }}</p>
+          <p v-if="node.state === 'pending'" class="text-base-content/60 text-sm">—</p>
+          <template v-else>
+            <MeterBar :label="t('node.cpu')" :used="node.cpus - node.freeCpus" :total="node.cpus" :format="formatCPUs" />
+            <MeterBar :label="t('node.memory')" :used="node.memoryMB - node.freeMemoryMB" :total="node.memoryMB" :format="formatMB" />
+            <p class="text-base-content/60 text-xs">{{ t('node.capacityHint') }}</p>
+          </template>
         </section>
 
         <section class="border-base-300 rounded-box border p-4">

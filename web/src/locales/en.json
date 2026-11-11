@@ -241,7 +241,7 @@
     "endpoint": "Client endpoint",
     "endpointHint": "Address devices and nodes use to reach the hub",
     "endpointChangeTitle": "Change client endpoint?",
-    "endpointChangeBody": "Existing device configs keep the old address; download them again.",
+    "endpointChangeBody": "{count} device(s) keep the old address in their configs; download them again.",
     "listen": "Listen address",
     "hubPort": "Hub port",
     "underlayPort": "Underlay port",

@@ -45,7 +45,10 @@ const setupPending = computed(() => settings.value?.setupComplete === false)
 async function apply(forTab: Tab, call: () => Promise<Settings>) {
   error.value = ''
   try {
-    seed(await call())
+    const s = await call()
+    if (forTab === 'networking') endpoint.value = s.clients.endpoint
+    else if (forTab === 'security') token.value = s.token
+    else mtu.value = s.guestMTU
     await refresh()
     savedTab.value = forTab
   } catch (e) {
@@ -85,7 +88,7 @@ async function copyToken() {
 
 const dialog = computed(() =>
   pending.value === 'endpoint'
-    ? { title: t('settings.endpointChangeTitle'), body: t('settings.endpointChangeBody'), label: t('settings.confirm') }
+    ? { title: t('settings.endpointChangeTitle'), body: t('settings.endpointChangeBody', { count: settings.value?.devices ?? 0 }), label: t('settings.confirm') }
     : { title: t('settings.tokenChangeTitle'), body: t('settings.tokenChangeBody'), label: t('settings.tokenChangeConfirm') },
 )
 
