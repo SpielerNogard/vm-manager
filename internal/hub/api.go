@@ -35,7 +35,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 		r.SetGatewayStatus(s)
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) {
+	networkViews := func() []map[string]any {
 		members := map[string][]string{}
 		for vmID, nics := range net.AllNICs() {
 			for _, n := range nics {
@@ -53,7 +53,17 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 		for _, n := range net.Networks() {
 			out = append(out, view(n.ID, n.Name, n.Subnet, false))
 		}
-		writeJSON(w, http.StatusOK, out)
+		return out
+	}
+	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, networkViews()) })
+	mux.HandleFunc("GET /api/networks/{id}", func(w http.ResponseWriter, req *http.Request) {
+		for _, n := range networkViews() {
+			if n["id"] == req.PathValue("id") {
+				writeJSON(w, http.StatusOK, n)
+				return
+			}
+		}
+		writeError(w, fmt.Errorf("%w: network %q", ErrNotFound, req.PathValue("id")))
 	})
 	mux.HandleFunc("POST /api/networks", func(w http.ResponseWriter, req *http.Request) {
 		var q struct {
@@ -136,6 +146,15 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 	})
 	mux.HandleFunc("GET /api/nodes", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.Nodes()) })
 	mux.HandleFunc("GET /api/vms", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.VMs()) })
+	mux.HandleFunc("GET /api/vms/{id}", func(w http.ResponseWriter, req *http.Request) {
+		for _, vm := range r.VMs() {
+			if vm.ID == req.PathValue("id") {
+				writeJSON(w, http.StatusOK, vm)
+				return
+			}
+		}
+		writeError(w, fmt.Errorf("%w: vm %q", ErrNotFound, req.PathValue("id")))
+	})
 	mux.HandleFunc("POST /api/vms", func(w http.ResponseWriter, req *http.Request) {
 		var q CreateVMRequest
 		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
