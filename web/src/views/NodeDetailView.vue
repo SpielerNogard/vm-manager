@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
@@ -25,9 +25,11 @@ const config = computed(() => flatten(node.value?.config ?? {}))
 const connectedAt = computed(() => node.value && new Date(node.value.connectedAt).toLocaleString(locale.value))
 const formatCPUs = (n: number) => `${n} vCPU`
 
+const DEBOUNCE_MS = 300
 const host = ref('')
 const nodeJson = ref('')
 const configError = ref('')
+const copyError = ref('')
 const copied = ref(false)
 const confirmDelete = ref(false)
 const deleteError = ref('')
@@ -40,18 +42,27 @@ watch(
   { immediate: true },
 )
 
+let fetchTimer: ReturnType<typeof setTimeout> | undefined
+onUnmounted(() => clearTimeout(fetchTimer))
+
 watch(
   () => [route.params.id, host.value] as const,
-  async ([id, h]) => {
+  ([id, h]) => {
+    clearTimeout(fetchTimer)
     if (typeof id !== 'string') return
-    try {
-      const json = await api.nodeConfig(id, h.trim() || undefined)
-      if (id !== route.params.id || h !== host.value) return
-      nodeJson.value = json
-      configError.value = ''
-    } catch (e) {
-      configError.value = (e as Error).message
-    }
+    fetchTimer = setTimeout(async () => {
+      const current = () => id === route.params.id && h === host.value
+      try {
+        const json = await api.nodeConfig(id, h.trim() || undefined)
+        if (!current()) return
+        nodeJson.value = json
+        configError.value = ''
+      } catch (e) {
+        if (!current()) return
+        nodeJson.value = ''
+        configError.value = (e as Error).message
+      }
+    }, DEBOUNCE_MS)
   },
   { immediate: true },
 )
@@ -60,9 +71,10 @@ async function copyConfig() {
   try {
     await navigator.clipboard.writeText(nodeJson.value)
     copied.value = true
+    copyError.value = ''
     setTimeout(() => (copied.value = false), 1500)
   } catch {
-    configError.value = t('node.copyFailed')
+    copyError.value = t('node.copyFailed')
   }
 }
 
@@ -148,6 +160,7 @@ async function deleteNode() {
           <span class="text-base-content/60 mt-1 block text-xs">{{ t('node.hubAddressHint') }}</span>
         </label>
         <div v-if="configError" role="alert" class="alert alert-error alert-soft text-sm">{{ configError }}</div>
+        <div v-if="copyError" role="alert" class="alert alert-error alert-soft text-sm">{{ copyError }}</div>
         <pre class="bg-base-200 rounded-box font-token overflow-x-auto p-3 text-xs">{{ nodeJson }}</pre>
         <div class="flex flex-wrap gap-2">
           <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="copyConfig">
