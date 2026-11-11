@@ -14,8 +14,22 @@ import (
 )
 
 type fakeNode struct {
-	mu   sync.Mutex
-	sent []proto.Message
+	mu     sync.Mutex
+	sent   []proto.Message
+	closed bool
+}
+
+func (f *fakeNode) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = true
+	return nil
+}
+
+func (f *fakeNode) isClosed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
 }
 
 func (f *fakeNode) Send(m proto.Message) error {
@@ -196,7 +210,7 @@ func TestHubRestartRestoresVMs(t *testing.T) {
 		t.Fatalf("vms = %+v", vms)
 	}
 	nodes := r2.Nodes()
-	if len(nodes) != 1 || nodes[0].ID != "n1" || nodes[0].Online || nodes[0].FreeCPUs != 1 || nodes[0].Provider != "vz" {
+	if len(nodes) != 1 || nodes[0].ID != "n1" || nodes[0].State != "offline" || nodes[0].FreeCPUs != 1 || nodes[0].Provider != "vz" {
 		t.Fatalf("nodes = %+v", nodes)
 	}
 	n := &fakeNode{}
@@ -390,7 +404,7 @@ func TestNodeOffline(t *testing.T) {
 	}
 	r.UpdateStatus("n1", proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
 	r.NodeDisconnected("n1", n)
-	if r.Nodes()[0].Online {
+	if r.Nodes()[0].State != "offline" {
 		t.Fatal("node still online")
 	}
 	if s := r.VMs()[0].State; s != proto.StateUnknown {
@@ -515,6 +529,8 @@ func TestStatusAndRegisterStoreDisks(t *testing.T) {
 type blockingNode struct {
 	entered, release chan struct{}
 }
+
+func (b *blockingNode) Close() error { return nil }
 
 func (b *blockingNode) Send(proto.Message) error {
 	b.entered <- struct{}{}
@@ -747,5 +763,163 @@ func TestNewRegistryReleasesOrphanNICs(t *testing.T) {
 		if p.Name == "ghost-mgmt" {
 			t.Fatalf("orphan port %+v", p)
 		}
+	}
+}
+
+func nodeByID(r *Registry, id string) (Node, bool) {
+	for _, n := range r.Nodes() {
+		if n.ID == id {
+			return n, true
+		}
+	}
+	return Node{}, false
+}
+
+func TestCreateNodePending(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	if _, err := r.CreateNode("mac-x"); err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := nodeByID(r, "mac-x"); !ok || n.State != "pending" {
+		t.Fatalf("node = %+v ok = %v", n, ok)
+	}
+	if _, err := r.CreateNode("Mac X"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := r.CreateNode("mac-x"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(newTestNet(t), store, newTestConfig(t, Config{}))
+	if n, _ := nodeByID(r2, "mac-x"); n.State != "pending" {
+		t.Fatalf("after restart: %+v", n)
+	}
+	if n, _ := nodeByID(r2, "n1"); n.State != "offline" {
+		t.Fatalf("after restart: %+v", n)
+	}
+}
+
+func TestPendingNodeGoesOnline(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.CreateNode("mac-x")
+	c := &fakeNode{}
+	r.NodeConnected(proto.Register{NodeID: "mac-x", Provider: "vz", CPUs: 4, MemoryMB: 8192}, c)
+	if len(r.Nodes()) != 2 {
+		t.Fatalf("nodes = %+v", r.Nodes())
+	}
+	if n, _ := nodeByID(r, "mac-x"); n.State != "online" || n.CPUs != 4 {
+		t.Fatalf("node = %+v", n)
+	}
+	r.NodeDisconnected("mac-x", c)
+	if n, _ := nodeByID(r, "mac-x"); n.State != "offline" {
+		t.Fatalf("node = %+v", n)
+	}
+	store, _ := LoadVMStore(r.store.path)
+	if n, _ := nodeByID(NewRegistry(newTestNet(t), store, newTestConfig(t, Config{})), "mac-x"); n.State != "offline" {
+		t.Fatalf("after restart: %+v", n)
+	}
+}
+
+func TestSelfRegistrationStillWorks(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.NodeConnected(proto.Register{NodeID: "Some.Host", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})
+	if n, ok := nodeByID(r, "Some.Host"); !ok || n.State != "online" {
+		t.Fatalf("node = %+v", n)
+	}
+}
+
+func TestDeleteNode(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteNode("n1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+	r.DeleteVM(vm.ID)
+	if err := r.DeleteNode("nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+
+	c := &fakeNode{}
+	_, pub, _ := wgkey.Generate()
+	r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192, ChassisKey: pub}, c)
+	if err := r.DeleteNode("n2"); err != nil {
+		t.Fatal(err)
+	}
+	if !c.isClosed() {
+		t.Fatal("connection not closed")
+	}
+	if _, ok := nodeByID(r, "n2"); ok {
+		t.Fatal("node still listed")
+	}
+	if ch := r.GatewayState().Chassis; len(ch) != 0 {
+		t.Fatalf("chassis = %+v", ch)
+	}
+	r.NodeDisconnected("n2", c)
+	if _, ok := nodeByID(r, "n2"); ok {
+		t.Fatal("disconnect resurrected the node")
+	}
+	if err := r.DeleteNode("n1"); err != nil {
+		t.Fatal(err)
+	}
+	store, _ := LoadVMStore(r.store.path)
+	if nodes := NewRegistry(newTestNet(t), store, newTestConfig(t, Config{})).Nodes(); len(nodes) != 0 {
+		t.Fatalf("after restart: %+v", nodes)
+	}
+}
+
+func TestCreateVMOnPendingNode(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.CreateNode("mac-x")
+	q := validReq()
+	q.NodeID = "mac-x"
+	if _, err := r.CreateVM(q); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNodeConfig(t *testing.T) {
+	var c Config
+	c.Token, c.Hub.Port, c.Clients.Endpoint = "tok-1234567890abcdef", 8080, "100.114.108.108"
+	cfg := newTestConfig(t, c)
+	r := NewRegistry(newTestNet(t), newTestStore(t), cfg)
+	r.CreateNode("mac-x")
+	parse := func(host string) map[string]any {
+		t.Helper()
+		b, err := r.NodeConfig("mac-x", host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	got := parse("")
+	hub := got["hub"].(map[string]any)
+	paths := got["paths"].(map[string]any)
+	if got["nodeId"] != "mac-x" || hub["url"] != "ws://100.114.108.108:8080/api/nodes/connect" || hub["token"] != c.Token ||
+		got["provider"] != "vz" || paths["vms"] != "~/.vm-manager/vms" || paths["images"] != "~/.vm-manager/images" {
+		t.Fatalf("config = %v", got)
+	}
+	cfg.Update(func(c *Config) error { c.Token = "tok-new-0123456789"; return nil })
+	got = parse("localhost")
+	if hub := got["hub"].(map[string]any); hub["url"] != "ws://localhost:8080/api/nodes/connect" || hub["token"] != "tok-new-0123456789" {
+		t.Fatalf("config = %v", got)
+	}
+	if hub := parse("fd00::1")["hub"].(map[string]any); hub["url"] != "ws://[fd00::1]:8080/api/nodes/connect" {
+		t.Fatalf("url = %v", hub["url"])
+	}
+	if _, err := r.NodeConfig("mac-x", "http://x:1"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := r.NodeConfig("nope", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
 	}
 }

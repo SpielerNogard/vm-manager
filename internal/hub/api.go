@@ -143,6 +143,37 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		io.WriteString(w, conf)
 	})
 	mux.HandleFunc("GET /api/nodes", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.Nodes()) })
+	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		n, err := r.CreateNode(q.ID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, n)
+	})
+	mux.HandleFunc("DELETE /api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
+		if err := r.DeleteNode(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/nodes/{id}/config", func(w http.ResponseWriter, req *http.Request) {
+		b, err := r.NodeConfig(req.PathValue("id"), req.URL.Query().Get("host"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(b)
+	})
 	mux.HandleFunc("GET /api/vms", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.VMs()) })
 	mux.HandleFunc("GET /api/vms/{id}", func(w http.ResponseWriter, req *http.Request) {
 		for _, vm := range r.VMs() {

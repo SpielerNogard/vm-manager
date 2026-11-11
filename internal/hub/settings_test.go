@@ -98,9 +98,9 @@ func TestSettingsTokenRegenerate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new token: %v", err)
 	}
-	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].Online })
+	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "online" })
 	n.sess.Close()
-	waitFor(t, "node offline", func() bool { ns := r.Nodes(); return len(ns) == 1 && !ns[0].Online })
+	waitFor(t, "node offline", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "offline" })
 }
 
 func TestSetupGuard(t *testing.T) {
@@ -128,10 +128,10 @@ func TestSetupGuard(t *testing.T) {
 	if n, err := dialNode(t, nodeSrv.URL, cfg.Get().Token, testReg); err != nil {
 		t.Errorf("node connect: %v", err)
 	} else {
-		waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].Online })
+		waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "online" })
 		defer func() {
 			n.sess.Close()
-			waitFor(t, "node offline", func() bool { ns := r.Nodes(); return len(ns) == 1 && !ns[0].Online })
+			waitFor(t, "node offline", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "offline" })
 		}()
 	}
 	if s := status("DELETE", "/api/keys/k1", ""); s != 409 {

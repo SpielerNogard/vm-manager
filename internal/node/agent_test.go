@@ -225,7 +225,7 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 		srv.Close()
 		<-done
 	})
-	eventually(t, "node online", func() bool { n := reg.Nodes(); return len(n) == 1 && n[0].Online })
+	eventually(t, "node online", func() bool { n := reg.Nodes(); return len(n) == 1 && n[0].State == "online" })
 	return &testEnv{reg: reg, agent: a, provider: p, stop: cancel, runDone: done}
 }
 

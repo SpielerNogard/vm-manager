@@ -149,5 +149,5 @@ func TestLiveTokenCheck(t *testing.T) {
 	if _, err := dialNode(t, srv.URL, "new", testReg); err != nil {
 		t.Fatalf("new token: %v", err)
 	}
-	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].Online })
+	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "online" })
 }

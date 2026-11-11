@@ -79,7 +79,7 @@ func TestNodeRegisterAndCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].Online })
+	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "online" })
 
 	var m proto.Message
 	if err := n.dec.Decode(&m); err != nil {
@@ -128,7 +128,7 @@ func TestStaleDisconnectKeepsNewSessionOnline(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	old.sess.Close()
 	time.Sleep(200 * time.Millisecond)
-	if !r.Nodes()[0].Online {
+	if r.Nodes()[0].State != "online" {
 		t.Fatal("old session's disconnect took the new session offline")
 	}
 }
@@ -155,5 +155,21 @@ func TestRefusedRegisterClosesConnection(t *testing.T) {
 	}
 	if len(r.Nodes()) != 1 {
 		t.Fatalf("nodes = %+v", r.Nodes())
+	}
+}
+
+func TestDeleteNodeClosesSession(t *testing.T) {
+	r, srv := startHub(t)
+	n, err := dialNode(t, srv.URL, testToken, testReg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "online" })
+	if err := r.DeleteNode("n1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session closed", n.sess.IsClosed)
+	if ns := r.Nodes(); len(ns) != 0 {
+		t.Fatalf("nodes = %+v", ns)
 	}
 }
