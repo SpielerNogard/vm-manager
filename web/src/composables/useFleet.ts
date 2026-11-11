@@ -17,14 +17,14 @@ const onlineNodes = computed(() => nodes.value.filter((n) => n.state === 'online
 
 async function refresh() {
   try {
-    ;[nodes.value, vms.value, keys.value, devices.value, networks.value, settings.value] = await Promise.all([
-      api.nodes(),
-      api.vms(),
-      api.keys(),
-      api.devices(),
-      api.networks(),
-      api.settings(),
+    // Settings and networks are optional extras; their failure must not stall the rest of the poll.
+    const [core, extras] = await Promise.all([
+      Promise.all([api.nodes(), api.vms(), api.keys(), api.devices()]),
+      Promise.allSettled([api.networks(), api.settings()]),
     ])
+    ;[nodes.value, vms.value, keys.value, devices.value] = core
+    if (extras[0].status === 'fulfilled') networks.value = extras[0].value
+    if (extras[1].status === 'fulfilled') settings.value = extras[1].value
     loadError.value = null
   } catch (e) {
     loadError.value = e as Error

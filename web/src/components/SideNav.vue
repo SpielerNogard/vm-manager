@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 
@@ -15,7 +14,8 @@ const locked = (section: Section) => section !== 'settings' && settings.value?.s
 
 const route = useRoute()
 
-const count = (section: Section) => ({ nodes, vms, keys, devices, networks, settings: ref([]) })[section].value.length
+const counts: Record<Exclude<Section, 'settings'>, { value: unknown[] }> = { nodes, vms, keys, devices, networks }
+const count = (section: Exclude<Section, 'settings'>) => counts[section].value.length
 const isActive = (section: Section) => route.name === section || route.meta.section === section
 </script>
 
@@ -27,7 +27,7 @@ const isActive = (section: Section) => route.name === section || route.meta.sect
       </p>
       <ul class="menu menu-sm w-full gap-0.5 p-0">
         <li v-for="item in group.items" :key="item.name">
-          <span v-if="locked(item.name)" class="flex items-center gap-2.5 opacity-40" aria-disabled="true">
+          <span v-if="locked(item.name)" class="menu-disabled flex items-center gap-2.5" aria-disabled="true">
             <AppIcon :name="item.icon" />
             <span class="grow">{{ t(`nav.${item.name}.label`) }}</span>
             <AppIcon name="lock" />

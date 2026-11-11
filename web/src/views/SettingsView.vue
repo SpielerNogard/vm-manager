@@ -41,6 +41,23 @@ else {
 
 const tabs: Tab[] = ['networking', 'security', 'guests']
 const setupPending = computed(() => settings.value?.setupComplete === false)
+const ports = computed(() => [
+  { key: 'listen', value: settings.value?.listen },
+  { key: 'hubPort', value: settings.value?.hub.port },
+  { key: 'underlayPort', value: settings.value?.underlay.port },
+  { key: 'clientsPort', value: settings.value?.clients.port },
+])
+
+function onTabKeydown(e: KeyboardEvent) {
+  const last = tabs.length - 1
+  const i = tabs.indexOf(tab.value)
+  const next = { ArrowDown: i === last ? 0 : i + 1, ArrowUp: i === 0 ? last : i - 1, Home: 0, End: last }[e.key]
+  const target = next === undefined ? undefined : tabs[next]
+  if (!target) return
+  e.preventDefault()
+  tab.value = target
+  document.getElementById(`tab-${target}`)?.focus()
+}
 
 async function apply(forTab: Tab, call: () => Promise<Settings>) {
   error.value = ''
@@ -88,7 +105,7 @@ async function copyToken() {
 
 const dialog = computed(() =>
   pending.value === 'endpoint'
-    ? { title: t('settings.endpointChangeTitle'), body: t('settings.endpointChangeBody', { count: settings.value?.devices ?? 0 }), label: t('settings.confirm') }
+    ? { title: t('settings.endpointChangeTitle'), body: t('settings.endpointChangeBody', { count: settings.value?.devices ?? 0 }, settings.value?.devices ?? 0), label: t('settings.confirm') }
     : { title: t('settings.tokenChangeTitle'), body: t('settings.tokenChangeBody'), label: t('settings.tokenChangeConfirm') },
 )
 
@@ -107,9 +124,9 @@ watch(tab, () => {
       {{ t('settings.setupBanner') }}
     </div>
 
-    <DataState :loading="!settings" :empty="false" :empty-title="''">
+    <DataState :loading="!settings">
       <div class="flex flex-col gap-6 md:flex-row">
-        <ul class="menu menu-sm w-full gap-0.5 p-0 md:w-48 md:shrink-0" role="tablist">
+        <ul class="menu menu-sm w-full gap-0.5 p-0 md:w-48 md:shrink-0" role="tablist" aria-orientation="vertical" @keydown="onTabKeydown">
           <li v-for="id in tabs" :key="id" role="presentation">
             <button
               :id="`tab-${id}`"
@@ -118,6 +135,7 @@ watch(tab, () => {
               class="flex items-center gap-2"
               :class="tab === id ? 'menu-active' : ''"
               :aria-selected="tab === id"
+              :tabindex="tab === id ? 0 : -1"
               :aria-controls="`panel-${id}`"
               @click="tab = id"
             >
@@ -137,7 +155,7 @@ watch(tab, () => {
               <span class="text-base-content/60 mt-1 text-xs">{{ t('settings.endpointHint') }}</span>
             </label>
             <div class="grid grid-cols-2 gap-3">
-              <label v-for="[key, value] in [['listen', settings?.listen], ['hubPort', settings?.hub.port], ['underlayPort', settings?.underlay.port], ['clientsPort', settings?.clients.port]]" :key="key" class="form-control">
+              <label v-for="{ key, value } in ports" :key="key" class="form-control">
                 <span class="label-text mb-1 text-sm font-medium">{{ t(`settings.${key}`) }}</span>
                 <input :value="value" type="text" class="input input-sm input-bordered w-full font-token" readonly />
               </label>
