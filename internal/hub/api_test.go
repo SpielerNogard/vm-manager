@@ -242,7 +242,7 @@ func TestAPINetworks(t *testing.T) {
 }
 
 func TestAPIPowerEndpoints(t *testing.T) {
-	srv := apiServer(t)
+	srv, reg, _ := apiServerWith(t, testAPIConfig())
 	_, vm := postVM(t, srv, validBody)
 	post := func(id, action string) (int, map[string]any) {
 		resp, err := http.Post(srv.URL+"/api/vms/"+id+"/"+action, "application/json", nil)
@@ -254,13 +254,23 @@ func TestAPIPowerEndpoints(t *testing.T) {
 		json.NewDecoder(resp.Body).Decode(&out)
 		return resp.StatusCode, out
 	}
-	for action, power := range map[string]string{"shutdown": "stopped", "stop": "stopped", "start": "running"} {
-		s, out := post(vm["id"].(string), action)
-		if s != http.StatusOK || out["power"] != power {
-			t.Fatalf("%s: status = %d body = %v", action, s, out)
+	for _, c := range []struct {
+		action, power string
+		mode          proto.StopMode
+	}{
+		{"shutdown", "stopped", proto.StopGraceful},
+		{"stop", "stopped", proto.StopHard},
+		{"start", "running", ""},
+	} {
+		s, out := post(vm["id"].(string), c.action)
+		if s != http.StatusOK || out["power"] != c.power {
+			t.Fatalf("%s: status = %d body = %v", c.action, s, out)
 		}
-		if s, _ := post("unknown", action); s != http.StatusNotFound {
-			t.Fatalf("%s unknown: status = %d", action, s)
+		if got := reg.store.VMs()[0].StopMode; got != c.mode {
+			t.Fatalf("%s: stop mode = %q", c.action, got)
+		}
+		if s, _ := post("unknown", c.action); s != http.StatusNotFound {
+			t.Fatalf("%s unknown: status = %d", c.action, s)
 		}
 	}
 }

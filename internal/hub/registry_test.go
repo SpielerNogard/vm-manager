@@ -134,7 +134,7 @@ func TestStaleStatusKeepsPending(t *testing.T) {
 	if s := r.VMs()[0].State; s != proto.StateRunning {
 		t.Fatalf("state = %s", s)
 	}
-	if err := r.bump(vm.ID, func(*VM) {}); err != nil {
+	if _, err := r.bump(vm.ID, func(*VM) {}); err != nil {
 		t.Fatal(err)
 	}
 	if m := n.last(); m.Type != "desired" || m.Desired[0].Generation != 2 {
@@ -148,7 +148,7 @@ func TestStaleStatusKeepsPending(t *testing.T) {
 	if s := r.VMs()[0].State; s != proto.StateRunning {
 		t.Fatalf("state = %s", s)
 	}
-	if err := r.bump("nope", func(*VM) {}); !errors.Is(err, ErrNotFound) {
+	if _, err := r.bump("nope", func(*VM) {}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestBumpRollsBackOnStoreError(t *testing.T) {
 	vm, _ := r.CreateVM(validReq())
 	// a regular file as parent directory makes saving fail
 	r.store.path = filepath.Join(r.net.path, "vms.json")
-	if err := r.bump(vm.ID, func(v *VM) { v.Power = proto.PowerStopped }); err == nil {
+	if _, err := r.bump(vm.ID, func(v *VM) { v.Power = proto.PowerStopped }); err == nil {
 		t.Fatal("bump succeeded")
 	}
 	if got := r.VMs()[0]; got.Power != proto.PowerRunning || got.generation != 1 {
@@ -524,14 +524,14 @@ func TestStalledNodeDoesNotBlockOthers(t *testing.T) {
 func TestSetPowerBumpsGeneration(t *testing.T) {
 	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
-	got, err := r.SetPower(vm.ID, proto.PowerRunning, "")
+	got, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Power != proto.PowerRunning {
+	if got.Power != proto.PowerStopped || got.generation != 2 {
 		t.Fatalf("vm = %+v", got)
 	}
-	if m := n.last(); m.Desired[0].Generation != 2 {
+	if m := n.last(); m.Desired[0].Generation != 2 || m.Desired[0].StopMode != proto.StopGraceful {
 		t.Fatalf("sent = %+v", m)
 	}
 	if _, err := r.SetPower("nope", proto.PowerRunning, ""); !errors.Is(err, ErrNotFound) {
@@ -549,5 +549,18 @@ func TestStartResetsProvisionedOnMissingDir(t *testing.T) {
 	}
 	if d := n.last().Desired[0]; d.Provisioned || d.Generation != 2 {
 		t.Fatalf("desired = %+v", d)
+	}
+}
+
+func TestStartKeepsProvisionedOnOtherError(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: "start boom", Generation: 1})
+	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !n.last().Desired[0].Provisioned {
+		t.Fatal("provisioned reset")
 	}
 }

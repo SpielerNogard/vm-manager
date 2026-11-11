@@ -275,12 +275,12 @@ func (r *Registry) release(id string) {
 }
 
 // bump applies f to the VM's desired state as a new generation and sends it to the node.
-func (r *Registry) bump(id string, f func(*VM)) error {
+func (r *Registry) bump(id string, f func(*VM)) (VM, error) {
 	r.mu.Lock()
 	vm, ok := r.vms[id]
 	if !ok {
 		r.mu.Unlock()
-		return ErrNotFound
+		return VM{}, ErrNotFound
 	}
 	prev := *vm
 	f(vm)
@@ -288,27 +288,21 @@ func (r *Registry) bump(id string, f func(*VM)) error {
 	if err := r.store.PutVM(vm.stored()); err != nil {
 		*vm = prev
 		r.mu.Unlock()
-		return err
+		return VM{}, err
 	}
-	nodeID := vm.NodeID
+	out := *vm
 	r.mu.Unlock()
-	r.push(nodeID)
-	return nil
+	r.push(out.NodeID)
+	return out, nil
 }
 
 func (r *Registry) SetPower(id string, power proto.Power, mode proto.StopMode) (VM, error) {
-	err := r.bump(id, func(vm *VM) {
+	return r.bump(id, func(vm *VM) {
 		vm.Power, vm.stopMode = power, mode
 		if power == proto.PowerRunning && vm.State == proto.StateError && vm.Error == proto.ErrVMDirMissing {
 			vm.provisioned = false
 		}
 	})
-	if err != nil {
-		return VM{}, err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return *r.vms[id], nil
 }
 
 // desiredFor lists the node's desired VMs; r.mu must be held.
