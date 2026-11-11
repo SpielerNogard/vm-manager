@@ -24,14 +24,12 @@ make test
 Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub):
 
 ```sh
-cp deploy/.env.example deploy/.env   # set HUB_TOKEN and CLIENTS_ENDPOINT
+cp deploy/.env.example deploy/.env   # optional: change the published ports
 make stack                           # docker compose -f deploy/compose.yaml up -d --build
 ```
 
 | Variable | Default | |
 |---|---|---|
-| `HUB_TOKEN` | none | Shared hub/node token. Only read on first start, when `/data/hub.json` does not exist yet |
-| `CLIENTS_ENDPOINT` | none | Address devices use to reach the clients WireGuard port |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
