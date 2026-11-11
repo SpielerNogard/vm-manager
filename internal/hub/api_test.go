@@ -221,7 +221,7 @@ func TestAPIDeviceNeedsEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 	var out map[string]string
 	json.NewDecoder(resp.Body).Decode(&out)
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(out["error"], "clients.endpoint") || len(nm.Devices()) != 0 {
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(out["error"], "client endpoint") || len(nm.Devices()) != 0 {
 		t.Fatalf("status = %d out = %v", resp.StatusCode, out)
 	}
 }
@@ -418,9 +418,7 @@ func TestAPIGetNetwork(t *testing.T) {
 }
 
 func TestAPIDeviceOnHub(t *testing.T) {
-	cfg := testAPIConfig()
-	cfg.Clients.Endpoint = ""
-	srv, _, _ := apiServerWith(t, cfg)
+	srv, _, _ := apiServerWith(t, testAPIConfig())
 	s, body := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"mac","onHub":true}`)
 	var out struct {
 		Device struct {

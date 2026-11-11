@@ -242,7 +242,8 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return mux
+	registerSettings(mux, cfg, net)
+	return setupGuard(cfg, mux)
 }
 
 // deviceView is Device without its private key, which only leaves the hub inside a client config.
