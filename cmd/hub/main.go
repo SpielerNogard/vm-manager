@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -38,22 +37,7 @@ func main() {
 		log.Printf("hub SSH key %s (%s)", k.Name, k.Fingerprint)
 	}
 
-	r := hub.NewRegistry(cfg.SSHPorts.Min, cfg.SSHPorts.Max)
-	listeners := map[int]io.Closer{} // only touched from registry hooks, which run under the registry lock
-	r.OnPortOpen = func(p int) error {
-		l, err := hub.ServeSSHPort(r, p)
-		if err != nil {
-			return err
-		}
-		listeners[p] = l
-		return nil
-	}
-	r.OnPortClose = func(p int) {
-		if l, ok := listeners[p]; ok {
-			l.Close()
-			delete(listeners, p)
-		}
-	}
+	r := hub.NewRegistry()
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
@@ -64,7 +48,7 @@ func main() {
 	mux.Handle("/api/", hub.APIHandler(r, keys))
 	mux.Handle("/", spa(dist))
 
-	log.Printf("hub listening on %s, SSH ports %d-%d, keys in %s", cfg.Listen, cfg.SSHPorts.Min, cfg.SSHPorts.Max, keysPath)
+	log.Printf("hub listening on %s, keys in %s", cfg.Listen, keysPath)
 	log.Fatal(http.ListenAndServe(cfg.Listen, mux))
 }
 

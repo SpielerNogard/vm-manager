@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -82,16 +80,6 @@ func (p *fakeProvider) instance(name string) *fakeInstance {
 	return p.started[name]
 }
 
-func freeTCPPort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
-
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -107,23 +95,13 @@ type testEnv struct {
 	reg      *hub.Registry
 	agent    *Agent
 	provider *fakeProvider
-	hubPort  int
 	stop     context.CancelFunc
 	runDone  chan struct{}
 }
 
 func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	t.Helper()
-	port := freeTCPPort(t)
-	reg := hub.NewRegistry(port, port)
-	var listeners []io.Closer
-	reg.OnPortOpen = func(p int) error {
-		l, err := hub.ServeSSHPort(reg, p)
-		if err == nil {
-			listeners = append(listeners, l)
-		}
-		return err
-	}
+	reg := hub.NewRegistry()
 	srv := httptest.NewServer(hub.NodeHandler(reg, "tok"))
 
 	p := newFakeProvider()
@@ -141,12 +119,9 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 		cancel()
 		srv.Close()
 		<-done
-		for _, l := range listeners {
-			l.Close()
-		}
 	})
 	eventually(t, "node online", func() bool { n := reg.Nodes(); return len(n) == 1 && n[0].Online })
-	return &testEnv{reg: reg, agent: a, provider: p, hubPort: port, stop: cancel, runDone: done}
+	return &testEnv{reg: reg, agent: a, provider: p, stop: cancel, runDone: done}
 }
 
 func createReq(name string) hub.CreateVMRequest {
@@ -184,7 +159,7 @@ func TestAgentCreateReachesRunning(t *testing.T) {
 		t.Fatalf("ip = %q", v.IP)
 	}
 	files, _ := LoadVMs(env.agent.VMsDir)
-	if len(files) != 1 || files[0].Spec.ID != vm.ID || files[0].Spec.SSHPort != vm.SSHPort {
+	if len(files) != 1 || files[0].Spec.ID != vm.ID {
 		t.Fatalf("vm.json = %+v", files)
 	}
 	if mac, err := net.ParseMAC(files[0].MAC); err != nil || mac[0]&0x02 == 0 || mac[0]&0x01 != 0 {
@@ -226,7 +201,7 @@ func TestAgentRestoreAfterRestart(t *testing.T) {
 	var good, bad VMFile
 	env := startEnv(t, func(a *Agent, p *fakeProvider) {
 		p.failStart["bad"] = true
-		good = VMFile{Spec: proto.VMSpec{ID: "g1", Name: "good", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}, SSHPort: 0}, MAC: "02:00:00:00:00:01"}
+		good = VMFile{Spec: proto.VMSpec{ID: "g1", Name: "good", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:01"}
 		bad = VMFile{Spec: proto.VMSpec{ID: "b1", Name: "bad", CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}}, MAC: "02:00:00:00:00:02"}
 		SaveVM(a.VMsDir, good)
 		SaveVM(a.VMsDir, bad)
@@ -238,38 +213,6 @@ func TestAgentRestoreAfterRestart(t *testing.T) {
 	})
 	if len(env.provider.prepared) != 0 {
 		t.Fatalf("Prepare called on restore: %v", env.provider.prepared)
-	}
-}
-
-func TestAgentStreamToVM(t *testing.T) {
-	echo, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer echo.Close()
-	go func() {
-		for {
-			c, err := echo.Accept()
-			if err != nil {
-				return
-			}
-			go io.Copy(c, c)
-		}
-	}()
-	env := startEnv(t, func(a *Agent, _ *fakeProvider) { a.sshPort = echo.Addr().(*net.TCPAddr).Port })
-	vm, _ := env.reg.CreateVM(createReq("dev"))
-	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
-
-	c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(env.hubPort))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	c.Write([]byte("hello"))
-	buf := make([]byte, 5)
-	c.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "hello" {
-		t.Fatalf("read %q err %v", buf, err)
 	}
 }
 

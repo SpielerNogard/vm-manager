@@ -2,7 +2,6 @@ package hub
 
 import (
 	"errors"
-	"net"
 	"sync"
 	"testing"
 
@@ -21,44 +20,36 @@ func (f *fakeNode) Send(m proto.Message) error {
 	return nil
 }
 
-func (f *fakeNode) OpenStream() (net.Conn, error) { return nil, errors.New("no streams") }
-
 func (f *fakeNode) last() proto.Message {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sent[len(f.sent)-1]
 }
 
-func newTestRegistry(t *testing.T, min, max int) (*Registry, *fakeNode, *[]int) {
+func newTestRegistry(t *testing.T) (*Registry, *fakeNode) {
 	t.Helper()
-	r := NewRegistry(min, max)
-	var opened []int
-	r.OnPortOpen = func(p int) error { opened = append(opened, p); return nil }
-	r.OnPortClose = func(int) {}
+	r := NewRegistry()
 	n := &fakeNode{}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n)
-	return r, n, &opened
+	return r, n
 }
 
 func validReq() CreateVMRequest {
 	return CreateVMRequest{NodeID: "n1", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, SSHPublicKeys: []string{"ssh-ed25519 AAA"}}
 }
 
-func TestCreateVMSendsCreateAndAllocatesPort(t *testing.T) {
-	r, n, opened := newTestRegistry(t, 22000, 22999)
+func TestCreateVMSendsCreate(t *testing.T) {
+	r, n := newTestRegistry(t)
 	vm, err := r.CreateVM(validReq())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vm.SSHPort != 22000 || vm.State != proto.StatePending || vm.Provider != "vz" {
+	if vm.State != proto.StatePending || vm.Provider != "vz" {
 		t.Fatalf("vm = %+v", vm)
 	}
 	m := n.last()
-	if m.Type != "create" || m.Create == nil || m.Create.SSHPort != 22000 || m.Create.ID != vm.ID {
+	if m.Type != "create" || m.Create == nil || m.Create.ID != vm.ID {
 		t.Fatalf("sent = %+v", m)
-	}
-	if len(*opened) != 1 || (*opened)[0] != 22000 {
-		t.Fatalf("opened = %v", *opened)
 	}
 }
 
@@ -107,7 +98,7 @@ func TestCreateVMRejectsInvalid(t *testing.T) {
 	}
 	for name, mod := range cases {
 		t.Run(name, func(t *testing.T) {
-			r, _, _ := newTestRegistry(t, 22000, 22999)
+			r, _ := newTestRegistry(t)
 			q := validReq()
 			mod(&q)
 			if _, err := r.CreateVM(q); !errors.Is(err, ErrInvalid) {
@@ -119,7 +110,7 @@ func TestCreateVMRejectsInvalid(t *testing.T) {
 		})
 	}
 	t.Run("duplicate name", func(t *testing.T) {
-		r, _, _ := newTestRegistry(t, 22000, 22999)
+		r, _ := newTestRegistry(t)
 		q := validReq()
 		q.CPUs = 1
 		if _, err := r.CreateVM(q); err != nil {
@@ -132,7 +123,7 @@ func TestCreateVMRejectsInvalid(t *testing.T) {
 }
 
 func TestCreateVMCapacity(t *testing.T) {
-	r, _, _ := newTestRegistry(t, 22000, 22999)
+	r, _ := newTestRegistry(t)
 	if _, err := r.CreateVM(validReq()); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +138,7 @@ func TestCreateVMCapacity(t *testing.T) {
 }
 
 func TestNodeOffline(t *testing.T) {
-	r, n, _ := newTestRegistry(t, 22000, 22999)
+	r, n := newTestRegistry(t)
 	vm, err := r.CreateVM(validReq())
 	if err != nil {
 		t.Fatal(err)
@@ -167,15 +158,10 @@ func TestNodeOffline(t *testing.T) {
 	if err := r.DeleteVM(vm.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("delete err = %v", err)
 	}
-	if _, err := r.StreamForPort(vm.SSHPort); err == nil {
-		t.Fatal("stream on offline node")
-	}
 }
 
 func TestDeleteVM(t *testing.T) {
-	r, n, _ := newTestRegistry(t, 22000, 22999)
-	closed := 0
-	r.OnPortClose = func(int) { closed++ }
+	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
 	if err := r.DeleteVM(vm.ID); err != nil {
 		t.Fatal(err)
@@ -183,8 +169,8 @@ func TestDeleteVM(t *testing.T) {
 	if m := n.last(); m.Type != "delete" || m.DeleteID != vm.ID {
 		t.Fatalf("sent = %+v", m)
 	}
-	if len(r.VMs()) != 0 || closed != 1 {
-		t.Fatalf("vms=%d closed=%d", len(r.VMs()), closed)
+	if len(r.VMs()) != 0 {
+		t.Fatalf("vms=%d", len(r.VMs()))
 	}
 	if err := r.DeleteVM(vm.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
@@ -192,7 +178,7 @@ func TestDeleteVM(t *testing.T) {
 }
 
 func TestUpdateStatus(t *testing.T) {
-	r, _, _ := newTestRegistry(t, 22000, 22999)
+	r, _ := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
 	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, IP: "192.168.64.5"})
 	got := r.VMs()[0]
@@ -201,63 +187,21 @@ func TestUpdateStatus(t *testing.T) {
 	}
 }
 
-func TestReRegisterKeepsPort(t *testing.T) {
-	r := NewRegistry(22000, 22999)
-	r.OnPortOpen = func(int) error { return nil }
-	rec := func(id string, port int) proto.VMRecord {
-		return proto.VMRecord{
-			Spec:   proto.VMSpec{ID: id, Name: id, CPUs: 1, MemoryMB: 1024, DiskGB: 10, SSHPublicKeys: []string{"k"}, SSHPort: port},
-			Status: proto.VMStatus{ID: id, State: proto.StateRunning, IP: "192.168.64.2"},
-		}
-	}
-	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, VMs: []proto.VMRecord{rec("a", 22005)}}, &fakeNode{})
-	r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz", CPUs: 4, MemoryMB: 8192, VMs: []proto.VMRecord{rec("b", 22005), rec("c", 30000)}}, &fakeNode{})
-	ports := map[string]int{}
-	for _, vm := range r.VMs() {
-		ports[vm.ID] = vm.SSHPort
-		if vm.State != proto.StateRunning {
-			t.Fatalf("%s state = %s", vm.ID, vm.State)
-		}
-	}
-	if ports["a"] != 22005 {
-		t.Fatalf("a port = %d", ports["a"])
-	}
-	if ports["b"] == 22005 || ports["b"] < 22000 || ports["b"] > 22999 {
-		t.Fatalf("b port = %d", ports["b"])
-	}
-	if ports["c"] < 22000 || ports["c"] > 22999 || ports["c"] == ports["b"] {
-		t.Fatalf("c port = %d", ports["c"])
-	}
-}
-
-func TestReconnectSameNodeKeepsPorts(t *testing.T) {
-	r, n, _ := newTestRegistry(t, 22000, 22999)
+func TestReconnectSameNodeKeepsVMs(t *testing.T) {
+	r, n := newTestRegistry(t)
 	vm, _ := r.CreateVM(validReq())
 	r.NodeDisconnected("n1", n)
 	spec := vm.VMSpec
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192,
 		VMs: []proto.VMRecord{{Spec: spec, Status: proto.VMStatus{ID: vm.ID, State: proto.StateRunning}}}}, &fakeNode{})
 	vms := r.VMs()
-	if len(vms) != 1 || vms[0].SSHPort != vm.SSHPort || vms[0].State != proto.StateRunning {
+	if len(vms) != 1 || vms[0].State != proto.StateRunning {
 		t.Fatalf("vms = %+v", vms)
 	}
 }
 
-func TestPortRangeExhausted(t *testing.T) {
-	r, _, _ := newTestRegistry(t, 22000, 22000)
-	q := validReq()
-	q.CPUs = 1
-	if _, err := r.CreateVM(q); err != nil {
-		t.Fatal(err)
-	}
-	q.Name = "dev2"
-	if _, err := r.CreateVM(q); !errors.Is(err, ErrConflict) {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestCreateVMAcceptsDataDisks(t *testing.T) {
-	r, _, _ := newTestRegistry(t, 22000, 22999)
+	r, _ := newTestRegistry(t)
 	q := validReq()
 	q.DataDisks = []proto.DataDisk{
 		{Name: "data", MountPath: "/data", SizeGB: 1},

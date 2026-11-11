@@ -10,7 +10,7 @@ import (
 
 func TestSaveLoadDelete(t *testing.T) {
 	dir := t.TempDir()
-	a := VMFile{Spec: proto.VMSpec{ID: "a", Name: "a", CPUs: 1, SSHPort: 22001}, MAC: "02:00:00:00:00:01"}
+	a := VMFile{Spec: proto.VMSpec{ID: "a", Name: "a", CPUs: 1, NICs: []proto.NIC{{Network: "mgmt", IP: "10.200.0.10"}}}, MAC: "02:00:00:00:00:01"}
 	b := VMFile{Spec: proto.VMSpec{ID: "b", Name: "b", CPUs: 2}, MAC: "02:00:00:00:00:02"}
 	for _, f := range []VMFile{a, b} {
 		if err := SaveVM(dir, f); err != nil {
@@ -25,7 +25,7 @@ func TestSaveLoadDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Spec.ID != "a" || got[0].MAC != a.MAC || got[0].Spec.SSHPort != 22001 || got[1].Spec.ID != "b" {
+	if len(got) != 2 || got[0].Spec.ID != "a" || got[0].MAC != a.MAC || len(got[0].Spec.NICs) != 1 || got[0].Spec.NICs[0].IP != "10.200.0.10" || got[1].Spec.ID != "b" {
 		t.Fatalf("loaded = %+v", got)
 	}
 

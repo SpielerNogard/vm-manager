@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -11,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -33,8 +31,6 @@ type Agent struct {
 	Config                        json.RawMessage
 	Machine                       *proto.Machine
 
-	sshPort int // guest SSH port; overridden in tests
-
 	mu   sync.Mutex
 	vms  map[string]*vmEntry
 	send func(proto.Message) error // nil while disconnected
@@ -49,9 +45,6 @@ type vmEntry struct {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	if a.sshPort == 0 {
-		a.sshPort = 22
-	}
 	a.vms = map[string]*vmEntry{}
 	if err := a.restoreAll(ctx); err != nil {
 		return err
@@ -123,7 +116,6 @@ func (a *Agent) connect(ctx context.Context) error {
 		a.mu.Unlock()
 	}()
 
-	go a.acceptStreams(sess)
 	dec := json.NewDecoder(ctrl)
 	for {
 		var m proto.Message
@@ -278,49 +270,6 @@ func (a *Agent) report(st proto.VMStatus) {
 		}
 	}
 }
-
-func (a *Agent) acceptStreams(sess *yamux.Session) {
-	for {
-		s, err := sess.Accept()
-		if err != nil {
-			return
-		}
-		go a.handleStream(s)
-	}
-}
-
-func (a *Agent) handleStream(s net.Conn) {
-	br := bufio.NewReader(s)
-	h, err := proto.ReadHeader(br)
-	if err != nil {
-		s.Close()
-		return
-	}
-	a.mu.Lock()
-	var ip string
-	if e, ok := a.vms[h.VMID]; ok {
-		ip = e.status.IP
-	}
-	a.mu.Unlock()
-	if ip == "" {
-		s.Close()
-		return
-	}
-	vm, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(a.sshPort)), 5*time.Second)
-	if err != nil {
-		s.Close()
-		return
-	}
-	proto.Pipe(bufConn{s, br}, vm)
-}
-
-// bufConn keeps bytes already buffered while reading the stream header.
-type bufConn struct {
-	net.Conn
-	r *bufio.Reader
-}
-
-func (b bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 
 func randomMAC() string {
 	b := make([]byte, 6)

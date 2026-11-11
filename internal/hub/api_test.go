@@ -12,7 +12,7 @@ import (
 
 func apiServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	r, _, _ := newTestRegistry(t, 22000, 22999)
+	r, _ := newTestRegistry(t)
 	keysPath := filepath.Join(t.TempDir(), "keys.json")
 	seed := `[{"id":"k1","name":"test","publicKey":"` + testKey + `","type":"ssh-ed25519","fingerprint":"` + testFingerprint + `"}]`
 	if err := os.WriteFile(keysPath, []byte(seed), 0o600); err != nil {
@@ -47,7 +47,7 @@ func TestAPICreateAndList(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d body = %v", resp.StatusCode, vm)
 	}
-	if vm["sshPort"] != float64(22000) || vm["state"] != "pending" || vm["provider"] != "vz" {
+	if vm["state"] != "pending" || vm["provider"] != "vz" {
 		t.Fatalf("vm = %v", vm)
 	}
 
