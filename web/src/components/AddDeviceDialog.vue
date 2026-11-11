@@ -17,7 +17,7 @@ const { refresh } = useFleet()
 const name = ref('')
 const error = ref('')
 const busy = ref(false)
-const created = ref<{ name: string; config: string; qr: string } | null>(null)
+const created = ref<{ name: string; config: string; qr?: string } | null>(null)
 
 watch(open, (isOpen) => {
   if (!isOpen) return
@@ -31,8 +31,13 @@ async function submit() {
   busy.value = true
   try {
     const { device, config } = await api.addDevice(name.value)
-    created.value = { name: device.name, config, qr: await QRCode.toDataURL(config, { margin: 1, width: 240 }) }
-    await refresh()
+    created.value = { name: device.name, config }
+    void refresh()
+    try {
+      created.value.qr = await QRCode.toDataURL(config, { margin: 1, width: 240 })
+    } catch {
+      // The config text and download still work without the QR code.
+    }
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -48,8 +53,9 @@ async function submit() {
 
       <template v-if="created">
         <p class="text-base-content/65 mt-2 text-sm">{{ t('devices.createdHint') }}</p>
+        <p v-if="!created.qr" class="text-warning mt-2 text-xs">{{ t('devices.qrFailed') }}</p>
         <div class="mt-4 flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-          <img :src="created.qr" :alt="t('devices.qrAlt')" class="size-48 shrink-0 rounded bg-white" />
+          <img v-if="created.qr" :src="created.qr" :alt="t('devices.qrAlt')" class="size-48 shrink-0 rounded bg-white" />
           <pre class="font-token bg-base-200 rounded-box max-h-60 w-full overflow-auto p-3 text-xs">{{ created.config }}</pre>
         </div>
         <div class="modal-action">

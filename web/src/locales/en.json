@@ -141,11 +141,12 @@
     "dialogTitle": "Add device",
     "nameHint": "Lowercase letters, digits and hyphens.",
     "create": "Create device",
-    "createdHint": "Import this config into WireGuard now. The private key is not stored and cannot be shown again; delete the device and add it again if you lose it.",
+    "createdHint": "This config contains the device's private key, so treat it as a secret. Import it into WireGuard now; you can download it again from the Devices list.",
     "qrAlt": "WireGuard config as QR code",
     "download": "Download .conf",
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The device loses access to all VMs immediately.",
-    "deleteConfirm": "Delete device"
+    "deleteConfirm": "Delete device",
+    "qrFailed": "The QR code could not be generated. Use the config text or the download."
   }
 }

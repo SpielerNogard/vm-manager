@@ -141,11 +141,12 @@
     "dialogTitle": "Gerät hinzufügen",
     "nameHint": "Kleinbuchstaben, Ziffern und Bindestriche.",
     "create": "Gerät erstellen",
-    "createdHint": "Importiere diese Konfiguration jetzt in WireGuard. Der Private Key wird nicht gespeichert und kann nicht erneut angezeigt werden; bei Verlust das Gerät löschen und neu anlegen.",
+    "createdHint": "Diese Konfiguration enthält den Private Key des Geräts, behandle sie als Geheimnis. Importiere sie jetzt in WireGuard; du kannst sie später erneut aus der Geräteliste herunterladen.",
     "qrAlt": "WireGuard-Konfiguration als QR-Code",
     "download": ".conf herunterladen",
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Das Gerät verliert sofort den Zugriff auf alle VMs.",
-    "deleteConfirm": "Gerät löschen"
+    "deleteConfirm": "Gerät löschen",
+    "qrFailed": "Der QR-Code konnte nicht erzeugt werden. Nutze den Konfigurationstext oder den Download."
   }
 }

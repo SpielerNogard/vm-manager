@@ -21,7 +21,9 @@ export const NAV: NavGroup[] = [
       { name: 'vms', path: '/vms', icon: 'cube' },
     ],
   },
-  { group: 'access', items: [
+  {
+    group: 'access',
+    items: [
       { name: 'keys', path: '/keys', icon: 'key' },
       { name: 'devices', path: '/devices', icon: 'shield' },
     ],
