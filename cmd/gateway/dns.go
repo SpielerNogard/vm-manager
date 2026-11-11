@@ -14,19 +14,28 @@ import (
 type dnsServer struct {
 	mu      sync.RWMutex
 	records map[string]string
+	parents map[string]bool
 }
 
 func (d *dnsServer) setRecords(r map[string]string) {
 	d.mu.Lock()
 	d.records = r
+	d.parents = map[string]bool{}
+	for name := range r {
+		for i := strings.Index(name, "."); i >= 0 && i < len(name)-1; {
+			name = name[i+1:]
+			d.parents[name] = true
+			i = strings.Index(name, ".")
+		}
+	}
 	d.mu.Unlock()
 }
 
-func (d *dnsServer) lookup(name string) (string, bool) {
+func (d *dnsServer) lookup(name string) (ip string, exists bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	ip, ok := d.records[name]
-	return ip, ok
+	return ip, ok || d.parents[name]
 }
 
 func (d *dnsServer) handle(network string, req []byte, upstream string) ([]byte, error) {

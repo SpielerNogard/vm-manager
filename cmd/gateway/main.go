@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -91,6 +92,10 @@ func main() {
 			log.Print(err)
 			continue
 		}
+		if err := validateState(st); err != nil {
+			log.Print(err)
+			continue
+		}
 		records := map[string]string{}
 		for _, p := range st.Ports {
 			records[strings.ToLower(p.Hostname)+"."] = p.IP
@@ -116,9 +121,7 @@ func main() {
 }
 
 func apply(run runner, st hub.GatewayState) error {
-	if err := reconcileNB(run, st); err != nil {
-		return err
-	}
+	nbErr := reconcileNB(run, st)
 	var underlay, clients []peer
 	for _, c := range st.Chassis {
 		underlay = append(underlay, peer{c.PublicKey, c.IP + "/32"})
@@ -126,10 +129,9 @@ func apply(run runner, st hub.GatewayState) error {
 	for _, d := range st.Devices {
 		clients = append(clients, peer{d.PublicKey, d.IP + "/32"})
 	}
-	if err := syncWG(run, "wg-underlay", st.UnderlayKey, 51820, underlay); err != nil {
-		return err
-	}
-	return syncWG(run, "wg-clients", st.ClientsKey, 51821, clients)
+	return errors.Join(nbErr,
+		syncWG(run, "wg-underlay", st.UnderlayKey, 51820, underlay),
+		syncWG(run, "wg-clients", st.ClientsKey, 51821, clients))
 }
 
 func observe(run runner) hub.GatewayStatus {
@@ -159,4 +161,11 @@ func upstreamResolver() string {
 		}
 	}
 	return "127.0.0.11:53"
+}
+
+func validateState(st hub.GatewayState) error {
+	if st.UnderlayKey == "" || st.ClientsKey == "" || st.GuestMTU <= 0 {
+		return errors.New("incomplete gateway state (missing keys or guest MTU)")
+	}
+	return nil
 }

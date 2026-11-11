@@ -73,6 +73,12 @@ func TestDNSAnswers(t *testing.T) {
 	if m.RCode != dnsmessage.RCodeNameError {
 		t.Fatalf("gone: %+v", m)
 	}
+	for _, n := range []string{"mgmt.internal.", "internal."} {
+		m = query(t, addr, n, dnsmessage.TypeA)
+		if m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 0 {
+			t.Fatalf("%s: %+v", n, m)
+		}
+	}
 	s.setRecords(map[string]string{})
 	m = query(t, addr, "dev.mgmt.internal.", dnsmessage.TypeA)
 	if m.RCode != dnsmessage.RCodeNameError {
