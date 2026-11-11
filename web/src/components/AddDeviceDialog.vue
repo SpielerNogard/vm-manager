@@ -15,6 +15,9 @@ const { t } = useI18n()
 const { refresh } = useFleet()
 
 const name = ref('')
+const onHub = ref(false)
+// Opened via loopback means the browser most likely runs on the hub machine itself.
+const openedOnHub = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
 const error = ref('')
 const busy = ref(false)
 const created = ref<{ name: string; config: string; qr?: string } | null>(null)
@@ -22,6 +25,7 @@ const created = ref<{ name: string; config: string; qr?: string } | null>(null)
 watch(open, (isOpen) => {
   if (!isOpen) return
   name.value = ''
+  onHub.value = openedOnHub
   error.value = ''
   created.value = null
 })
@@ -30,7 +34,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    const { device, config } = await api.addDevice(name.value)
+    const { device, config } = await api.addDevice(name.value, onHub.value)
     created.value = { name: device.name, config }
     void refresh()
     try {
@@ -79,6 +83,13 @@ async function submit() {
             placeholder="macbook"
           />
           <span class="text-base-content/60 mt-1 block text-xs">{{ t('devices.nameHint') }}</span>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3">
+          <input v-model="onHub" type="checkbox" class="checkbox checkbox-sm mt-0.5" />
+          <span>
+            <span class="block text-sm font-medium">{{ t('devices.onHub') }}</span>
+            <span class="text-base-content/60 block text-xs">{{ t('devices.onHubHint') }}</span>
+          </span>
         </label>
         <div v-if="error" role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>
         <div class="modal-action">

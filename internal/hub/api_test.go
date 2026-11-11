@@ -415,3 +415,35 @@ func TestAPIGetNetwork(t *testing.T) {
 		t.Fatalf("unknown: status = %d body = %s", s, body)
 	}
 }
+
+func TestAPIDeviceOnHub(t *testing.T) {
+	cfg := testAPIConfig()
+	cfg.Clients.Endpoint = ""
+	srv, _, _ := apiServerWith(t, cfg)
+	s, body := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"mac","onHub":true}`)
+	var out struct {
+		Device struct {
+			ID    string `json:"id"`
+			OnHub bool   `json:"onHub"`
+		} `json:"device"`
+		Config string `json:"config"`
+	}
+	json.Unmarshal(body, &out)
+	if s != http.StatusCreated || !out.Device.OnHub || !strings.Contains(out.Config, "Endpoint = 127.0.0.1:51821") {
+		t.Fatalf("status = %d body = %s", s, body)
+	}
+	if s, conf := doJSON(t, "GET", srv.URL+"/api/devices/"+out.Device.ID+"/config", ""); s != http.StatusOK || !strings.Contains(string(conf), "Endpoint = 127.0.0.1:51821") {
+		t.Fatalf("download: status = %d config = %s", s, conf)
+	}
+	if _, list := doJSON(t, "GET", srv.URL+"/api/devices", ""); !strings.Contains(string(list), `"onHub":true`) {
+		t.Fatalf("list = %s", list)
+	}
+}
+
+func TestAPIDeviceDefaultsToClientsEndpoint(t *testing.T) {
+	srv := apiServer(t)
+	s, body := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"laptop"}`)
+	if s != http.StatusCreated || !strings.Contains(string(body), `Endpoint = vmm.lan:51821`) || strings.Contains(string(body), `"onHub"`) {
+		t.Fatalf("status = %d body = %s", s, body)
+	}
+}

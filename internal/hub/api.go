@@ -101,17 +101,18 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 	})
 	mux.HandleFunc("POST /api/devices", func(w http.ResponseWriter, req *http.Request) {
 		var q struct {
-			Name string `json:"name"`
+			Name  string `json:"name"`
+			OnHub bool   `json:"onHub"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
 			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 			return
 		}
-		if cfg.Clients.Endpoint == "" {
+		if cfg.Clients.Endpoint == "" && !q.OnHub {
 			writeError(w, fmt.Errorf("%w: set clients.endpoint in the hub config before adding devices", ErrConflict))
 			return
 		}
-		d, err := net.AddDevice(q.Name)
+		d, err := net.AddDevice(q.Name, q.OnHub)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -250,10 +251,11 @@ type deviceView struct {
 	IP        string    `json:"ip"`
 	PublicKey string    `json:"publicKey"`
 	CreatedAt time.Time `json:"createdAt"`
+	OnHub     bool      `json:"onHub,omitempty"`
 }
 
 func viewOf(d Device) deviceView {
-	return deviceView{ID: d.ID, Name: d.Name, IP: d.IP, PublicKey: d.PublicKey, CreatedAt: d.CreatedAt}
+	return deviceView{ID: d.ID, Name: d.Name, IP: d.IP, PublicKey: d.PublicKey, CreatedAt: d.CreatedAt, OnHub: d.OnHub}
 }
 
 func deviceConfig(r *Registry, d Device, cfg Config) (string, error) {
@@ -261,7 +263,12 @@ func deviceConfig(r *Registry, d Device, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return DeviceConfig(d, pub, cfg.Clients.Endpoint, cfg.Clients.Port, cfg.GuestMTU), nil
+	endpoint := cfg.Clients.Endpoint
+	if d.OnHub {
+		// The macOS WireGuard app can't reach the hub machine's own LAN or Tailscale address; loopback works everywhere.
+		endpoint = "127.0.0.1"
+	}
+	return DeviceConfig(d, pub, endpoint, cfg.Clients.Port, cfg.GuestMTU), nil
 }
 
 func writeError(w http.ResponseWriter, err error) {
