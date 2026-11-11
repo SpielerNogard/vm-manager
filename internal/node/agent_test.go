@@ -55,19 +55,20 @@ func (i *fakeInstance) Kill() error {
 }
 
 type fakeProvider struct {
-	mu          sync.Mutex
-	prepared    []string
-	started     map[string]*fakeInstance
-	failPrepare map[string]bool
-	failStart   map[string]bool
-	staleIP     map[string]bool
-	chassis     []Chassis
-	block       chan struct{} // when set, StartChassis waits for it to close
-	inflight    atomic.Int32
-	maxInflight atomic.Int32
-	events      []string
-	failDisks   bool
-	bigRoot     bool // makes Disks report a different allocation, as if the guest wrote data
+	mu           sync.Mutex
+	prepared     []string
+	started      map[string]*fakeInstance
+	failPrepare  map[string]bool
+	failStart    map[string]bool
+	staleIP      map[string]bool
+	chassis      []Chassis
+	block        chan struct{} // when set, StartChassis waits for it to close
+	inflight     atomic.Int32
+	maxInflight  atomic.Int32
+	events       []string
+	failDisks    bool
+	bigRoot      bool // makes Disks report a different allocation, as if the guest wrote data
+	afterPrepare func(dir string)
 }
 
 func (p *fakeProvider) Disks(f VMFile, _ string) ([]proto.Disk, error) {
@@ -124,13 +125,16 @@ func newFakeProvider() *fakeProvider {
 
 func (p *fakeProvider) Name() string { return "fake" }
 
-func (p *fakeProvider) Prepare(_ context.Context, f VMFile, _ string) error {
+func (p *fakeProvider) Prepare(_ context.Context, f VMFile, dir string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prepared = append(p.prepared, f.Spec.Name)
 	p.events = append(p.events, "prepare:"+f.Spec.Name)
 	if p.failPrepare[f.Spec.Name] {
 		return errors.New("prepare boom")
+	}
+	if p.afterPrepare != nil {
+		p.afterPrepare(dir)
 	}
 	return nil
 }
@@ -268,6 +272,48 @@ func TestAgentPrepareFails(t *testing.T) {
 	eventually(t, "error", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateError })
 	if v, _ := vmState(env.reg, vm.ID); !strings.Contains(v.Error, "prepare boom") {
 		t.Fatalf("error = %q", v.Error)
+	}
+}
+
+func TestAgentPrepareSaveFails(t *testing.T) {
+	env := startEnv(t, func(_ *Agent, p *fakeProvider) {
+		p.afterPrepare = func(dir string) {
+			os.Chmod(dir, 0o555)
+			t.Cleanup(func() { os.Chmod(dir, 0o755) })
+		}
+	})
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "error", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateError })
+	if v, _ := vmState(env.reg, vm.ID); !strings.HasPrefix(v.Error, "prepare: ") {
+		t.Fatalf("error = %q", v.Error)
+	}
+	if env.provider.instance("dev") != nil {
+		t.Fatal("instance started although NeedsPrepare was not saved")
+	}
+}
+
+func TestAgentWithChangedNodeIDKeepsVMs(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.stop()
+	<-env.runDone
+
+	p := newFakeProvider()
+	a := &Agent{HubURL: env.agent.HubURL, Token: "tok", NodeID: "renamed", VMsDir: env.agent.VMsDir, CPUs: 4, MemoryMB: 8192, Provider: p}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	eventually(t, "booted from cache", func() bool { return p.instance("dev") != nil })
+	time.Sleep(300 * time.Millisecond)
+	if _, err := os.Stat(VMDir(a.VMsDir, vm.ID)); err != nil {
+		t.Fatalf("vm dir: %v", err)
+	}
+	for _, n := range env.reg.Nodes() {
+		if n.ID == "renamed" {
+			t.Fatalf("renamed node registered: %+v", n)
+		}
 	}
 }
 

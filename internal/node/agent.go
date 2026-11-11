@@ -309,10 +309,8 @@ func (a *Agent) prepare(ctx context.Context, e *vmEntry, f VMFile) error {
 	e.file.NeedsPrepare = false
 	saved := e.file
 	a.mu.Unlock()
-	if err := SaveVM(a.VMsDir, saved); err != nil {
-		log.Printf("vm %s: save: %v", f.Spec.ID, err)
-	}
-	return nil
+	// Booting without the cleared flag on disk would re-prepare (wipe the disks) on the next restart.
+	return SaveVM(a.VMsDir, saved)
 }
 
 // watch reports inst's progress until it exits, reporting stopped last.
