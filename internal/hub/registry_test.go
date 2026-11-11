@@ -612,3 +612,121 @@ func TestStartKeepsProvisionedOnOtherError(t *testing.T) {
 		t.Fatal("provisioned reset")
 	}
 }
+
+func addTestNetwork(t *testing.T, r *Registry, name string) Network {
+	t.Helper()
+	n, err := r.net.AddNetwork(name, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestCreateVMWithNetworks(t *testing.T) {
+	r, n := newTestRegistry(t)
+	a := addTestNetwork(t, r, "a")
+	q := validReq()
+	q.NetworkIDs = []string{a.ID}
+	if _, err := r.CreateVM(q); err != nil {
+		t.Fatal(err)
+	}
+	if nics := n.last().Desired[0].Spec.NICs; len(nics) != 2 || nics[0].Network != "mgmt" || nics[1].Network != a.ID {
+		t.Fatalf("nics = %+v", nics)
+	}
+}
+
+func TestSetVMNetworksNeedsRestartFlag(t *testing.T) {
+	r, n := newTestRegistry(t)
+	a := addTestNetwork(t, r, "a")
+	vm, _ := r.CreateVM(validReq())
+	if _, err := r.SetVMNetworks(vm.ID, []string{a.ID}, false); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "restartAllowed=true") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := r.VMs()[0]; got.generation != 1 || len(got.NICs) != 1 {
+		t.Fatalf("vm = %+v gen %d", got, got.generation)
+	}
+	got, err := r.SetVMNetworks(vm.ID, []string{a.ID}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.generation != 2 || len(got.NICs) != 2 || got.NICs[1].Network != a.ID {
+		t.Fatalf("vm = %+v gen %d", got, got.generation)
+	}
+	if d := n.last().Desired[0]; d.Generation != 2 || len(d.Spec.NICs) != 2 || d.Spec.NICs[1].Network != a.ID {
+		t.Fatalf("desired = %+v", d)
+	}
+	if _, err := r.SetVMNetworks("nope", nil, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSetVMNetworksStoppedNoFlag(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	a := addTestNetwork(t, r, "a")
+	vm, _ := r.CreateVM(validReq())
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.SetVMNetworks(vm.ID, []string{a.ID}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Power != proto.PowerStopped || len(got.NICs) != 2 {
+		t.Fatalf("vm = %+v", got)
+	}
+}
+
+func TestSetVMNetworksSameListNoop(t *testing.T) {
+	r, n := newTestRegistry(t)
+	a, b := addTestNetwork(t, r, "a"), addTestNetwork(t, r, "b")
+	vm, _ := r.CreateVM(validReq())
+	set, err := r.SetVMNetworks(vm.ID, []string{a.ID, b.ID}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := n.count()
+	got, err := r.SetVMNetworks(vm.ID, []string{b.ID, a.ID}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.generation != set.generation || n.count() != sent {
+		t.Fatalf("gen %d -> %d, sent %d -> %d", set.generation, got.generation, sent, n.count())
+	}
+}
+
+func TestSetVMNetworksRestoresOnStoreError(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	a := addTestNetwork(t, r, "a")
+	vm, _ := r.CreateVM(validReq())
+	r.store.path = filepath.Join(r.net.path, "vms.json")
+	if _, err := r.SetVMNetworks(vm.ID, []string{a.ID}, true); err == nil {
+		t.Fatal("SetVMNetworks succeeded")
+	}
+	if nics := r.net.NICs(vm.ID); len(nics) != 1 {
+		t.Fatalf("net NICs = %+v", nics)
+	}
+	if got := r.VMs()[0]; got.generation != 1 || len(got.NICs) != 1 {
+		t.Fatalf("vm = %+v gen %d", got, got.generation)
+	}
+}
+
+func TestDeleteNetworkAfterDetachOffline(t *testing.T) {
+	r, n := newTestRegistry(t)
+	a := addTestNetwork(t, r, "a")
+	q := validReq()
+	q.NetworkIDs = []string{a.ID}
+	vm, _ := r.CreateVM(q)
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful); err != nil {
+		t.Fatal(err)
+	}
+	r.NodeDisconnected("n1", n)
+	if err := r.net.DeleteNetwork(a.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("delete in use: err = %v", err)
+	}
+	if _, err := r.SetVMNetworks(vm.ID, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.net.DeleteNetwork(a.ID); err != nil {
+		t.Fatal(err)
+	}
+}
