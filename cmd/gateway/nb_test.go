@@ -184,3 +184,20 @@ func TestReconcileNBDeletesStalePortOnNetworkSwitch(t *testing.T) {
 		t.Errorf("wrong stale handling:\n%s", strings.Join(f.cmds, "\n"))
 	}
 }
+
+func TestReconcileNBSkipsPortOfUnknownNetwork(t *testing.T) {
+	f := &fakeRun{out: map[string]string{"ovn-nbctl --bare --columns=_uuid find dhcp_options cidr=10.200.0.0/16": "u-1",
+		"ovn-nbctl lsp-list ls-mgmt": "aaa (ghost-n)"}}
+	st := testState
+	st.Ports = append(append([]hub.GatewayPort{}, testState.Ports...),
+		hub.GatewayPort{Name: "ghost-n", MAC: "02:0a:d2:00:00:09", IP: "10.210.0.9", Network: "gone"})
+	if err := reconcileNB(f.run, st); err != nil {
+		t.Fatal(err)
+	}
+	if f.has("lsp-add ls-mgmt ghost-n") || f.has("ghost-n 02:") || f.has("lsp-del ghost-n") || f.has("pg-set-ports pg_vms vm1-mgmt ghost-n") {
+		t.Errorf("unknown-network port touched:\n%s", strings.Join(f.cmds, "\n"))
+	}
+	if !f.has("lsp-add ls-mgmt vm1-mgmt") {
+		t.Error("mgmt port not reconciled")
+	}
+}

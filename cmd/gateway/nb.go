@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -203,7 +204,8 @@ func reconcileNB(run runner, s hub.GatewayState) error {
 		if !isMgmtPort(p) {
 			n, ok := nets[p.Network]
 			if !ok {
-				return fmt.Errorf("port %s references unknown network %s", p.Name, p.Network)
+				log.Printf("skipping port %s: unknown network %s", p.Name, p.Network)
+				continue
 			}
 			sw, opts = "ls-net-"+p.Network, n.dhcp
 		}
