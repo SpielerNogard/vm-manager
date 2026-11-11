@@ -23,6 +23,7 @@ type fakeInstance struct {
 	once    sync.Once
 	done    chan struct{}
 	stopped atomic.Bool
+	killed  atomic.Bool
 	p       *fakeProvider
 	staleIP bool // simulates finding the previous boot's lease only after the VM already died
 }
@@ -40,6 +41,14 @@ func (i *fakeInstance) Stop() error {
 	i.once.Do(func() { i.stopped.Store(true); close(i.done) })
 	if i.p != nil {
 		i.p.record("stop-guest")
+	}
+	return nil
+}
+
+func (i *fakeInstance) Kill() error {
+	i.once.Do(func() { i.killed.Store(true); close(i.done) })
+	if i.p != nil {
+		i.p.record("kill-guest")
 	}
 	return nil
 }
@@ -118,6 +127,7 @@ func (p *fakeProvider) Prepare(_ context.Context, f VMFile, _ string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prepared = append(p.prepared, f.Spec.Name)
+	p.events = append(p.events, "prepare:"+f.Spec.Name)
 	if p.failPrepare[f.Spec.Name] {
 		return errors.New("prepare boom")
 	}
@@ -343,7 +353,7 @@ func TestAgentStopsChassisAfterGuests(t *testing.T) {
 	<-env.runDone
 	env.provider.mu.Lock()
 	defer env.provider.mu.Unlock()
-	if got := strings.Join(env.provider.events, ","); got != "stop-guest,stop-chassis" {
+	if got := strings.Join(env.provider.events, ","); got != "prepare:dev,stop-guest,stop-chassis" {
 		t.Fatalf("events = %s", got)
 	}
 }

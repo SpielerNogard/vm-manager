@@ -26,5 +26,7 @@ type Chassis struct {
 type Instance interface {
 	WaitIP(ctx context.Context) (string, error)
 	Stop() error
+	// Kill powers the VM off without asking the guest.
+	Kill() error
 	Done() <-chan struct{}
 }
