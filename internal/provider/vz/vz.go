@@ -30,6 +30,8 @@ type Provider struct {
 	netMu   sync.Mutex
 	netvm   *instance
 	netStop chan struct{} // closed by StopChassis; nil until the netvm was first booted
+	netDone chan struct{} // closed when the supervisor exits
+	netMAC  string
 }
 
 func New(c node.Config) (*Provider, error) {

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -38,15 +37,28 @@ func (p *Provider) StartChassis(ctx context.Context, c node.Chassis) error {
 			return fmt.Errorf("netvm: %w", err)
 		}
 	}
+	endpoint, err := netvmEndpoint(c.Endpoint, func() (string, error) {
+		return waitForLease(ctx, p.LeasesPath, p.netMAC, 0, relayRetry)
+	})
+	if err != nil {
+		return fmt.Errorf("netvm endpoint: %w", err)
+	}
+	c.Endpoint = endpoint
 	payload, err := json.Marshal(netframe.Configure(c))
 	if err != nil {
 		return err
 	}
+	logged := false
 	for {
 		err := p.sendConfigure(ctx, payload)
 		if err == nil {
-			log.Printf("netvm configured (chassis %s, %s)", c.Name, c.Address)
+			log.Printf("netvm configured (chassis %s, %s, endpoint %s)", c.Name, c.Address, c.Endpoint)
 			return nil
+		}
+		var applyErr configureError
+		if errors.As(err, &applyErr) && !logged {
+			log.Printf("netvm configure: %v, retrying", err)
+			logged = true
 		}
 		select {
 		case <-ctx.Done():
@@ -56,20 +68,60 @@ func (p *Provider) StartChassis(ctx context.Context, c node.Chassis) error {
 	}
 }
 
-// sendConfigure waits for netagent to close the connection, which it does once the config is applied.
 func (p *Provider) sendConfigure(ctx context.Context, payload []byte) error {
 	conn, err := p.dialNetvm()
 	if err != nil {
 		return err
 	}
+	return configureOver(ctx, conn, payload, 2*time.Minute)
+}
+
+// configureError is netagent's reply to a Configure it could not apply.
+type configureError string
+
+func (e configureError) Error() string { return "netagent: " + string(e) }
+
+// configureOver sends one Configure on conn and succeeds only on an ok ConfigureResult.
+func configureOver(ctx context.Context, conn net.Conn, payload []byte, timeout time.Duration) error {
 	defer conn.Close()
 	defer context.AfterFunc(ctx, func() { conn.Close() })()
+	conn.SetDeadline(time.Now().Add(timeout))
 	if err := netframe.Write(conn, netframe.ConfigureFrame, 0, payload); err != nil {
 		return err
 	}
-	conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
-	_, err = io.Copy(io.Discard, conn)
-	return err
+	typ, _, reply, err := netframe.Read(conn, nil)
+	if err != nil {
+		return fmt.Errorf("waiting for configure result: %w", err)
+	}
+	if typ != netframe.ConfigureResult {
+		return fmt.Errorf("unexpected frame type %d in reply to configure", typ)
+	}
+	if len(reply) > 0 {
+		return configureError(reply)
+	}
+	return nil
+}
+
+// netvmEndpoint points a loopback endpoint at the vmnet NAT gateway, which is how the netvm reaches this Mac.
+func netvmEndpoint(endpoint string, leaseIP func() (string, error)) (string, error) {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", err
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return endpoint, nil
+	}
+	lease, err := leaseIP()
+	if err != nil {
+		return "", err
+	}
+	gw := net.ParseIP(lease).To4()
+	if gw == nil {
+		return "", fmt.Errorf("netvm lease %q is not IPv4", lease)
+	}
+	// vmnet's NAT gateway is .1 of the guest's /24.
+	gw[3] = 1
+	return net.JoinHostPort(gw.String(), port), nil
 }
 
 func (p *Provider) dialNetvm() (net.Conn, error) {
@@ -98,12 +150,16 @@ func (p *Provider) StopChassis() error {
 	default:
 		close(p.netStop)
 	}
-	inst := p.netvm
+	inst, done := p.netvm, p.netDone
 	p.netMu.Unlock()
-	if inst == nil {
-		return nil
+	err := inst.Stop()
+	// A restart in flight is stopped by the supervisor; the node must not exit before that.
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		return errors.New("netvm supervisor did not exit within 30s")
 	}
-	return inst.Stop()
+	return err
 }
 
 func (p *Provider) bootNetvm(ctx context.Context) error {
@@ -134,11 +190,14 @@ func (p *Provider) bootNetvm(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	stop := make(chan struct{})
+	stop, done := make(chan struct{}), make(chan struct{})
 	p.netMu.Lock()
-	p.netvm, p.netStop = inst, stop
+	p.netvm, p.netStop, p.netDone, p.netMAC = inst, stop, done, mac
 	p.netMu.Unlock()
-	go p.superviseNetvm(f, dir, inst, stop)
+	go func() {
+		defer close(done)
+		p.superviseNetvm(f, dir, inst, stop)
+	}()
 	return nil
 }
 
