@@ -8,8 +8,8 @@ done
 if [ ! -f /data/hub.json ]; then
   [ -n "${HUB_TOKEN:-}" ] || { echo "HUB_TOKEN is required on first start" >&2; exit 1; }
   # underlay/clients ports are the published host ports; inside the container WireGuard always uses 51820/51821
-  printf '{"listen":":8080","token":"%s","underlay":{"port":%s},"clients":{"endpoint":"%s","port":%s}}\n' \
-    "$HUB_TOKEN" "${UNDERLAY_PORT:-51820}" "${CLIENTS_ENDPOINT:-}" "${CLIENTS_PORT:-51821}" > /data/hub.json.tmp
+  (umask 077 && printf '{"listen":":8080","token":"%s","underlay":{"port":%s},"clients":{"endpoint":"%s","port":%s}}\n' \
+    "$HUB_TOKEN" "${UNDERLAY_PORT:-51820}" "${CLIENTS_ENDPOINT:-}" "${CLIENTS_PORT:-51821}" > /data/hub.json.tmp)
   mv /data/hub.json.tmp /data/hub.json
 fi
 
@@ -60,7 +60,7 @@ rule INPUT -i wg-clients -d 10.201.0.1 -p udp --dport 53 -j ACCEPT
 rule INPUT -i wg-clients -d 10.201.0.1 -p tcp --dport 53 -j ACCEPT
 rule INPUT -i wg-clients -j DROP
 rule INPUT -i gw0 -j DROP
-rule FORWARD -i wg-clients -d 10.198.0.0/24 -j DROP
-rule FORWARD -i gw0 -d 10.198.0.0/24 -j DROP
+rule FORWARD -i wg-clients ! -o gw0 -j DROP
+rule FORWARD -i gw0 ! -o wg-clients -j DROP
 
 exec gateway -hub http://127.0.0.1:8080 -token-file /data/hub.json -nb unix:/var/run/ovn/ovnnb_db.sock

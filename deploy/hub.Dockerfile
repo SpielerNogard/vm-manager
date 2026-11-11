@@ -13,6 +13,6 @@ COPY . .
 COPY --from=web /src/web/dist web/dist
 RUN CGO_ENABLED=0 go build -o /hub ./cmd/hub
 
-FROM gcr.io/distroless/static
+FROM gcr.io/distroless/static-debian13@sha256:448810357cc8e67b7208988abdba0f5ec3d3aebee0a5b13eb624979792cffc0f
 COPY --from=build /hub /usr/local/bin/hub
 ENTRYPOINT ["hub"]
