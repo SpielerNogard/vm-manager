@@ -978,3 +978,20 @@ func brokenStorePath(t *testing.T) string {
 	}
 	return filepath.Join(f, "vms.json")
 }
+
+func TestNewRegistryReleasesOrphanChassis(t *testing.T) {
+	nm := newTestNet(t)
+	for _, id := range []string{"gone", "kept"} {
+		if _, err := nm.Enroll(id, "k-"+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := newTestStore(t)
+	if err := store.PutNode(StoredNode{ID: "kept"}); err != nil {
+		t.Fatal(err)
+	}
+	NewRegistry(nm, store, newTestConfig(t, Config{}))
+	if ch := nm.Chassis(); len(ch) != 1 || ch[0].NodeID != "kept" {
+		t.Errorf("chassis = %+v", ch)
+	}
+}

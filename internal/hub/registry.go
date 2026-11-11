@@ -164,6 +164,14 @@ func NewRegistry(net *NetModel, store *VMStore, cfg *ConfigStore) *Registry {
 			log.Printf("releasing orphan NICs of %s: %v", id, err)
 		}
 	}
+	for _, c := range net.Chassis() {
+		if _, ok := r.nodes[c.NodeID]; ok {
+			continue
+		}
+		if err := net.ReleaseChassis(c.NodeID); err != nil {
+			log.Printf("releasing orphan chassis of %s: %v", c.NodeID, err)
+		}
+	}
 	return r
 }
 
@@ -285,10 +293,7 @@ func (r *Registry) DeleteNode(id string) error {
 		r.mu.Unlock()
 		return err
 	}
-	if err := r.net.ReleaseChassis(id); err != nil {
-		r.mu.Unlock()
-		return err
-	}
+	releaseErr := r.net.ReleaseChassis(id)
 	delete(r.nodes, id)
 	conn := n.conn
 	r.mu.Unlock()
@@ -297,7 +302,7 @@ func (r *Registry) DeleteNode(id string) error {
 			log.Printf("node %s: closing connection: %v", id, err)
 		}
 	}
-	return nil
+	return releaseErr
 }
 
 // NodeConfig renders a node.json for the node; host is how the node reaches the hub and defaults to clients.endpoint.
