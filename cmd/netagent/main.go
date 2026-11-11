@@ -120,7 +120,7 @@ func pumpTap(tap, conn *os.File, wmu *sync.Mutex, id uint16) {
 }
 
 func openTap(name string) (*os.File, error) {
-	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0)
+	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +134,7 @@ func openTap(name string) (*os.File, error) {
 		unix.Close(fd)
 		return nil, err
 	}
+	// Non-blocking so the runtime poller owns the fd and Close unblocks a pending Read.
 	return os.NewFile(uintptr(fd), name), nil
 }
 

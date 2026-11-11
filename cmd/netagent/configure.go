@@ -41,6 +41,16 @@ PersistentKeepalive = 25
 	}
 	changed = wgChanged || idChanged
 
+	// A failure below must not make the retry see unchanged files and skip the restart.
+	pending := filepath.Join(root, "run/netagent-restart-pending")
+	if changed {
+		if _, err := writeIfChanged(pending, nil, 0o644); err != nil {
+			return changed, err
+		}
+	}
+	_, statErr := os.Stat(pending)
+	restart := statErr == nil
+
 	if err := run("ovs-vsctl", "set", "open", ".",
 		"external_ids:system-id="+c.Name,
 		"external_ids:ovn-remote="+c.SBRemote,
@@ -48,13 +58,16 @@ PersistentKeepalive = 25
 		"external_ids:ovn-encap-ip="+encapIP); err != nil {
 		return changed, err
 	}
-	if !changed {
+	if !restart {
 		return false, nil
 	}
 	if err := run("systemctl", "enable", "--now", wgService); err != nil {
-		return true, err
+		return changed, err
 	}
-	return true, run("systemctl", "restart", wgService, "ovn-controller")
+	if err := run("systemctl", "restart", wgService, "ovn-controller"); err != nil {
+		return changed, err
+	}
+	return true, os.Remove(pending)
 }
 
 func writeIfChanged(path string, content []byte, mode os.FileMode) (bool, error) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,5 +51,42 @@ func TestApplyConfigureWritesAndRestartsOnce(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(calls, "\n"), "restart") {
 		t.Errorf("unexpected restart: %v", calls)
+	}
+}
+
+func TestApplyConfigureRetriesRestartAfterFailure(t *testing.T) {
+	root := t.TempDir()
+	c := netframe.Configure{
+		Name: "mac-1", PrivateKey: "priv", Address: "10.198.0.11/24", HubKey: "hubpub",
+		Endpoint: "hub.lan:51820", SBRemote: "tcp:10.198.0.1:6642", MTU: 1420,
+	}
+	failing := func(name string, args ...string) error {
+		if name == "systemctl" {
+			return errors.New("boom")
+		}
+		return nil
+	}
+	if _, err := applyConfigure(c, root, failing); err == nil {
+		t.Fatal("expected error")
+	}
+
+	var calls []string
+	ok := func(name string, args ...string) error {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	if _, err := applyConfigure(c, root, ok); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(calls, "\n"), "restart") {
+		t.Errorf("retry did not restart: %v", calls)
+	}
+
+	calls = nil
+	if _, err := applyConfigure(c, root, ok); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(calls, "\n"), "restart") {
+		t.Errorf("restart after success: %v", calls)
 	}
 }
