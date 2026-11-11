@@ -21,6 +21,11 @@
     "networks": {
       "label": "Netzwerke",
       "blurb": "Private Netzwerke, denen VMs beitreten können. VMs im selben Netzwerk erreichen sich als NAME.NETZWERK.internal."
+    },
+    "system": "System",
+    "settings": {
+      "label": "Einstellungen",
+      "blurb": "Hub-Adresse, Token und Standardwerte für Gäste."
     }
   },
   "topbar": {
@@ -205,5 +210,35 @@
     "deleteConfirm": "Netzwerk löschen",
     "inUse": "in Benutzung",
     "builtin": "integriert"
+  },
+  "settings": {
+    "setupBanner": "Einrichtung nicht abgeschlossen – Client-Endpoint setzen",
+    "tabs": {
+      "networking": "Netzwerk",
+      "security": "Sicherheit",
+      "guests": "Gäste"
+    },
+    "save": "Speichern",
+    "saved": "Gespeichert",
+    "confirm": "Bestätigen",
+    "endpoint": "Client-Endpoint",
+    "endpointHint": "Adresse, unter der Geräte und Nodes den Hub erreichen",
+    "endpointChangeTitle": "Client-Endpoint ändern?",
+    "endpointChangeBody": "Bestehende Geräte-Configs behalten die alte Adresse; lade sie neu herunter.",
+    "listen": "Listen-Adresse",
+    "hubPort": "Hub-Port",
+    "underlayPort": "Underlay-Port",
+    "clientsPort": "Client-Port",
+    "portsHint": "per .env gesetzt (HUB_PORT, UNDERLAY_PORT, CLIENTS_PORT)",
+    "token": "Hub-Token",
+    "show": "Anzeigen",
+    "hide": "Verbergen",
+    "copy": "Kopieren",
+    "regenerate": "Neu erzeugen",
+    "tokenChangeTitle": "Hub-Token ändern?",
+    "tokenChangeBody": "Nodes brauchen den neuen Token in ihrer node.json, wenn sie sich das nächste Mal verbinden.",
+    "tokenChangeConfirm": "Token ändern",
+    "guestMTU": "Gast-MTU",
+    "guestMTUHint": "wird auf VMs bei der nächsten DHCP-Lease oder beim Neustart angewendet (576–9000)"
   }
 }

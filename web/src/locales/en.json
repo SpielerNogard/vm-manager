@@ -21,6 +21,11 @@
     "networks": {
       "label": "Networks",
       "blurb": "Private networks that VMs can join. VMs on the same network reach each other as NAME.NETWORK.internal."
+    },
+    "system": "System",
+    "settings": {
+      "label": "Settings",
+      "blurb": "Hub address, token and defaults for guests."
     }
   },
   "topbar": {
@@ -205,5 +210,35 @@
     "deleteConfirm": "Delete network",
     "inUse": "in use",
     "builtin": "built-in"
+  },
+  "settings": {
+    "setupBanner": "Setup not finished – set the client endpoint",
+    "tabs": {
+      "networking": "Networking",
+      "security": "Security",
+      "guests": "Guests"
+    },
+    "save": "Save",
+    "saved": "Saved",
+    "confirm": "Confirm",
+    "endpoint": "Client endpoint",
+    "endpointHint": "Address devices and nodes use to reach the hub",
+    "endpointChangeTitle": "Change client endpoint?",
+    "endpointChangeBody": "Existing device configs keep the old address; download them again.",
+    "listen": "Listen address",
+    "hubPort": "Hub port",
+    "underlayPort": "Underlay port",
+    "clientsPort": "Client port",
+    "portsHint": "set via .env (HUB_PORT, UNDERLAY_PORT, CLIENTS_PORT)",
+    "token": "Hub token",
+    "show": "Show",
+    "hide": "Hide",
+    "copy": "Copy",
+    "regenerate": "Regenerate",
+    "tokenChangeTitle": "Change hub token?",
+    "tokenChangeBody": "Nodes need the new token in their node.json the next time they connect.",
+    "tokenChangeConfirm": "Change token",
+    "guestMTU": "Guest MTU",
+    "guestMTUHint": "applied to VMs on their next DHCP lease or reboot (576–9000)"
   }
 }

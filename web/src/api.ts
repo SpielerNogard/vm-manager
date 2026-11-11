@@ -99,6 +99,19 @@ export interface SSHKey {
   hub?: boolean
 }
 
+export interface Settings {
+  listen: string
+  token: string
+  hub: { port: number }
+  underlay: { port: number }
+  clients: { endpoint: string; port: number }
+  guestMTU: number
+  setupComplete: boolean
+  devices: number
+}
+
+export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string } }
+
 export interface CreateVMRequest {
   nodeId: string
   name: string
@@ -148,5 +161,8 @@ export const api = {
   addDevice: (name: string, onHub: boolean) =>
     request<{ device: Device; config: string }>('POST', '/api/devices', { name, onHub }),
   deleteDevice: (id: string) => request<void>('DELETE', `/api/devices/${id}`),
+  settings: () => request<Settings>('GET', '/api/settings'),
+  updateSettings: (patch: SettingsPatch) => request<Settings>('PUT', '/api/settings', patch),
+  regenerateToken: () => request<Settings>('POST', '/api/settings/token'),
   deviceConfig: (id: string) => text(`/api/devices/${id}/config`),
 }

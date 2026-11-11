@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-import { api, type Device, type Network, type Node, type SSHKey, type VM } from '@/api'
+import { api, type Device, type Network, type Node, type Settings, type SSHKey, type VM } from '@/api'
 
 const POLL_MS = 2000
 
@@ -10,18 +10,20 @@ const vms = ref<VM[]>([])
 const keys = ref<SSHKey[]>([])
 const devices = ref<Device[]>([])
 const networks = ref<Network[]>([])
+const settings = ref<Settings | null>(null)
 const loaded = ref(false)
 const loadError = ref<Error | null>(null)
 const onlineNodes = computed(() => nodes.value.filter((n) => n.online))
 
 async function refresh() {
   try {
-    ;[nodes.value, vms.value, keys.value, devices.value, networks.value] = await Promise.all([
+    ;[nodes.value, vms.value, keys.value, devices.value, networks.value, settings.value] = await Promise.all([
       api.nodes(),
       api.vms(),
       api.keys(),
       api.devices(),
       api.networks(),
+      api.settings(),
     ])
     loadError.value = null
   } catch (e) {
@@ -29,6 +31,12 @@ async function refresh() {
   } finally {
     loaded.value = true
   }
+}
+
+/** Settings for the router guard, which runs before any component polls. */
+export async function ensureSettings() {
+  if (!settings.value) settings.value = await api.settings().catch(() => null)
+  return settings.value
 }
 
 let subscribers = 0
@@ -45,5 +53,5 @@ export function useFleet() {
   onUnmounted(() => {
     if (--subscribers === 0) clearInterval(timer)
   })
-  return { nodes, vms, keys, devices, networks, onlineNodes, loaded, loadError, refresh }
+  return { nodes, vms, keys, devices, networks, settings, onlineNodes, loaded, loadError, refresh }
 }
