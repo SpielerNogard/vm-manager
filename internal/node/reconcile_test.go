@@ -370,6 +370,13 @@ func TestReconcileNICChangeRestartsWithReseed(t *testing.T) {
 	if s, r := strings.Index(ev, "stop-guest"), strings.Index(ev, "reseed:a"); s < 0 || r < s {
 		t.Fatalf("events = %s", ev)
 	}
+	time.Sleep(50 * time.Millisecond)
+	p.mu.Lock()
+	starts := p.starts["a"]
+	p.mu.Unlock()
+	if starts != 2 {
+		t.Fatalf("starts = %d, want 2 (restart policy must not start another)", starts)
+	}
 	if got := p.gotPrepared(); len(got) != 1 {
 		t.Fatalf("prepared = %v, want once (disks untouched)", got)
 	}
