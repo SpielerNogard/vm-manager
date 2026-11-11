@@ -55,9 +55,9 @@ func (a *Agent) destroy(e *vmEntry) {
 	id := e.file.Spec.ID
 	e.cancel()
 	<-e.booted
-	if e.inst != nil {
+	if inst := a.instance(e); inst != nil {
 		e.stopRequested.Store(true)
-		if err := e.inst.Kill(); err != nil {
+		if err := inst.Kill(); err != nil {
 			log.Printf("vm %s: kill: %v", id, err)
 		}
 	}
@@ -137,6 +137,9 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 			log.Printf("vm %s: stop: %v", f.Spec.ID, err)
 		}
 		a.report(proto.VMStatus{ID: f.Spec.ID, State: proto.StateStopped})
+	case f.Power == proto.PowerStopped:
+		e.cancel() // ends a pending restart backoff
+		a.report(st)
 	default:
 		a.report(st)
 	}

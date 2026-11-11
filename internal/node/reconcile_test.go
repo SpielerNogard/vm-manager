@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"vm-manager/internal/proto"
 )
@@ -259,5 +260,87 @@ func TestRestoreKeepsStoppedVMsStopped(t *testing.T) {
 	waitState(t, a, "off", proto.StateStopped, 4)
 	if p.instance("off") != nil || len(p.gotPrepared()) != 0 {
 		t.Fatalf("off started=%v prepared=%v", p.instance("off") != nil, p.gotPrepared())
+	}
+}
+
+func fastRestarts(t *testing.T, backoff ...time.Duration) {
+	t.Helper()
+	oldBackoff, oldQuick := restartBackoff, quickRun
+	restartBackoff, quickRun = backoff, time.Hour
+	t.Cleanup(func() { restartBackoff, quickRun = oldBackoff, oldQuick })
+}
+
+func TestRestartAfterGuestPoweroff(t *testing.T) {
+	fastRestarts(t, 10*time.Millisecond, 10*time.Millisecond, 10*time.Millisecond)
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	first.guestShutdown()
+	eventually(t, "restarted", func() bool {
+		st, _ := a.vmStatus("a")
+		return p.instance("a") != first && st.State == proto.StateRunning
+	})
+}
+
+func TestRestartGivesUpAfterQuickFailures(t *testing.T) {
+	fastRestarts(t, 10*time.Millisecond, 10*time.Millisecond, 10*time.Millisecond)
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	p.mu.Lock()
+	p.failStart["a"] = true
+	p.mu.Unlock()
+	p.instance("a").guestShutdown()
+	eventually(t, "given up", func() bool {
+		st, _ := a.vmStatus("a")
+		return st.State == proto.StateError && strings.Contains(st.Error, "restarting failed repeatedly")
+	})
+	p.mu.Lock()
+	p.failStart["a"] = false
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
+	waitState(t, a, "a", proto.StateRunning, 2)
+}
+
+func TestShutdownCancelsBackoff(t *testing.T) {
+	fastRestarts(t, time.Hour)
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	first.guestShutdown()
+	waitState(t, a, "a", proto.StateStopped, 1)
+	d := dv("a", "a", proto.PowerStopped, 2)
+	d.StopMode = proto.StopGraceful
+	a.reconcile(context.Background(), []proto.DesiredVM{d})
+	waitState(t, a, "a", proto.StateStopped, 2)
+	time.Sleep(50 * time.Millisecond)
+	if p.instance("a") != first {
+		t.Fatal("restarted after shutdown")
+	}
+	if st, _ := a.vmStatus("a"); st.State != proto.StateStopped {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestStopAllDoesNotRestart(t *testing.T) {
+	fastRestarts(t, 10*time.Millisecond, 10*time.Millisecond, 10*time.Millisecond)
+	p := newFakeProvider()
+	a := &Agent{HubURL: "ws://127.0.0.1:1", NodeID: "n1", VMsDir: t.TempDir(), Provider: p}
+	SaveVM(a.VMsDir, VMFile{Spec: dv("a", "a", "", 1).Spec, MAC: "02:00:00:00:00:01", Power: proto.PowerRunning, Generation: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.Run(ctx); close(done) }()
+	eventually(t, "started", func() bool { return p.instance("a") != nil })
+	first := p.instance("a")
+	cancel()
+	<-done
+	time.Sleep(50 * time.Millisecond)
+	if p.instance("a") != first || !first.stopped.Load() {
+		t.Fatalf("restarted=%v stopped=%v", p.instance("a") != first, first.stopped.Load())
+	}
+	if f := loadVM(t, a, "a"); f.Power != proto.PowerRunning {
+		t.Fatalf("vm.json = %+v", f)
 	}
 }

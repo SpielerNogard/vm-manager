@@ -244,12 +244,17 @@ func TestAgentCreateReachesRunning(t *testing.T) {
 	}
 }
 
-func TestAgentStoppedWhenGuestShutsDown(t *testing.T) {
+func TestAgentRestartsWhenGuestShutsDown(t *testing.T) {
+	fastRestarts(t, 10*time.Millisecond)
 	env := startEnv(t, nil)
 	vm, _ := env.reg.CreateVM(createReq("dev"))
 	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
-	env.provider.instance("dev").guestShutdown()
-	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	first := env.provider.instance("dev")
+	first.guestShutdown()
+	eventually(t, "restarted", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return env.provider.instance("dev") != first && v.State == proto.StateRunning
+	})
 }
 
 func TestAgentPrepareFails(t *testing.T) {
