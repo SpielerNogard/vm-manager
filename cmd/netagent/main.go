@@ -5,7 +5,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -91,13 +90,11 @@ func serve(conn *os.File) {
 		case netframe.RemovePort:
 			return
 		case netframe.ConfigureFrame:
-			var c netframe.Configure
-			if err := json.Unmarshal(payload, &c); err != nil {
-				log.Printf("configure: %v", err)
-				return
-			}
-			changed, err := applyConfigure(c, "/", run)
-			log.Printf("configure %s: changed=%v err=%v", c.Name, changed, err)
+			handleConfigure(conn, payload, func(c netframe.Configure) error {
+				changed, err := applyConfigure(c, "/", run)
+				log.Printf("configure %s: changed=%v err=%v", c.Name, changed, err)
+				return err
+			})
 			return
 		}
 	}

@@ -13,6 +13,8 @@ const (
 	Ethernet   = 3
 	// ConfigureFrame is named apart from the Configure payload type, which Go would reject as a duplicate.
 	ConfigureFrame = 4
+	// ConfigureResult answers a ConfigureFrame: empty payload means applied, otherwise the error text.
+	ConfigureResult = 5
 
 	MaxPayload = 65535
 )

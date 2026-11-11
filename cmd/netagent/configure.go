@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,20 @@ import (
 )
 
 const wgService = "wg-quick@wg-underlay"
+
+// handleConfigure applies one ConfigureFrame payload and answers with exactly one ConfigureResult.
+func handleConfigure(w io.Writer, payload []byte, apply func(netframe.Configure) error) {
+	var c netframe.Configure
+	err := json.Unmarshal(payload, &c)
+	if err == nil {
+		err = apply(c)
+	}
+	var reply []byte
+	if err != nil {
+		reply = []byte(err.Error())
+	}
+	netframe.Write(w, netframe.ConfigureResult, 0, reply)
+}
 
 func applyConfigure(c netframe.Configure, root string, run func(name string, args ...string) error) (changed bool, err error) {
 	if c.Name == "" || c.Address == "" || c.SBRemote == "" {

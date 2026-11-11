@@ -7,7 +7,7 @@ import (
 )
 
 func TestFrameRoundTrip(t *testing.T) {
-	for _, typ := range []byte{AddPort, RemovePort, Ethernet, ConfigureFrame} {
+	for _, typ := range []byte{AddPort, RemovePort, Ethernet, ConfigureFrame, ConfigureResult} {
 		for _, size := range []int{0, 1, 1514, 65535} {
 			payload := bytes.Repeat([]byte{0xab}, size)
 			var b bytes.Buffer
