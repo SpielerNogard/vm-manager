@@ -17,6 +17,7 @@ import (
 func main() {
 	home, _ := os.UserHomeDir()
 	configPath := flag.String("config", filepath.Join(home, ".vm-manager", "hub.json"), "path to hub config")
+	sshDir := flag.String("ssh-dir", "~/.ssh", "directory holding the hub's default SSH public keys")
 	flag.Parse()
 
 	cfg, err := hub.LoadConfig(expandHome(*configPath, home))
@@ -29,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	hubKeys, err := keys.LoadHubKeys(hub.HubKeyFiles(home))
+	hubKeys, err := keys.LoadHubKeys(hub.HubKeyFiles(expandHome(*sshDir, home)))
 	if err != nil {
 		log.Fatal(err)
 	}

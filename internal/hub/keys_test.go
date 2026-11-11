@@ -110,6 +110,13 @@ func TestAPIKeys(t *testing.T) {
 	}
 }
 
+func TestHubKeyFilesDir(t *testing.T) {
+	files := HubKeyFiles("/x")
+	if len(files) != 5 || files[3] != "/x/id_ed25519.pub" || files[0] != "/x/id_rsa.pub" {
+		t.Fatalf("files = %v", files)
+	}
+}
+
 func TestKeyStoreHubKeys(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
@@ -124,7 +131,7 @@ func TestKeyStoreHubKeys(t *testing.T) {
 	}
 
 	s, _ = LoadKeyStore(path)
-	hubKeys, err := s.LoadHubKeys(HubKeyFiles(home))
+	hubKeys, err := s.LoadHubKeys(HubKeyFiles(filepath.Join(home, ".ssh")))
 	if err != nil {
 		t.Fatal(err)
 	}

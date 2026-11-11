@@ -1,4 +1,4 @@
-.PHONY: web hub node test
+.PHONY: web hub node test stack
 
 web:
 	npm --prefix web ci
@@ -15,3 +15,6 @@ node:
 
 test:
 	go test ./...
+
+stack:
+	docker compose -f deploy/compose.yaml up -d --build
