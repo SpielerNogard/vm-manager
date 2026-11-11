@@ -42,33 +42,44 @@ watch(
   (endpoint) => {
     if (!host.value && endpoint) host.value = endpoint
   },
-  { immediate: true },
 )
 
 let fetchTimer: ReturnType<typeof setTimeout> | undefined
+let fetchedHost: string | undefined
 onUnmounted(() => clearTimeout(fetchTimer))
 
+async function loadConfig() {
+  const id = route.params.id
+  if (typeof id !== 'string') return
+  const h = host.value
+  fetchedHost = h
+  const current = () => id === route.params.id && h === host.value
+  try {
+    const json = await api.nodeConfig(id, h.trim() || undefined)
+    if (!current()) return
+    nodeJson.value = json
+    configError.value = ''
+  } catch (e) {
+    if (!current()) return
+    nodeJson.value = ''
+    configError.value = (e as Error).message
+  }
+}
+
 watch(
-  () => [route.params.id, host.value] as const,
-  ([id, h]) => {
+  () => route.params.id,
+  () => {
     clearTimeout(fetchTimer)
-    if (typeof id !== 'string') return
-    fetchTimer = setTimeout(async () => {
-      const current = () => id === route.params.id && h === host.value
-      try {
-        const json = await api.nodeConfig(id, h.trim() || undefined)
-        if (!current()) return
-        nodeJson.value = json
-        configError.value = ''
-      } catch (e) {
-        if (!current()) return
-        nodeJson.value = ''
-        configError.value = (e as Error).message
-      }
-    }, DEBOUNCE_MS)
+    host.value = settings.value?.clients.endpoint ?? ''
+    void loadConfig()
   },
   { immediate: true },
 )
+
+watch(host, (h) => {
+  clearTimeout(fetchTimer)
+  if (h !== fetchedHost) fetchTimer = setTimeout(loadConfig, DEBOUNCE_MS)
+})
 
 async function copyConfig() {
   try {
@@ -111,7 +122,7 @@ async function deleteNode() {
       <header class="mb-6">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold tracking-tight">{{ node.id }}</h1>
-          <StateBadge :label="t(`state.${node.state}`)" :tone="node.state === 'online' ? 'good' : 'quiet'" />
+          <StateBadge :label="node.state === 'pending' ? t('nodes.pendingLabel') : t(`state.${node.state}`)" :tone="node.state === 'online' ? 'good' : 'quiet'" />
           <span v-if="node.provider" class="badge badge-sm badge-outline font-token">{{ node.provider }}</span>
         </div>
         <p class="text-base-content/65 mt-1 text-sm">
@@ -202,16 +213,23 @@ async function deleteNode() {
       <div class="mt-8">
         <div v-if="deleteError" role="alert" class="alert alert-error alert-soft mb-3 text-sm">{{ deleteError }}</div>
         <span :class="nodeVMs.length ? 'tooltip' : ''" :data-tip="t('node.deleteBlocked')">
-          <button type="button" class="btn btn-sm btn-error btn-outline" :disabled="nodeVMs.length > 0" @click="confirmDelete = true">
+          <button
+            type="button"
+            class="btn btn-sm btn-error btn-outline"
+            :disabled="nodeVMs.length > 0"
+            :aria-describedby="nodeVMs.length ? 'node-delete-hint' : undefined"
+            @click="confirmDelete = true"
+          >
             {{ t('node.delete') }}
           </button>
+          <span v-if="nodeVMs.length" id="node-delete-hint" class="sr-only">{{ t('node.deleteBlocked') }}</span>
         </span>
       </div>
 
       <ConfirmDialog
         :open="confirmDelete"
         :title="t('node.deleteTitle', { name: node.id })"
-        :body="node.state === 'online' ? t('node.deleteBody') + ' ' + t('node.deleteOnlineBody') : t('node.deleteBody')"
+        :body="node.state === 'online' ? t('node.deleteBodyOnline') : t('node.deleteBody')"
         :confirm-label="t('node.deleteConfirm')"
         @confirm="deleteNode"
         @cancel="confirmDelete = false"

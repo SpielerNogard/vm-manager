@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 
 import { api } from '@/api'
 import { useFleet } from '@/composables/useFleet'
+import { NAME_PATTERN } from '@/lib/names'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -50,7 +51,7 @@ async function submit() {
             class="input w-full"
             required
             maxlength="63"
-            pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"
+            :pattern="NAME_PATTERN"
             placeholder="mac-mini"
           />
           <span class="text-base-content/60 mt-1 block text-xs">{{ t('nodes.nameHint') }}</span>

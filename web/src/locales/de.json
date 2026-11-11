@@ -158,7 +158,7 @@
     "deleteBlocked": "Diese Node hat noch VMs",
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Die Node wird vom Hub entfernt.",
-    "deleteOnlineBody": "Der Node wird getrennt; läuft er weiter, verbindet er sich neu und taucht wieder auf.",
+    "deleteBodyOnline": "Die Node wird vom Hub entfernt und getrennt; läuft sie weiter, verbindet sie sich neu und taucht wieder auf.",
     "deleteConfirm": "Node löschen"
   },
   "vm": {
@@ -241,7 +241,7 @@
     "endpoint": "Client-Endpoint",
     "endpointHint": "Adresse, unter der Geräte und Nodes den Hub erreichen",
     "endpointChangeTitle": "Client-Endpoint ändern?",
-    "endpointChangeBody": "{count} Gerät(e) behalten die alte Adresse in ihren Configs; lade sie neu herunter.",
+    "endpointChangeBody": "Kein Gerät behält die alte Adresse in seiner Config.|Ein Gerät behält die alte Adresse in seiner Config; lade sie neu herunter.|{count} Geräte behalten die alte Adresse in ihren Configs; lade sie neu herunter.",
     "listen": "Listen-Adresse",
     "hubPort": "Hub-Port",
     "underlayPort": "Underlay-Port",

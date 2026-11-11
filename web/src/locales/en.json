@@ -158,7 +158,7 @@
     "deleteBlocked": "This node still has VMs",
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The node is removed from the hub.",
-    "deleteOnlineBody": "The node is disconnected; if it keeps running it reconnects and appears again.",
+    "deleteBodyOnline": "The node is removed from the hub and disconnected; if it keeps running it reconnects and appears again.",
     "deleteConfirm": "Delete node"
   },
   "vm": {
@@ -241,7 +241,7 @@
     "endpoint": "Client endpoint",
     "endpointHint": "Address devices and nodes use to reach the hub",
     "endpointChangeTitle": "Change client endpoint?",
-    "endpointChangeBody": "{count} device(s) keep the old address in their configs; download them again.",
+    "endpointChangeBody": "No device keeps the old address in its config.|One device keeps the old address in its config; download it again.|{count} devices keep the old address in their configs; download them again.",
     "listen": "Listen address",
     "hubPort": "Hub port",
     "underlayPort": "Underlay port",
