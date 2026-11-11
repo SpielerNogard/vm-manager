@@ -37,14 +37,18 @@ make stack                           # docker compose -f deploy/compose.yaml up 
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
 | `HUB_SSH_DIR` | `~/.ssh` | Directory with the default SSH public keys offered as hub keys |
 
-The hub config lives in the `data` volume as `/data/hub.json`, written by the gateway on first start from these variables. Editing `.env` later does not change it. To change hub settings afterwards (`guestMTU`, `clients.endpoint`, ports), copy the file out, edit it and copy it back (the gateway image has no editor), then restart the hub:
+The hub config lives in the `data` volume as `/data/hub.json`, written by the gateway on first start from these variables. Editing `.env` later does not change it. To change `guestMTU` or `clients.endpoint` afterwards, copy the file out, edit it and copy it back (the gateway image has no editor), then restart the hub:
 
 ```sh
 docker compose -f deploy/compose.yaml cp gateway:/data/hub.json hub.json
 $EDITOR hub.json
 docker compose -f deploy/compose.yaml cp hub.json gateway:/data/hub.json
+docker compose -f deploy/compose.yaml exec gateway chmod 600 /data/hub.json
 docker compose -f deploy/compose.yaml restart hub
+rm hub.json   # holds the token
 ```
+
+To change a port, edit the matching `.env` variable (`HUB_PORT`, `UNDERLAY_PORT`, `CLIENTS_PORT`) and the same value in `/data/hub.json` (`underlay.port`, `clients.port`; `HUB_PORT` has no hub.json key), then run `docker compose -f deploy/compose.yaml up -d` to recreate the services. The hub.json values are only what nodes and devices are told; publishing comes from `.env`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
 
 Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at `CLIENTS_ENDPOINT`. To run the hub without the stack, copy `hub.example.json` to `~/.vm-manager/hub.json` and start `./bin/hub`. Without the gateway container, VMs get no network.
 
