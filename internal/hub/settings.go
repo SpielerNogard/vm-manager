@@ -53,6 +53,10 @@ func registerSettings(mux *http.ServeMux, cfg *ConfigStore, nm *NetModel) {
 			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 			return
 		}
+		if dec.More() {
+			writeError(w, fmt.Errorf("%w: unexpected data after JSON object", ErrInvalid))
+			return
+		}
 		c, err := cfg.Update(func(c *Config) error {
 			if p.Clients != nil && p.Clients.Endpoint != nil {
 				if err := validEndpoint(*p.Clients.Endpoint); err != nil {

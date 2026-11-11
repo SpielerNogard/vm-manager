@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log"
@@ -31,7 +32,7 @@ func (n *yamuxNode) Send(m proto.Message) error {
 // NodeHandler accepts node connections: WebSocket → yamux, first node-opened stream is the control stream.
 func NodeHandler(r *Registry, token func() string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Authorization") != "Bearer "+token() {
+		if subtle.ConstantTimeCompare([]byte(req.Header.Get("Authorization")), []byte("Bearer "+token())) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

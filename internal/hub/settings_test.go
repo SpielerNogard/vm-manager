@@ -56,7 +56,7 @@ func TestSettingsPutValidation(t *testing.T) {
 		`{"clients":{"endpoint":""}}`, `{"clients":{"endpoint":"-"}}`, `{"clients":{"endpoint":"a..b"}}`, `{"clients":{"endpoint":"*"}}`,
 		`{"clients":{"endpoint":"a=b"}}`, `{"clients":{"endpoint":"a,b"}}`, `{"clients":{"endpoint":"[::1]"}}`, `{"clients":{"endpoint":"-a.b"}}`,
 		`{"clients":{"endpoint":"a-.b"}}`, `{"clients":{"endpoint":".a"}}`, `{"clients":{"endpoint":"a."}}`, `{"clients":{"endpoint":"fe80::1%eth0"}}`,
-		`{"listen":":9"}`, `{"clients":{"port":1}}`, `{"hub":{"port":1}}`,
+		`{"listen":":9"}`, `{"clients":{"port":1}}`, `{"hub":{"port":1}}`, `{"guestMTU":1400} {"token":"0123456789abcdefg"}`,
 	} {
 		if s, body := doJSON(t, "PUT", srv.URL+"/api/settings", b); s != 400 {
 			t.Errorf("%s: status = %d body = %s", b, s, body)
