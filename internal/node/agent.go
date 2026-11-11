@@ -9,7 +9,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,6 +24,8 @@ import (
 const (
 	reconnectDelay = 2 * time.Second
 	ipTimeout      = 120 * time.Second
+
+	defaultUnderlayMTU = 1420
 )
 
 type Agent struct {
@@ -30,6 +34,10 @@ type Agent struct {
 	Provider                      Provider
 	Config                        json.RawMessage
 	Machine                       *proto.Machine
+	ChassisKey                    string // public, sent in Register
+	ChassisPrivateKey             string
+	UnderlayEndpoint              string // host:port override of the hub's underlay address
+	UnderlayMTU                   int
 
 	mu   sync.Mutex
 	vms  map[string]*vmEntry
@@ -127,12 +135,37 @@ func (a *Agent) connect(ctx context.Context) error {
 			a.create(ctx, *m.Create)
 		case m.Type == "delete":
 			go a.delete(m.DeleteID)
+		case m.Type == "underlay" && m.Underlay != nil:
+			go a.startChassis(ctx, *m.Underlay)
 		}
 	}
 }
 
+func (a *Agent) startChassis(ctx context.Context, u proto.Underlay) {
+	endpoint := a.UnderlayEndpoint
+	if endpoint == "" {
+		hu, err := url.Parse(a.HubURL)
+		if err != nil {
+			log.Printf("chassis: hub url: %v", err)
+			return
+		}
+		endpoint = net.JoinHostPort(hu.Hostname(), strconv.Itoa(u.Port))
+	}
+	mtu := a.UnderlayMTU
+	if mtu == 0 {
+		mtu = defaultUnderlayMTU
+	}
+	err := a.Provider.StartChassis(ctx, Chassis{
+		Name: a.NodeID, PrivateKey: a.ChassisPrivateKey, Address: u.Address, HubKey: u.HubKey,
+		Endpoint: endpoint, SBRemote: u.SBRemote, MTU: mtu,
+	})
+	if err != nil {
+		log.Printf("chassis: %v", err)
+	}
+}
+
 func (a *Agent) registerMsg() *proto.Register {
-	reg := &proto.Register{NodeID: a.NodeID, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
+	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
 		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: e.status})
@@ -233,6 +266,9 @@ func (a *Agent) stopAll() {
 		}()
 	}
 	wg.Wait()
+	if err := a.Provider.StopChassis(); err != nil {
+		log.Printf("stop chassis: %v", err)
+	}
 }
 
 func (a *Agent) delete(id string) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ type fakeInstance struct {
 	once    sync.Once
 	done    chan struct{}
 	stopped atomic.Bool
+	p       *fakeProvider
 	staleIP bool // simulates finding the previous boot's lease only after the VM already died
 }
 
@@ -36,6 +38,9 @@ func (i *fakeInstance) guestShutdown()        { i.once.Do(func() { close(i.done)
 
 func (i *fakeInstance) Stop() error {
 	i.once.Do(func() { i.stopped.Store(true); close(i.done) })
+	if i.p != nil {
+		i.p.record("stop-guest")
+	}
 	return nil
 }
 
@@ -46,6 +51,32 @@ type fakeProvider struct {
 	failPrepare map[string]bool
 	failStart   map[string]bool
 	staleIP     map[string]bool
+	chassis     []Chassis
+	events      []string
+}
+
+func (p *fakeProvider) record(e string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, e)
+}
+
+func (p *fakeProvider) StartChassis(_ context.Context, c Chassis) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.chassis = append(p.chassis, c)
+	return nil
+}
+
+func (p *fakeProvider) StopChassis() error {
+	p.record("stop-chassis")
+	return nil
+}
+
+func (p *fakeProvider) gotChassis() []Chassis {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]Chassis(nil), p.chassis...)
 }
 
 func newFakeProvider() *fakeProvider {
@@ -70,7 +101,7 @@ func (p *fakeProvider) Start(f VMFile, _ string) (Instance, error) {
 	if p.failStart[f.Spec.Name] {
 		return nil, errors.New("start boom")
 	}
-	inst := &fakeInstance{done: make(chan struct{}), staleIP: p.staleIP[f.Spec.Name]}
+	inst := &fakeInstance{p: p, done: make(chan struct{}), staleIP: p.staleIP[f.Spec.Name]}
 	p.started[f.Spec.Name] = inst
 	return inst, nil
 }
@@ -106,7 +137,9 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := hub.NewRegistry(net, hub.Config{})
+	var hcfg hub.Config
+	hcfg.Underlay.Port = 51820
+	reg := hub.NewRegistry(net, hcfg)
 	srv := httptest.NewServer(hub.NodeHandler(reg, "tok"))
 
 	p := newFakeProvider()
@@ -244,5 +277,41 @@ func TestAgentStopsVMsOnShutdown(t *testing.T) {
 	}
 	if _, err := os.Stat(VMDir(env.agent.VMsDir, vm.ID)); err != nil {
 		t.Fatalf("vm dir must survive shutdown: %v", err)
+	}
+}
+
+func TestAgentSendsChassisKeyAndStartsChassis(t *testing.T) {
+	env := startEnv(t, func(a *Agent, _ *fakeProvider) {
+		a.ChassisKey, a.ChassisPrivateKey = "pub-key", "priv-key"
+	})
+	eventually(t, "chassis started", func() bool { return len(env.provider.gotChassis()) > 0 })
+	c := env.provider.gotChassis()[0]
+	u, _ := url.Parse(env.agent.HubURL)
+	if c.Name != "n1" || c.PrivateKey != "priv-key" || !strings.HasPrefix(c.Address, "10.198.0.") || !strings.HasSuffix(c.Address, "/24") ||
+		c.Endpoint != net.JoinHostPort(u.Hostname(), "51820") || c.MTU != 1420 || c.HubKey == "" || c.SBRemote == "" {
+		t.Fatalf("chassis = %+v", c)
+	}
+}
+
+func TestAgentUnderlayEndpointOverride(t *testing.T) {
+	env := startEnv(t, func(a *Agent, _ *fakeProvider) {
+		a.ChassisKey, a.ChassisPrivateKey, a.UnderlayEndpoint, a.UnderlayMTU = "pub-key", "priv-key", "1.2.3.4:6000", 1400
+	})
+	eventually(t, "chassis started", func() bool { return len(env.provider.gotChassis()) > 0 })
+	if c := env.provider.gotChassis()[0]; c.Endpoint != "1.2.3.4:6000" || c.MTU != 1400 {
+		t.Fatalf("chassis = %+v", c)
+	}
+}
+
+func TestAgentStopsChassisAfterGuests(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.stop()
+	<-env.runDone
+	env.provider.mu.Lock()
+	defer env.provider.mu.Unlock()
+	if got := strings.Join(env.provider.events, ","); got != "stop-guest,stop-chassis" {
+		t.Fatalf("events = %s", got)
 	}
 }

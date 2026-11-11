@@ -25,6 +25,10 @@ type Config struct {
 		CPUs     int `json:"cpus"`
 		MemoryMB int `json:"memoryMB"`
 	} `json:"capacity"`
+	Underlay struct {
+		Endpoint string `json:"endpoint"`
+		MTU      int    `json:"mtu"`
+	} `json:"underlay"`
 	Raw map[string]json.RawMessage `json:"-"`
 }
 
@@ -50,6 +54,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	home, _ := os.UserHomeDir()
 	c.Paths.VMs, c.Paths.Images = expandHome(c.Paths.VMs, home), expandHome(c.Paths.Images, home)
+	if c.Underlay.MTU == 0 {
+		c.Underlay.MTU = defaultUnderlayMTU
+	}
 	if c.NodeID == "" {
 		c.NodeID, _ = os.Hostname()
 	}

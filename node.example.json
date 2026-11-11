@@ -6,6 +6,7 @@
     "vms": "~/.vm-manager/vms",
     "images": "~/.vm-manager/images"
   },
+  "underlay": { "mtu": 1420 },
   "capacity": { "cpus": 4, "memoryMB": 8192 },
   "vz": {
     "imageURL": "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img",

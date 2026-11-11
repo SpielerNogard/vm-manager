@@ -45,6 +45,12 @@ func New(c node.Config) (*Provider, error) {
 
 func (p *Provider) Name() string { return "vz" }
 
+func (p *Provider) StartChassis(context.Context, node.Chassis) error {
+	return errors.New("not implemented")
+}
+
+func (p *Provider) StopChassis() error { return nil }
+
 func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error {
 	p.imageMu.Lock()
 	base, err := node.EnsureBaseImage(p.ImagesDir, p.ImageURL)

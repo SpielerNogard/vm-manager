@@ -97,3 +97,14 @@ func TestConfigPublicDropsToken(t *testing.T) {
 		t.Fatalf("token leaked: %s", pub)
 	}
 }
+
+func TestLoadConfigUnderlay(t *testing.T) {
+	c, err := LoadConfig(writeConfig(t, fullConfig))
+	if err != nil || c.Underlay.MTU != 1420 || c.Underlay.Endpoint != "" {
+		t.Fatalf("defaults: %+v %v", c.Underlay, err)
+	}
+	c, err = LoadConfig(writeConfig(t, strings.Replace(fullConfig, `"vz"`, `"vz", "underlay": {"endpoint": "1.2.3.4:6000", "mtu": 1400}`, 1)))
+	if err != nil || c.Underlay.MTU != 1400 || c.Underlay.Endpoint != "1.2.3.4:6000" {
+		t.Fatalf("set: %+v %v", c.Underlay, err)
+	}
+}
