@@ -1,6 +1,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
-import { api, type Device, type Node, type SSHKey, type VM } from '@/api'
+import { api, type Device, type Network, type Node, type SSHKey, type VM } from '@/api'
 
 const POLL_MS = 2000
 
@@ -9,17 +9,19 @@ const nodes = ref<Node[]>([])
 const vms = ref<VM[]>([])
 const keys = ref<SSHKey[]>([])
 const devices = ref<Device[]>([])
+const networks = ref<Network[]>([])
 const loaded = ref(false)
 const loadError = ref<Error | null>(null)
 const onlineNodes = computed(() => nodes.value.filter((n) => n.online))
 
 async function refresh() {
   try {
-    ;[nodes.value, vms.value, keys.value, devices.value] = await Promise.all([
+    ;[nodes.value, vms.value, keys.value, devices.value, networks.value] = await Promise.all([
       api.nodes(),
       api.vms(),
       api.keys(),
       api.devices(),
+      api.networks(),
     ])
     loadError.value = null
   } catch (e) {
@@ -43,5 +45,5 @@ export function useFleet() {
   onUnmounted(() => {
     if (--subscribers === 0) clearInterval(timer)
   })
-  return { nodes, vms, keys, devices, onlineNodes, loaded, loadError, refresh }
+  return { nodes, vms, keys, devices, networks, onlineNodes, loaded, loadError, refresh }
 }
