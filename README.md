@@ -94,7 +94,7 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
 
-Upgrade note: VMs created before the hub became the source of truth are deleted when their node first connects. Recreate them.
+Upgrade note: VMs created before the hub became the source of truth are deleted when their node first connects. Recreate them. Upgrade the hub and all nodes together; old and new versions don't work with each other.
 
 ## Config
 
@@ -109,7 +109,7 @@ Upgrade note: VMs created before the hub became the source of truth are deleted 
 | `clients.port` | `51821` | Published clients WireGuard port |
 | `guestMTU` | `1300` | Guest mgmt MTU, delivered by OVN DHCP |
 
-**Node:** the required keys are `hub.url`, `hub.token`, `provider` (`vz`), `paths.vms` and `paths.images`. `nodeId` is optional and defaults to the hostname. `capacity.cpus`/`memoryMB` are optional and default to the hardware, minus 4 GB of RAM. `underlay.endpoint` overrides the hub's WireGuard endpoint (default: the host of `hub.url` plus the hub's underlay port). `underlay.mtu` is the `wg-underlay` MTU (default 1420). The node's WireGuard chassis key is stored in `<paths.vms>/chassis.key`.
+**Node:** the required keys are `hub.url`, `hub.token`, `provider` (`vz`), `paths.vms` and `paths.images`. `nodeId` is optional and defaults to the hostname. Set it explicitly: if it changes (or the hostname changes while it is unset), the hub refuses the node because its VMs belong to the old ID. The node keeps its VMs and retries. `capacity.cpus`/`memoryMB` are optional and default to the hardware, minus 4 GB of RAM. `underlay.endpoint` overrides the hub's WireGuard endpoint (default: the host of `hub.url` plus the hub's underlay port). `underlay.mtu` is the `wg-underlay` MTU (default 1420). The node's WireGuard chassis key is stored in `<paths.vms>/chassis.key`.
 
 Provider settings go in a section named after the provider. For `vz` these are `vz.imageURL` and `vz.leasesPath`.
 
@@ -120,7 +120,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | GET | `/api/nodes` | Nodes with provider, capacity, online state, machine info, chassis state, and their config file without the hub token |
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`). Also works for an offline node: the VM shows `pending` until the node connects |
-| DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node (`pending` until it connects) |
+| DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
 | POST | `/api/vms/{id}/start` | Power the VM on |
 | POST | `/api/vms/{id}/shutdown` | ACPI shutdown, hard power-off after 10 s |
 | POST | `/api/vms/{id}/stop` | Immediate hard power-off |
