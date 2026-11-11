@@ -13,7 +13,7 @@ type Tab = 'networking' | 'security' | 'guests'
 type Pending = 'endpoint' | 'token' | 'regenerate'
 
 const { t } = useI18n()
-const { settings, refresh } = useFleet()
+const { settings, loaded, refresh } = useFleet()
 
 const tab = ref<Tab>('networking')
 const endpoint = ref('')
@@ -124,7 +124,11 @@ watch(tab, () => {
       {{ t('settings.setupBanner') }}
     </div>
 
-    <DataState :loading="!settings">
+    <div v-if="loaded && !settings" role="alert" class="alert alert-error alert-soft text-sm">
+      <span class="grow">{{ t('settings.loadFailed') }}</span>
+      <button type="button" class="btn btn-sm" @click="refresh">{{ t('common.retry') }}</button>
+    </div>
+    <DataState v-else :loading="!settings">
       <div class="flex flex-col gap-6 md:flex-row">
         <ul class="menu menu-sm w-full gap-0.5 p-0 md:w-48 md:shrink-0" role="tablist" aria-orientation="vertical" @keydown="onTabKeydown">
           <li v-for="id in tabs" :key="id" role="presentation">

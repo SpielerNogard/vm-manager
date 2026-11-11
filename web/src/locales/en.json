@@ -41,7 +41,8 @@
     "actionsFor": "Actions for {name}",
     "name": "Name",
     "status": "Status",
-    "hubUnreachable": "Hub unreachable: {error}"
+    "hubUnreachable": "Hub unreachable: {error}",
+    "retry": "Retry"
   },
   "state": {
     "online": "online",
@@ -240,6 +241,7 @@
     "confirm": "Confirm",
     "endpoint": "Client endpoint",
     "endpointHint": "Address devices and nodes use to reach the hub",
+    "loadFailed": "Settings could not be loaded.",
     "endpointChangeTitle": "Change client endpoint?",
     "endpointChangeBody": "No device keeps the old address in its config.|One device keeps the old address in its config; download it again.|{count} devices keep the old address in their configs; download them again.",
     "listen": "Listen address",
