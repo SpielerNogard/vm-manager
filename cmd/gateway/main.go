@@ -23,7 +23,15 @@ func main() {
 	hubURL := flag.String("hub", "http://127.0.0.1:8080", "hub base URL")
 	tokenFile := flag.String("token-file", "/data/hub.json", "hub config holding the API token")
 	nbDB := flag.String("nb", "unix:/var/run/ovn/ovnnb_db.sock", "OVN NB database")
+	initConfig := flag.String("init-config", "", "write the hub config to this path from the environment and exit")
 	flag.Parse()
+
+	if *initConfig != "" {
+		if err := writeHubConfig(*initConfig, os.Getenv); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	raw, err := os.ReadFile(*tokenFile)
 	if err != nil {
@@ -84,7 +92,9 @@ func main() {
 		}
 		records := map[string]string{}
 		for _, p := range st.Ports {
-			records[strings.ToLower(p.Hostname)+"."] = p.IP
+			if p.Hostname != "" {
+				records[strings.ToLower(p.Hostname)+"."] = p.IP
+			}
 		}
 		dns.setRecords(records)
 
