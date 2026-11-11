@@ -60,7 +60,12 @@
     "provider": "Provider",
     "capacity": "Kapazität",
     "free": "Frei",
-    "chassis": "Chassis"
+    "chassis": "Chassis",
+    "add": "Node hinzufügen",
+    "dialogTitle": "Node hinzufügen",
+    "nameHint": "Kleinbuchstaben, Ziffern, Bindestriche",
+    "create": "Node anlegen",
+    "pendingLabel": "wartet auf erste Verbindung"
   },
   "vms": {
     "new": "Neue VM",
@@ -142,7 +147,19 @@
     "vms": "VMs auf dieser Node",
     "noVMs": "Keine VMs auf dieser Node",
     "open": "{name} öffnen",
-    "chassis": "Chassis"
+    "chassis": "Chassis",
+    "nodeConfig": "Konfiguration",
+    "hubAddress": "Hub-Adresse für diese Node",
+    "hubAddressHint": "localhost für den eigenen Mac des Hubs, oder eine LAN-IP, wenn Nodes den Hub anders erreichen.",
+    "download": "node.json herunterladen",
+    "saveHint": "Als ~/.vm-manager/node.json auf der Node speichern und ./bin/node starten",
+    "copyFailed": "Kopieren fehlgeschlagen; Text manuell markieren.",
+    "delete": "Node löschen",
+    "deleteBlocked": "Diese Node hat noch VMs",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Die Node wird vom Hub entfernt.",
+    "deleteOnlineBody": "Der Node wird getrennt; läuft er weiter, verbindet er sich neu und taucht wieder auf.",
+    "deleteConfirm": "Node löschen"
   },
   "vm": {
     "notFound": "Keine VM mit der ID {id}.",

@@ -1,25 +1,82 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
+import { api } from '@/api'
+import AppIcon from '@/components/AppIcon.vue'
 import ChassisBadge from '@/components/ChassisBadge.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DataState from '@/components/DataState.vue'
 import MeterBar from '@/components/MeterBar.vue'
 import StateBadge from '@/components/StateBadge.vue'
 import VMTable from '@/components/VMTable.vue'
 import { useFleet } from '@/composables/useFleet'
-import { flatten, formatMB } from '@/lib/format'
+import { downloadText, flatten, formatMB } from '@/lib/format'
 
 const { t, locale } = useI18n()
 const route = useRoute()
-const { nodes, vms, loaded } = useFleet()
+const router = useRouter()
+const { nodes, vms, settings, loaded, refresh } = useFleet()
 
 const node = computed(() => nodes.value.find((n) => n.id === route.params.id))
 const nodeVMs = computed(() => vms.value.filter((vm) => vm.nodeId === route.params.id))
 const config = computed(() => flatten(node.value?.config ?? {}))
 const connectedAt = computed(() => node.value && new Date(node.value.connectedAt).toLocaleString(locale.value))
 const formatCPUs = (n: number) => `${n} vCPU`
+
+const host = ref('')
+const nodeJson = ref('')
+const configError = ref('')
+const copied = ref(false)
+const confirmDelete = ref(false)
+const deleteError = ref('')
+
+watch(
+  () => settings.value?.clients.endpoint,
+  (endpoint) => {
+    if (!host.value && endpoint) host.value = endpoint
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [route.params.id, host.value] as const,
+  async ([id, h]) => {
+    if (typeof id !== 'string') return
+    try {
+      const json = await api.nodeConfig(id, h.trim() || undefined)
+      if (id !== route.params.id || h !== host.value) return
+      nodeJson.value = json
+      configError.value = ''
+    } catch (e) {
+      configError.value = (e as Error).message
+    }
+  },
+  { immediate: true },
+)
+
+async function copyConfig() {
+  try {
+    await navigator.clipboard.writeText(nodeJson.value)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    configError.value = t('node.copyFailed')
+  }
+}
+
+async function deleteNode() {
+  confirmDelete.value = false
+  deleteError.value = ''
+  try {
+    await api.deleteNode(String(route.params.id))
+    await refresh()
+    await router.push({ name: 'nodes' })
+  } catch (e) {
+    deleteError.value = (e as Error).message
+  }
+}
 </script>
 
 <template>
@@ -39,7 +96,7 @@ const formatCPUs = (n: number) => `${n} vCPU`
       <header class="mb-6">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold tracking-tight">{{ node.id }}</h1>
-          <StateBadge :label="t(node.online ? 'state.online' : 'state.offline')" :tone="node.online ? 'good' : 'quiet'" />
+          <StateBadge :label="t(`state.${node.state}`)" :tone="node.state === 'online' ? 'good' : 'quiet'" />
           <span class="badge badge-sm badge-outline font-token">{{ node.provider }}</span>
         </div>
         <p class="text-base-content/65 mt-1 text-sm">
@@ -83,6 +140,27 @@ const formatCPUs = (n: number) => `${n} vCPU`
         </section>
       </div>
 
+      <section class="border-base-300 rounded-box mb-6 space-y-3 border p-4">
+        <h2 class="font-semibold">{{ t('node.nodeConfig') }}</h2>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">{{ t('node.hubAddress') }}</span>
+          <input v-model="host" class="input font-token w-full max-w-md" />
+          <span class="text-base-content/60 mt-1 block text-xs">{{ t('node.hubAddressHint') }}</span>
+        </label>
+        <div v-if="configError" role="alert" class="alert alert-error alert-soft text-sm">{{ configError }}</div>
+        <pre class="bg-base-200 rounded-box font-token overflow-x-auto p-3 text-xs">{{ nodeJson }}</pre>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="copyConfig">
+            <AppIcon :name="copied ? 'check' : 'copy'" />
+            {{ copied ? t('vms.copied') : t('vms.copy') }}
+          </button>
+          <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="downloadText('node.json', nodeJson)">
+            {{ t('node.download') }}
+          </button>
+        </div>
+        <p class="text-base-content/60 text-xs">{{ t('node.saveHint') }}</p>
+      </section>
+
       <section class="border-base-300 rounded-box mb-6 border p-4">
         <h2 class="font-semibold">{{ t('node.config') }}</h2>
         <p class="text-base-content/60 mb-3 text-xs">{{ t('node.configHint') }}</p>
@@ -101,6 +179,24 @@ const formatCPUs = (n: number) => `${n} vCPU`
       <DataState :loading="false" :empty="!nodeVMs.length" :empty-title="t('node.noVMs')">
         <VMTable :vms="nodeVMs" />
       </DataState>
+
+      <div class="mt-8">
+        <div v-if="deleteError" role="alert" class="alert alert-error alert-soft mb-3 text-sm">{{ deleteError }}</div>
+        <span :class="nodeVMs.length ? 'tooltip' : ''" :data-tip="t('node.deleteBlocked')">
+          <button type="button" class="btn btn-sm btn-error btn-outline" :disabled="nodeVMs.length > 0" @click="confirmDelete = true">
+            {{ t('node.delete') }}
+          </button>
+        </span>
+      </div>
+
+      <ConfirmDialog
+        :open="confirmDelete"
+        :title="t('node.deleteTitle', { name: node.id })"
+        :body="node.state === 'online' ? t('node.deleteBody') + ' ' + t('node.deleteOnlineBody') : t('node.deleteBody')"
+        :confirm-label="t('node.deleteConfirm')"
+        @confirm="deleteNode"
+        @cancel="confirmDelete = false"
+      />
     </template>
   </div>
 </template>

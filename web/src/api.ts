@@ -8,7 +8,7 @@ export interface Node {
   memoryMB: number
   freeCpus: number
   freeMemoryMB: number
-  online: boolean
+  state: 'pending' | 'online' | 'offline'
   connectedAt: string
   /** The node's config file without the hub token. */
   config?: Record<string, unknown>
@@ -143,6 +143,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   nodes: () => request<Node[]>('GET', '/api/nodes'),
+  createNode: (id: string) => request<Node>('POST', '/api/nodes', { id }),
+  deleteNode: (id: string) => request<void>('DELETE', `/api/nodes/${id}`),
+  nodeConfig: (id: string, host?: string) =>
+    text(`/api/nodes/${id}/config${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   vms: () => request<VM[]>('GET', '/api/vms'),
   createVM: (req: CreateVMRequest) => request<VM>('POST', '/api/vms', req),
   deleteVM: (id: string) => request<void>('DELETE', `/api/vms/${id}`),

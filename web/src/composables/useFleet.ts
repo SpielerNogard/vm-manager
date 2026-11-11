@@ -13,7 +13,7 @@ const networks = ref<Network[]>([])
 const settings = ref<Settings | null>(null)
 const loaded = ref(false)
 const loadError = ref<Error | null>(null)
-const onlineNodes = computed(() => nodes.value.filter((n) => n.online))
+const onlineNodes = computed(() => nodes.value.filter((n) => n.state === 'online'))
 
 async function refresh() {
   try {
