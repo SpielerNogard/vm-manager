@@ -17,6 +17,10 @@
     "devices": {
       "label": "Devices",
       "blurb": "WireGuard client devices. A device reaches every VM by its management hostname."
+    },
+    "networks": {
+      "label": "Networks",
+      "blurb": "Private networks that VMs can join. VMs on the same network reach each other as NAME.NETWORK.internal."
     }
   },
   "topbar": {
@@ -92,7 +96,11 @@
     "addDisk": "Add disk",
     "sshKeys": "SSH keys",
     "noKeys": "No key stored yet.",
-    "submit": "Create VM"
+    "submit": "Create VM",
+    "networks": "Networks",
+    "networksHint": "VMs on the same network reach each other as NAME.NETWORK.internal.",
+    "network": "Network",
+    "removeNetwork": "Remove network"
   },
   "keys": {
     "add": "Add key",
@@ -136,12 +144,7 @@
     "onNode": "on",
     "access": "Access",
     "networks": "Networks",
-    "networksHint": "The management NIC is reachable from WireGuard devices. The NAT NIC gives the VM internet access and is only reachable from its node.",
-    "network": "Network",
-    "subnet": "Subnet",
-    "port": "OVN port",
-    "nat": "NAT (internet)",
-    "natHint": "node only",
+    "networksHint": "Networks this VM is attached to besides management. Reach it from other members as NAME.NETWORK.internal.",
     "rootDisk": "Root disk",
     "sshKeys": "SSH keys",
     "disks": "Disks",
@@ -151,7 +154,14 @@
     "allocated": "Allocated on host",
     "notReported": "Not reported by the node",
     "filesystem": "Filesystem",
-    "mountPath": "Mount path"
+    "mountPath": "Mount path",
+    "dnsName": "DNS name",
+    "noNetworks": "Not attached to any network.",
+    "editNetworks": "Edit",
+    "save": "Save",
+    "restartTitle": "Restart {name}?",
+    "restartBody": "The VM will restart to apply the network change.",
+    "restartConfirm": "Save and restart"
   },
   "chassis": {
     "connected": "connected",
@@ -175,5 +185,22 @@
     "deleteBody": "The device loses access to all VMs immediately.",
     "deleteConfirm": "Delete device",
     "qrFailed": "The QR code could not be generated. Use the config text or the download."
+  },
+  "networks": {
+    "add": "Add network",
+    "emptyTitle": "No networks yet",
+    "emptyBody": "Create a network to let VMs reach each other privately.",
+    "subnet": "Subnet",
+    "automatic": "automatic",
+    "members": "Members",
+    "dialogTitle": "Add network",
+    "nameHint": "Lowercase letters, digits and hyphens.",
+    "subnetHint": "CIDR, e.g. 10.20.0.0/24. Leave empty to pick one automatically.",
+    "create": "Create network",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "The network and its subnet are removed.",
+    "deleteConfirm": "Delete network",
+    "inUse": "in use",
+    "builtin": "built-in"
   }
 }

@@ -36,11 +36,51 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) {
-		members := 0
-		for _, nics := range net.AllNICs() {
-			members += len(nics)
+		members := map[string][]string{}
+		for vmID, nics := range net.AllNICs() {
+			for _, n := range nics {
+				members[n.Network] = append(members[n.Network], vmID)
+			}
 		}
-		writeJSON(w, http.StatusOK, []map[string]any{{"name": mgmtNetwork, "subnet": mgmtSubnet, "members": members}})
+		view := func(id, name, subnet string, builtin bool) map[string]any {
+			m := slices.Sorted(slices.Values(members[id]))
+			if m == nil {
+				m = []string{}
+			}
+			return map[string]any{"id": id, "name": name, "subnet": subnet, "builtin": builtin, "members": m}
+		}
+		out := []map[string]any{view(mgmtNetwork, mgmtNetwork, mgmtSubnet, true)}
+		for _, n := range net.Networks() {
+			out = append(out, view(n.ID, n.Name, n.Subnet, false))
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
+	mux.HandleFunc("POST /api/networks", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			Name   string `json:"name"`
+			Subnet string `json:"subnet"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		n, err := net.AddNetwork(q.Name, q.Subnet)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, n)
+	})
+	mux.HandleFunc("DELETE /api/networks/{id}", func(w http.ResponseWriter, req *http.Request) {
+		if req.PathValue("id") == mgmtNetwork {
+			writeError(w, fmt.Errorf("%w: the mgmt network cannot be deleted", ErrInvalid))
+			return
+		}
+		if err := net.DeleteNetwork(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /api/devices", func(w http.ResponseWriter, _ *http.Request) {
 		out := []deviceView{}
@@ -120,6 +160,25 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("PUT /api/vms/{id}/networks", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			NetworkIDs *[]string `json:"networkIds"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		if q.NetworkIDs == nil {
+			writeError(w, fmt.Errorf("%w: networkIds is required", ErrInvalid))
+			return
+		}
+		vm, err := r.SetVMNetworks(req.PathValue("id"), *q.NetworkIDs, req.URL.Query().Get("restartAllowed") == "true")
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, vm)
 	})
 	for path, act := range map[string]struct {
 		power proto.Power

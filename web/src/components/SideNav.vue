@@ -8,11 +8,11 @@ import { NAV, type Section } from '@/nav'
 import AppIcon from './AppIcon.vue'
 
 const { t } = useI18n()
-const { nodes, vms, keys, devices } = useFleet()
+const { nodes, vms, keys, devices, networks } = useFleet()
 
 const route = useRoute()
 
-const count = (section: Section) => ({ nodes, vms, keys, devices })[section].value.length
+const count = (section: Section) => ({ nodes, vms, keys, devices, networks })[section].value.length
 const isActive = (section: Section) => route.name === section || route.meta.section === section
 </script>
 

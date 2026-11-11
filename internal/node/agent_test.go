@@ -67,6 +67,8 @@ type fakeProvider struct {
 	maxInflight  atomic.Int32
 	events       []string
 	failDisks    bool
+	failReseed   bool
+	starts       map[string]int
 	bigRoot      bool // makes Disks report a different allocation, as if the guest wrote data
 	afterPrepare func(dir string)
 }
@@ -120,7 +122,7 @@ func (p *fakeProvider) gotChassis() []Chassis {
 }
 
 func newFakeProvider() *fakeProvider {
-	return &fakeProvider{started: map[string]*fakeInstance{}, failPrepare: map[string]bool{}, failStart: map[string]bool{}, staleIP: map[string]bool{}}
+	return &fakeProvider{started: map[string]*fakeInstance{}, starts: map[string]int{}, failPrepare: map[string]bool{}, failStart: map[string]bool{}, staleIP: map[string]bool{}}
 }
 
 func (p *fakeProvider) Name() string { return "fake" }
@@ -139,12 +141,23 @@ func (p *fakeProvider) Prepare(_ context.Context, f VMFile, dir string) error {
 	return nil
 }
 
+func (p *fakeProvider) Reseed(_ context.Context, f VMFile, _ string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, "reseed:"+f.Spec.Name)
+	if p.failReseed {
+		return errors.New("reseed boom")
+	}
+	return nil
+}
+
 func (p *fakeProvider) Start(f VMFile, _ string) (Instance, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.failStart[f.Spec.Name] {
 		return nil, errors.New("start boom")
 	}
+	p.starts[f.Spec.Name]++
 	inst := &fakeInstance{p: p, done: make(chan struct{}), staleIP: p.staleIP[f.Spec.Name]}
 	p.started[f.Spec.Name] = inst
 	return inst, nil

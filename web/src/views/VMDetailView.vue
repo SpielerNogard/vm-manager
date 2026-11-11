@@ -1,27 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-import { api, type Network } from '@/api'
+import { api } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import NetworkRows from '@/components/NetworkRows.vue'
 import StateBadge from '@/components/StateBadge.vue'
 import { useFleet } from '@/composables/useFleet'
 import { formatBytes, formatMB, VM_TONE } from '@/lib/format'
 
 const { t } = useI18n()
 const route = useRoute()
-const { vms, keys, loaded, refresh } = useFleet()
-
-const networks = ref<Network[]>([])
-onMounted(async () => {
-  try {
-    networks.value = await api.networks()
-  } catch {
-    // Subnets are optional detail; the page still works without them.
-  }
-})
+const router = useRouter()
+const { vms, keys, networks, loaded, refresh } = useFleet()
 
 const vm = computed(() => vms.value.find((v) => v.id === route.params.id))
 const host = computed(() => vm.value && `${vm.value.name}.mgmt.internal`)
@@ -42,7 +35,9 @@ const disks = computed(() =>
       }
     }),
 )
-const subnet = (name: string) => networks.value.find((n) => n.name === name)?.subnet
+const networkName = (id: string) => networks.value.find((n) => n.id === id)?.name ?? id
+const attachable = computed(() => networks.value.filter((n) => !n.builtin))
+const vmNics = computed(() => (vm.value?.nics ?? []).filter((nic) => nic.network !== 'mgmt'))
 const sshKeys = computed(() =>
   (vm.value?.sshPublicKeys ?? []).map((pk) => {
     const known = keys.value.find((k) => k.publicKey.trim() === pk.trim())
@@ -67,6 +62,39 @@ async function power(action: 'startVM' | 'shutdownVM' | 'stopVM') {
     await refresh()
   } catch (e) {
     powerError.value = (e as Error).message
+  }
+}
+
+const editingNetworks = ref(false)
+const selectedNetworks = ref<string[]>([])
+const confirmRestart = ref(false)
+const networkError = ref('')
+const savingNetworks = ref(false)
+
+function editNetworks() {
+  selectedNetworks.value = vmNics.value.map((nic) => nic.network)
+  networkError.value = ''
+  editingNetworks.value = true
+}
+
+function saveNetworks() {
+  if (vm.value?.power === 'running') confirmRestart.value = true
+  else void applyNetworks(false)
+}
+
+async function applyNetworks(restartAllowed: boolean) {
+  confirmRestart.value = false
+  if (!vm.value) return
+  networkError.value = ''
+  savingNetworks.value = true
+  try {
+    await api.setVMNetworks(vm.value.id, selectedNetworks.value, restartAllowed)
+    editingNetworks.value = false
+    await refresh()
+  } catch (e) {
+    networkError.value = (e as Error).message
+  } finally {
+    savingNetworks.value = false
   }
 }
 
@@ -133,35 +161,46 @@ async function copy() {
       </section>
 
       <section class="border-base-300 rounded-box mb-6 border p-4">
-        <h2 class="font-semibold">{{ t('vm.networks') }}</h2>
-        <p class="text-base-content/60 mb-3 text-xs">{{ t('vm.networksHint') }}</p>
-        <table class="table-sm table">
-          <thead>
-            <tr>
-              <th>{{ t('vm.network') }}</th>
-              <th>{{ t('vm.subnet') }}</th>
-              <th>{{ t('vms.ip') }}</th>
-              <th>MAC</th>
-              <th>{{ t('vm.port') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="nic in vm.nics ?? []" :key="nic.port">
-              <td class="font-medium">{{ nic.network }}</td>
-              <td class="font-token">{{ subnet(nic.network) ?? '—' }}</td>
-              <td class="font-token">{{ nic.ip }}</td>
-              <td class="font-token">{{ nic.mac }}</td>
-              <td class="font-token text-base-content/65 text-xs break-all">{{ nic.port }}</td>
-            </tr>
-            <tr>
-              <td class="font-medium">{{ t('vm.nat') }}</td>
-              <td>—</td>
-              <td class="font-token">{{ vm.ip || '—' }}</td>
-              <td>—</td>
-              <td class="text-base-content/65 text-xs">{{ t('vm.natHint') }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="font-semibold">{{ t('vm.networks') }}</h2>
+            <p class="text-base-content/60 mb-3 text-xs">{{ t('vm.networksHint') }}</p>
+          </div>
+          <button v-if="!editingNetworks" type="button" class="btn btn-sm" @click="editNetworks">{{ t('vm.editNetworks') }}</button>
+        </div>
+
+        <form v-if="editingNetworks" class="space-y-2" @submit.prevent="saveNetworks">
+          <NetworkRows v-model="selectedNetworks" :networks="attachable" @manage="router.push({ name: 'networks' })" />
+          <div v-if="networkError" role="alert" class="alert alert-error alert-soft text-sm">{{ networkError }}</div>
+          <div class="flex justify-end gap-2">
+            <button type="button" class="btn btn-sm btn-ghost" @click="editingNetworks = false">{{ t('common.cancel') }}</button>
+            <button type="submit" class="btn btn-sm btn-primary" :disabled="savingNetworks">
+              <span v-if="savingNetworks" class="loading loading-spinner loading-xs"></span>
+              {{ t('vm.save') }}
+            </button>
+          </div>
+        </form>
+
+        <template v-else>
+          <div v-if="networkError" role="alert" class="alert alert-error alert-soft mb-3 text-sm">{{ networkError }}</div>
+          <p v-if="!vmNics.length" class="text-base-content/60 text-sm">{{ t('vm.noNetworks') }}</p>
+          <table v-else class="table-sm table">
+            <thead>
+              <tr>
+                <th>{{ t('common.name') }}</th>
+                <th>{{ t('vms.ip') }}</th>
+                <th>{{ t('vm.dnsName') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="nic in vmNics" :key="nic.port">
+                <td class="font-medium">{{ networkName(nic.network) }}</td>
+                <td class="font-token">{{ nic.ip }}</td>
+                <td class="font-token">{{ vm.name }}.{{ networkName(nic.network) }}.internal</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </section>
 
       <section class="border-base-300 rounded-box mb-6 border p-4">
@@ -215,6 +254,14 @@ async function copy() {
           <p v-else class="text-base-content/60 text-sm">—</p>
         </section>
       </div>
+      <ConfirmDialog
+        :open="confirmRestart"
+        :title="t('vm.restartTitle', { name: vm.name })"
+        :body="t('vm.restartBody')"
+        :confirm-label="t('vm.restartConfirm')"
+        @confirm="applyNetworks(true)"
+        @cancel="confirmRestart = false"
+      />
       <ConfirmDialog
         :open="confirmStop"
         :title="t('vms.stopTitle', { name: vm.name })"

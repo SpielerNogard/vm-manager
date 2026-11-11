@@ -24,6 +24,12 @@ defineProps<{ name: string }>()
       <path d="M12 3 21 7.5v9L12 21 3 16.5v-9L12 3Z" />
       <path d="M3 7.5 12 12l9-4.5M12 12v9" />
     </template>
+    <template v-else-if="name === 'network'">
+      <rect x="9" y="3" width="6" height="5" rx="1" />
+      <rect x="3" y="16" width="6" height="5" rx="1" />
+      <rect x="15" y="16" width="6" height="5" rx="1" />
+      <path d="M12 8v4M6 16v-4h12v4" />
+    </template>
     <template v-else-if="name === 'plus'">
       <path d="M12 5v14M5 12h14" />
     </template>

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -224,20 +225,116 @@ func TestAPIDeviceNeedsEndpoint(t *testing.T) {
 	}
 }
 
-func TestAPINetworks(t *testing.T) {
-	srv, r, _ := apiServerWith(t, testAPIConfig())
-	if _, err := r.CreateVM(validReq()); err != nil {
+func doJSON(t *testing.T, method, url, body string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.Get(srv.URL + "/api/networks")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var out []map[string]any
-	json.NewDecoder(resp.Body).Decode(&out)
-	if len(out) != 1 || out[0]["name"] != "mgmt" || out[0]["subnet"] != "10.200.0.0/16" || out[0]["members"] != float64(1) {
-		t.Fatalf("networks = %v", out)
+	var buf bytes.Buffer
+	buf.ReadFrom(resp.Body)
+	return resp.StatusCode, buf.Bytes()
+}
+
+func TestAPINetworksLifecycle(t *testing.T) {
+	srv, r, _ := apiServerWith(t, testAPIConfig())
+	s, body := doJSON(t, "POST", srv.URL+"/api/networks", `{"name":"a"}`)
+	var a Network
+	json.Unmarshal(body, &a)
+	if s != http.StatusCreated || a.ID == "" || a.Subnet != "10.210.0.0/24" {
+		t.Fatalf("auto: status = %d body = %s", s, body)
+	}
+	s, body = doJSON(t, "POST", srv.URL+"/api/networks", `{"name":"b","subnet":"10.50.0.0/24"}`)
+	var b Network
+	json.Unmarshal(body, &b)
+	if s != http.StatusCreated || b.Subnet != "10.50.0.0/24" {
+		t.Fatalf("custom: status = %d body = %s", s, body)
+	}
+	if s, body := doJSON(t, "POST", srv.URL+"/api/networks", `{"name":"c","subnet":"8.8.8.0/24"}`); s != http.StatusBadRequest {
+		t.Fatalf("invalid: status = %d body = %s", s, body)
+	}
+	q := validReq()
+	q.NetworkIDs = []string{a.ID}
+	vm, err := r.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, body = doJSON(t, "GET", srv.URL+"/api/networks", "")
+	var list []struct {
+		ID, Name, Subnet string
+		Builtin          bool
+		Members          []string
+	}
+	json.Unmarshal(body, &list)
+	if s != http.StatusOK || len(list) != 3 || list[0].ID != "mgmt" || list[0].Name != "mgmt" || list[0].Subnet != "10.200.0.0/16" ||
+		!list[0].Builtin || !slices.Equal(list[0].Members, []string{vm.ID}) {
+		t.Fatalf("list = %s", body)
+	}
+	if list[1].ID != a.ID || list[1].Builtin || !slices.Equal(list[1].Members, []string{vm.ID}) || list[2].ID != b.ID || list[2].Members == nil || len(list[2].Members) != 0 {
+		t.Fatalf("list = %s", body)
+	}
+	for _, c := range []struct {
+		id   string
+		want int
+	}{{a.ID, http.StatusConflict}, {"mgmt", http.StatusBadRequest}, {"unknown", http.StatusNotFound}, {b.ID, http.StatusNoContent}} {
+		if s, body := doJSON(t, "DELETE", srv.URL+"/api/networks/"+c.id, ""); s != c.want {
+			t.Fatalf("delete %s: status = %d body = %s", c.id, s, body)
+		}
+	}
+}
+
+func TestAPISetVMNetworks(t *testing.T) {
+	srv, r, nm := apiServerWith(t, testAPIConfig())
+	a, err := nm.AddNetwork("a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"networkIds":["` + a.ID + `"]}`
+	if s, out := doJSON(t, "PUT", srv.URL+"/api/vms/"+vm.ID+"/networks", body); s != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	s, out := doJSON(t, "PUT", srv.URL+"/api/vms/"+vm.ID+"/networks?restartAllowed=true", body)
+	var got VM
+	json.Unmarshal(out, &got)
+	if s != http.StatusOK || len(got.NICs) != 2 || got.NICs[1].Network != a.ID {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+}
+
+func TestAPISetVMNetworksRequiresField(t *testing.T) {
+	srv, r, nm := apiServerWith(t, testAPIConfig())
+	a, err := nm.AddNetwork("a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := srv.URL + "/api/vms/" + vm.ID + "/networks?restartAllowed=true"
+	if s, out := doJSON(t, "PUT", url, `{"networkIds":["`+a.ID+`"]}`); s != http.StatusOK {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	if s, out := doJSON(t, "PUT", url, `{}`); s != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	if n := len(nm.NICs(vm.ID)); n != 2 {
+		t.Fatalf("NICs = %d", n)
+	}
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopHard); err != nil {
+		t.Fatal(err)
+	}
+	if s, out := doJSON(t, "PUT", srv.URL+"/api/vms/"+vm.ID+"/networks", `{"networkIds":[]}`); s != http.StatusOK {
+		t.Fatalf("status = %d body = %s", s, out)
 	}
 }
 

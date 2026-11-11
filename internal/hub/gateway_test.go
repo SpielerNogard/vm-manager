@@ -31,7 +31,7 @@ func TestGatewayStateListsPortsAndPeers(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := r.GatewayState()
-	if len(st.Ports) != 1 || st.Ports[0] != (GatewayPort{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal"}) {
+	if len(st.Ports) != 1 || st.Ports[0] != (GatewayPort{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal", Network: "mgmt"}) {
 		t.Fatalf("ports = %+v", st.Ports)
 	}
 	if len(st.Chassis) != 1 || st.Chassis[0].PublicKey != pub || len(st.Devices) != 1 || st.Devices[0] != (DevicePeer{PublicKey: dev.PublicKey, IP: dev.IP}) {
@@ -87,10 +87,47 @@ func TestGatewayStateKeepsPortsAfterHubRestart(t *testing.T) {
 	}
 	st := NewRegistry(m2, store, Config{}).GatewayState()
 	want := []GatewayPort{
-		{Name: db.ID + "-mgmt", MAC: "02:0a:c8:00:00:0b", IP: "10.200.0.11", Hostname: "db.mgmt.internal"},
-		{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal"},
+		{Name: db.ID + "-mgmt", MAC: "02:0a:c8:00:00:0b", IP: "10.200.0.11", Hostname: "db.mgmt.internal", Network: "mgmt"},
+		{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal", Network: "mgmt"},
 	}
 	if !slices.Equal(st.Ports, want) {
 		t.Fatalf("ports = %+v, want %+v", st.Ports, want)
+	}
+}
+
+func TestGatewayStateNetworks(t *testing.T) {
+	r1, _ := newTestRegistry(t)
+	a, err := r1.net.AddNetwork("a", "10.50.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := validReq()
+	q.NetworkIDs = []string{a.ID}
+	vm, err := r1.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := r1.GatewayState()
+	if !slices.Equal(st.Networks, []GatewayNetwork{{ID: a.ID, Name: "a", Subnet: "10.50.0.0/24"}}) {
+		t.Fatalf("networks = %+v", st.Networks)
+	}
+	want := []GatewayPort{
+		{Name: vm.ID + "-" + a.ID, MAC: "02:0a:32:00:00:0a", IP: "10.50.0.10", Hostname: "dev.a.internal", Network: a.ID},
+		{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal", Network: "mgmt"},
+	}
+	if !slices.Equal(st.Ports, want) {
+		t.Fatalf("ports = %+v, want %+v", st.Ports, want)
+	}
+	m2, err := LoadNetModel(r1.net.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := LoadVMStore(r1.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st2 := NewRegistry(m2, store, Config{}).GatewayState()
+	if !slices.Equal(st2.Networks, st.Networks) || !slices.Equal(st2.Ports, st.Ports) {
+		t.Fatalf("after restart: %+v", st2)
 	}
 }

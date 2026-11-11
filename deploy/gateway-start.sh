@@ -53,6 +53,11 @@ rule() { iptables -C "$@" 2>/dev/null || iptables -A "$@"; }
 rule INPUT -i wg-clients -d 10.201.0.1 -p udp --dport 53 -j ACCEPT
 rule INPUT -i wg-clients -d 10.201.0.1 -p tcp --dport 53 -j ACCEPT
 rule INPUT -i wg-clients -j DROP
+# inserted, not appended: on upgrade the long-lived netns already holds the gw0 DROP
+for proto in udp tcp; do
+  iptables -C INPUT -i gw0 -s 10.200.0.0/16 -d 10.201.0.1 -p $proto --dport 53 -j ACCEPT 2>/dev/null ||
+    iptables -I INPUT 1 -i gw0 -s 10.200.0.0/16 -d 10.201.0.1 -p $proto --dport 53 -j ACCEPT
+done
 rule INPUT -i gw0 -j DROP
 rule FORWARD -i wg-clients ! -o gw0 -j DROP
 # VMs may only answer device connections, never open their own

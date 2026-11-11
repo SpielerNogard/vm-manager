@@ -344,3 +344,115 @@ func TestStopAllDoesNotRestart(t *testing.T) {
 		t.Fatalf("vm.json = %+v", f)
 	}
 }
+
+var (
+	mgmtNIC = proto.NIC{Network: "mgmt", MAC: "02:0a:c8:00:00:0a"}
+	netNIC  = proto.NIC{Network: "n1", MAC: "02:00:00:00:01:0a"}
+)
+
+func dvNICs(power proto.Power, gen uint64, nics ...proto.NIC) proto.DesiredVM {
+	d := dv("a", "a", power, gen)
+	d.Spec.NICs = nics
+	return d
+}
+
+func TestReconcileNICChangeRestartsWithReseed(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 2, mgmtNIC, netNIC)})
+	eventually(t, "restarted", func() bool {
+		st, _ := a.vmStatus("a")
+		return p.instance("a") != first && st.State == proto.StateRunning && st.Generation == 2
+	})
+	ev := strings.Join(p.gotEvents(), ",")
+	if s, r := strings.Index(ev, "stop-guest"), strings.Index(ev, "reseed:a"); s < 0 || r < s {
+		t.Fatalf("events = %s", ev)
+	}
+	time.Sleep(50 * time.Millisecond)
+	p.mu.Lock()
+	starts := p.starts["a"]
+	p.mu.Unlock()
+	if starts != 2 {
+		t.Fatalf("starts = %d, want 2 (restart policy must not start another)", starts)
+	}
+	if got := p.gotPrepared(); len(got) != 1 {
+		t.Fatalf("prepared = %v, want once (disks untouched)", got)
+	}
+	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 2 || f.Spec.NICs[1] != netNIC || f.Generation != 2 {
+		t.Fatalf("vm.json = %+v", f)
+	}
+}
+
+func TestReconcileNICChangeWhileStopped(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 1, mgmtNIC)})
+	waitState(t, a, "a", proto.StateStopped, 1)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
+	waitState(t, a, "a", proto.StateStopped, 2)
+	if !p.hasEvent("reseed:a") || p.instance("a") != nil {
+		t.Fatalf("events = %v started = %v", p.gotEvents(), p.instance("a") != nil)
+	}
+	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 2 {
+		t.Fatalf("vm.json = %+v", f)
+	}
+}
+
+func TestReconcileReseedFailure(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	p.mu.Lock()
+	p.failReseed = true
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 2, mgmtNIC, netNIC)})
+	waitState(t, a, "a", proto.StateError, 2)
+	time.Sleep(50 * time.Millisecond)
+	st, _ := a.vmStatus("a")
+	if st.State != proto.StateError || !strings.Contains(st.Error, "reseed") || p.instance("a") != first {
+		t.Fatalf("status = %+v restarted = %v", st, p.instance("a") != first)
+	}
+}
+
+func TestReconcileReseedRetriedAfterFailure(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	p.mu.Lock()
+	p.failReseed = true
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
+	waitState(t, a, "a", proto.StateError, 2)
+	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 1 {
+		t.Fatalf("vm.json after failed reseed = %+v, want old NICs", f)
+	}
+	p.mu.Lock()
+	p.failReseed = false
+	p.events = nil
+	p.mu.Unlock()
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 3, mgmtNIC, netNIC)})
+	eventually(t, "restarted", func() bool {
+		st, _ := a.vmStatus("a")
+		return p.instance("a") != first && st.State == proto.StateRunning && st.Generation == 3
+	})
+	if !p.hasEvent("reseed:a") {
+		t.Fatalf("events = %v, want reseed retried", p.gotEvents())
+	}
+	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 2 || f.Spec.NICs[1] != netNIC {
+		t.Fatalf("vm.json = %+v", f)
+	}
+}
+
+func TestReconcilePowerOnlyNoReseed(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC)})
+	waitState(t, a, "a", proto.StateStopped, 2)
+	if p.hasEvent("reseed:a") {
+		t.Fatalf("events = %v", p.gotEvents())
+	}
+}

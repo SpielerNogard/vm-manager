@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
@@ -7,14 +7,15 @@ import { api, type CreateVMRequest } from '@/api'
 import { useFleet } from '@/composables/useFleet'
 
 import AppIcon from './AppIcon.vue'
+import NetworkRows from './NetworkRows.vue'
 
 const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
 const router = useRouter()
-const { onlineNodes, keys, refresh } = useFleet()
+const { onlineNodes, keys, networks, refresh } = useFleet()
 
-const form = ref<CreateVMRequest>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [] })
+const form = ref<CreateVMRequest & { networkIds: string[] }>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [], networkIds: [] })
 const error = ref('')
 const busy = ref(false)
 
@@ -29,6 +30,8 @@ watch(open, (isOpen) => {
   f.sshKeyIds = hubKeys.length || !only ? hubKeys : [only.id]
 })
 
+const userNetworks = computed(() => networks.value.filter((n) => !n.builtin))
+
 function addDisk() {
   const n = form.value.dataDisks.length
   const name = n ? `data${n + 1}` : 'data'
@@ -40,6 +43,11 @@ function goToKeys() {
   void router.push({ name: 'keys', query: { add: '1' } })
 }
 
+function goToNetworks() {
+  open.value = false
+  void router.push({ name: 'networks' })
+}
+
 async function submit() {
   error.value = ''
   busy.value = true
@@ -47,6 +55,7 @@ async function submit() {
     await api.createVM(form.value)
     form.value.name = ''
     form.value.dataDisks = []
+    form.value.networkIds = []
     open.value = false
     await refresh()
   } catch (e) {
@@ -144,6 +153,12 @@ async function submit() {
             <AppIcon name="plus" />
             {{ t('create.addDisk') }}
           </button>
+        </fieldset>
+
+        <fieldset class="col-span-2">
+          <legend class="mb-1 text-sm font-medium">{{ t('create.networks') }}</legend>
+          <p class="text-base-content/60 mb-2 text-xs">{{ t('create.networksHint') }}</p>
+          <NetworkRows v-model="form.networkIds" :networks="userNetworks" @manage="goToNetworks" />
         </fieldset>
 
         <fieldset class="col-span-2">

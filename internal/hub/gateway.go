@@ -21,16 +21,25 @@ type GatewayPort struct {
 	MAC      string `json:"mac"`
 	IP       string `json:"ip"`
 	Hostname string `json:"hostname"`
+	// Network is "mgmt" or a network ID.
+	Network string `json:"network"`
+}
+
+type GatewayNetwork struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Subnet string `json:"subnet"`
 }
 
 // GatewayState is the desired state the gateway agent applies.
 type GatewayState struct {
-	UnderlayKey string        `json:"underlayKey"`
-	ClientsKey  string        `json:"clientsKey"`
-	GuestMTU    int           `json:"guestMTU"`
-	Chassis     []Chassis     `json:"chassis"`
-	Devices     []DevicePeer  `json:"devices"`
-	Ports       []GatewayPort `json:"ports"`
+	UnderlayKey string           `json:"underlayKey"`
+	ClientsKey  string           `json:"clientsKey"`
+	GuestMTU    int              `json:"guestMTU"`
+	Chassis     []Chassis        `json:"chassis"`
+	Devices     []DevicePeer     `json:"devices"`
+	Networks    []GatewayNetwork `json:"networks"`
+	Ports       []GatewayPort    `json:"ports"`
 }
 
 // GatewayStatus is what the gateway observes: WireGuard handshakes by peer public key and chassis registered in the OVN SB.
@@ -42,9 +51,14 @@ type GatewayStatus struct {
 func (r *Registry) GatewayState() GatewayState {
 	underlay, clients := r.net.GatewayKeys()
 	st := GatewayState{UnderlayKey: underlay, ClientsKey: clients, GuestMTU: r.cfg.GuestMTU,
-		Chassis: r.net.Chassis(), Devices: []DevicePeer{}, Ports: []GatewayPort{}}
+		Chassis: r.net.Chassis(), Devices: []DevicePeer{}, Networks: []GatewayNetwork{}, Ports: []GatewayPort{}}
 	for _, d := range r.net.Devices() {
 		st.Devices = append(st.Devices, DevicePeer{PublicKey: d.PublicKey, IP: d.IP})
+	}
+	netNames := map[string]string{mgmtNetwork: mgmtNetwork}
+	for _, n := range r.net.Networks() {
+		st.Networks = append(st.Networks, GatewayNetwork{ID: n.ID, Name: n.Name, Subnet: n.Subnet})
+		netNames[n.ID] = n.Name
 	}
 	// ports come from the persisted model so a hub restart does not drop LSPs of VMs whose node has not re-registered yet
 	nics, names := r.net.AllNICs(), r.net.Names()
@@ -54,12 +68,12 @@ func (r *Registry) GatewayState() GatewayState {
 	}
 	r.mu.Unlock()
 	for id, list := range nics {
-		hostname := ""
-		if names[id] != "" {
-			hostname = names[id] + ".mgmt.internal"
-		}
 		for _, n := range list {
-			st.Ports = append(st.Ports, GatewayPort{Name: n.Port, MAC: n.MAC, IP: n.IP, Hostname: hostname})
+			hostname := ""
+			if names[id] != "" && netNames[n.Network] != "" {
+				hostname = names[id] + "." + netNames[n.Network] + ".internal"
+			}
+			st.Ports = append(st.Ports, GatewayPort{Name: n.Port, MAC: n.MAC, IP: n.IP, Hostname: hostname, Network: n.Network})
 		}
 	}
 	sort.Slice(st.Ports, func(i, j int) bool {

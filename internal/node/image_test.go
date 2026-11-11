@@ -154,7 +154,7 @@ func TestCloudInitMgmtNIC(t *testing.T) {
 			t.Errorf("network-config missing %q:\n%s", want, nc)
 		}
 	}
-	if strings.Contains(nc, "addresses") || strings.Contains(nc, "mtu") {
+	if strings.Contains(nc, "10.200.0.20") || strings.Contains(nc, "mtu") {
 		t.Errorf("mgmt nic must not carry static config:\n%s", nc)
 	}
 	mgmt := nc[strings.Index(nc, "mgmt0:"):]
@@ -165,6 +165,38 @@ func TestCloudInitMgmtNIC(t *testing.T) {
 		}
 		if strings.Contains(primary, want) {
 			t.Errorf("primary block must not contain %q:\n%s", want, nc)
+		}
+	}
+}
+
+func TestCloudInitNetworkNICs(t *testing.T) {
+	f := VMFile{Spec: proto.VMSpec{Name: "dev", NICs: []proto.NIC{
+		{Network: "mgmt", MAC: "02:0a:c8:00:00:14"},
+		{Network: "n1", MAC: "02:00:00:00:01:01"},
+		{Network: "n2", MAC: "02:00:00:00:02:01"},
+	}}, MAC: "7e:30:17:4e:4a:00"}
+	ud, _, nc := CloudInit(f)
+	if !strings.Contains(ud, "when: [boot]") {
+		t.Errorf("user-data missing network update on boot:\n%s", ud)
+	}
+	mgmtAt, net0At, net1At := strings.Index(nc, "  mgmt0:"), strings.Index(nc, "  net0:"), strings.Index(nc, "  net1:")
+	if mgmtAt < 0 || net0At < mgmtAt || net1At < net0At {
+		t.Fatalf("network-config entries missing or out of order:\n%s", nc)
+	}
+	mgmt, net0, net1 := nc[mgmtAt:net0At], nc[net0At:net1At], nc[net1At:]
+	for _, want := range []string{`macaddress: "02:0a:c8:00:00:14"`, "nameservers:", "10.201.0.1", `"~internal"`} {
+		if !strings.Contains(mgmt, want) {
+			t.Errorf("mgmt0 missing %q:\n%s", want, nc)
+		}
+	}
+	for mac, block := range map[string]string{"02:00:00:00:01:01": net0, "02:00:00:00:02:01": net1} {
+		for _, want := range []string{`macaddress: "` + mac + `"`, "dhcp4: true", "link-local: []", "accept-ra: false", "use-dns: false", "use-hostname: false", "use-domains: false"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("net block for %s missing %q:\n%s", mac, want, nc)
+			}
+		}
+		if strings.Contains(block, "nameservers") {
+			t.Errorf("net block for %s has nameservers:\n%s", mac, nc)
 		}
 	}
 }

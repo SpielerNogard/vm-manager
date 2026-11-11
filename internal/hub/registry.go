@@ -99,13 +99,14 @@ func (vm *VM) desired() proto.DesiredVM {
 }
 
 type CreateVMRequest struct {
-	NodeID    string           `json:"nodeId"`
-	Name      string           `json:"name"`
-	CPUs      int              `json:"cpus"`
-	MemoryMB  int              `json:"memoryMB"`
-	DiskGB    int              `json:"diskGB"`
-	DataDisks []proto.DataDisk `json:"dataDisks"`
-	SSHKeyIDs []string         `json:"sshKeyIds"`
+	NodeID     string           `json:"nodeId"`
+	Name       string           `json:"name"`
+	CPUs       int              `json:"cpus"`
+	MemoryMB   int              `json:"memoryMB"`
+	DiskGB     int              `json:"diskGB"`
+	DataDisks  []proto.DataDisk `json:"dataDisks"`
+	SSHKeyIDs  []string         `json:"sshKeyIds"`
+	NetworkIDs []string         `json:"networkIds"`
 	// SSHPublicKeys is resolved from SSHKeyIDs by the API.
 	SSHPublicKeys []string `json:"-"`
 }
@@ -139,6 +140,15 @@ func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
 			vm.applied = s.Generation
 		}
 		r.vms[s.Spec.ID] = vm
+	}
+	// NICs without a VM (deleted pre-upgrade, or a crash between AllocNICs and PutVM) would keep OVN ports and duplicate DNS names.
+	for id := range net.AllNICs() {
+		if _, ok := r.vms[id]; ok {
+			continue
+		}
+		if err := net.Release(id); err != nil {
+			log.Printf("releasing orphan NICs of %s: %v", id, err)
+		}
 	}
 	return r
 }
@@ -241,7 +251,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 		return VM{}, fmt.Errorf("%w: node %q has %d CPUs / %d MB free", ErrConflict, n.ID, freeCPU, freeMem)
 	}
 	id := newID()
-	nics, err := r.net.AllocNICs(id, req.Name)
+	nics, err := r.net.AllocNICs(id, req.Name, req.NetworkIDs)
 	if err != nil {
 		r.mu.Unlock()
 		return VM{}, err
@@ -296,15 +306,63 @@ func (r *Registry) bump(id string, f func(*VM)) (VM, error) {
 		r.mu.Unlock()
 		return VM{}, ErrNotFound
 	}
+	out, err := r.bumpLocked(vm, f)
+	r.mu.Unlock()
+	if err != nil {
+		return VM{}, err
+	}
+	r.push(out.NodeID)
+	return out, nil
+}
+
+// bumpLocked applies f as a new generation and persists it without pushing; r.mu must be held.
+func (r *Registry) bumpLocked(vm *VM, f func(*VM)) (VM, error) {
 	prev := *vm
 	f(vm)
 	vm.generation++
 	if err := r.store.PutVM(vm.stored()); err != nil {
 		*vm = prev
+		return VM{}, err
+	}
+	return *vm, nil
+}
+
+// SetVMNetworks replaces the VM's non-mgmt networks; a running VM must be restarted for that, so it needs restartAllowed.
+func (r *Registry) SetVMNetworks(id string, networkIDs []string, restartAllowed bool) (VM, error) {
+	r.mu.Lock()
+	vm, ok := r.vms[id]
+	if !ok {
+		r.mu.Unlock()
+		return VM{}, ErrNotFound
+	}
+	var prevIDs []string
+	for _, n := range vm.NICs {
+		if n.Network != mgmtNetwork {
+			prevIDs = append(prevIDs, n.Network)
+		}
+	}
+	if slices.Equal(slices.Sorted(slices.Values(prevIDs)), slices.Sorted(slices.Values(networkIDs))) {
+		out := *vm
+		r.mu.Unlock()
+		return out, nil
+	}
+	if vm.Power == proto.PowerRunning && !restartAllowed {
+		r.mu.Unlock()
+		return VM{}, fmt.Errorf("%w: restart required: pass restartAllowed=true", ErrConflict)
+	}
+	nics, err := r.net.SetNetworkNICs(id, networkIDs)
+	if err != nil {
 		r.mu.Unlock()
 		return VM{}, err
 	}
-	out := *vm
+	out, err := r.bumpLocked(vm, func(vm *VM) { vm.NICs = nics })
+	if err != nil {
+		if _, rerr := r.net.SetNetworkNICs(id, prevIDs); rerr != nil {
+			log.Printf("vm %s: restoring networks: %v", id, rerr)
+		}
+		r.mu.Unlock()
+		return VM{}, err
+	}
 	r.mu.Unlock()
 	r.push(out.NodeID)
 	return out, nil
