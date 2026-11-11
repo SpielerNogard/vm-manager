@@ -1,0 +1,54 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"vm-manager/internal/netframe"
+)
+
+func TestApplyConfigureWritesAndRestartsOnce(t *testing.T) {
+	root := t.TempDir()
+	c := netframe.Configure{
+		Name: "mac-1", PrivateKey: "priv", Address: "10.198.0.11/24", HubKey: "hubpub",
+		Endpoint: "hub.lan:51820", SBRemote: "tcp:10.198.0.1:6642", MTU: 1420,
+	}
+	var calls []string
+	run := func(name string, args ...string) error {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return nil
+	}
+
+	changed, err := applyConfigure(c, root, run)
+	if err != nil || !changed {
+		t.Fatalf("first call: changed=%v err=%v", changed, err)
+	}
+	conf, err := os.ReadFile(filepath.Join(root, "etc/wireguard/wg-underlay.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Endpoint = hub.lan:51820", "MTU = 1420", "Address = 10.198.0.11/24", "AllowedIPs = 10.198.0.0/24", "PersistentKeepalive = 25"} {
+		if !strings.Contains(string(conf), want) {
+			t.Errorf("conf missing %q:\n%s", want, conf)
+		}
+	}
+	id, _ := os.ReadFile(filepath.Join(root, "etc/openvswitch/system-id.conf"))
+	if string(id) != "mac-1" {
+		t.Errorf("system-id.conf = %q", id)
+	}
+	joined := strings.Join(calls, "\n")
+	if !strings.Contains(joined, "restart") || !strings.Contains(joined, "external_ids:ovn-encap-ip=10.198.0.11") {
+		t.Errorf("calls:\n%s", joined)
+	}
+
+	calls = nil
+	changed, err = applyConfigure(c, root, run)
+	if err != nil || changed {
+		t.Fatalf("second call: changed=%v err=%v", changed, err)
+	}
+	if strings.Contains(strings.Join(calls, "\n"), "restart") {
+		t.Errorf("unexpected restart: %v", calls)
+	}
+}
