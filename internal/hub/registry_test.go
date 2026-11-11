@@ -520,3 +520,34 @@ func TestStalledNodeDoesNotBlockOthers(t *testing.T) {
 		t.Fatalf("sent = %+v", m)
 	}
 }
+
+func TestSetPowerBumpsGeneration(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	got, err := r.SetPower(vm.ID, proto.PowerRunning, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Power != proto.PowerRunning {
+		t.Fatalf("vm = %+v", got)
+	}
+	if m := n.last(); m.Desired[0].Generation != 2 {
+		t.Fatalf("sent = %+v", m)
+	}
+	if _, err := r.SetPower("nope", proto.PowerRunning, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStartResetsProvisionedOnMissingDir(t *testing.T) {
+	r, n := newTestRegistry(t)
+	vm, _ := r.CreateVM(validReq())
+	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateRunning, Generation: 1})
+	r.UpdateStatus(proto.VMStatus{ID: vm.ID, State: proto.StateError, Error: proto.ErrVMDirMissing, Generation: 1})
+	if _, err := r.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if d := n.last().Desired[0]; d.Provisioned || d.Generation != 2 {
+		t.Fatalf("desired = %+v", d)
+	}
+}

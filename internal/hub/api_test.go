@@ -240,3 +240,27 @@ func TestAPINetworks(t *testing.T) {
 		t.Fatalf("networks = %v", out)
 	}
 }
+
+func TestAPIPowerEndpoints(t *testing.T) {
+	srv := apiServer(t)
+	_, vm := postVM(t, srv, validBody)
+	post := func(id, action string) (int, map[string]any) {
+		resp, err := http.Post(srv.URL+"/api/vms/"+id+"/"+action, "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	for action, power := range map[string]string{"shutdown": "stopped", "stop": "stopped", "start": "running"} {
+		s, out := post(vm["id"].(string), action)
+		if s != http.StatusOK || out["power"] != power {
+			t.Fatalf("%s: status = %d body = %v", action, s, out)
+		}
+		if s, _ := post("unknown", action); s != http.StatusNotFound {
+			t.Fatalf("%s unknown: status = %d", action, s)
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -473,4 +474,72 @@ func TestAgentRefreshesDisksWhileRunning(t *testing.T) {
 		v, _ := vmState(env.reg, vm.ID)
 		return len(v.Disks) == 1 && v.Disks[0].AllocatedBytes == 42 && v.State == proto.StateRunning
 	})
+}
+
+func (p *fakeProvider) hasEvent(e string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Contains(p.events, e)
+}
+
+func TestAgentShutdownAndStart(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	first := env.provider.instance("dev")
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerStopped, proto.StopGraceful); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	if !env.provider.hasEvent("stop-guest") || env.provider.hasEvent("kill-guest") {
+		t.Fatalf("events = %v", env.provider.events)
+	}
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "running again", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return v.State == proto.StateRunning && env.provider.instance("dev") != first
+	})
+}
+
+func TestAgentHardStop(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerStopped, proto.StopHard); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "stopped", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateStopped })
+	if !env.provider.hasEvent("kill-guest") {
+		t.Fatalf("events = %v", env.provider.events)
+	}
+}
+
+func TestAgentRebuildAfterDirMissing(t *testing.T) {
+	env := startEnv(t, nil)
+	vm, _ := env.reg.CreateVM(createReq("dev"))
+	eventually(t, "running", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	env.stop()
+	<-env.runDone
+	if err := os.RemoveAll(VMDir(env.agent.VMsDir, vm.ID)); err != nil {
+		t.Fatal(err)
+	}
+	old := env.agent
+	restarted := &Agent{HubURL: old.HubURL, Token: old.Token, NodeID: old.NodeID, VMsDir: old.VMsDir, CPUs: old.CPUs, MemoryMB: old.MemoryMB, Provider: env.provider}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { restarted.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	eventually(t, "dir missing", func() bool {
+		v, _ := vmState(env.reg, vm.ID)
+		return v.State == proto.StateError && v.Error == proto.ErrVMDirMissing
+	})
+	if _, err := env.reg.SetPower(vm.ID, proto.PowerRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "running again", func() bool { v, _ := vmState(env.reg, vm.ID); return v.State == proto.StateRunning })
+	if n := len(env.provider.prepared); n != 2 {
+		t.Fatalf("prepared = %v", env.provider.prepared)
+	}
 }

@@ -296,6 +296,21 @@ func (r *Registry) bump(id string, f func(*VM)) error {
 	return nil
 }
 
+func (r *Registry) SetPower(id string, power proto.Power, mode proto.StopMode) (VM, error) {
+	err := r.bump(id, func(vm *VM) {
+		vm.Power, vm.stopMode = power, mode
+		if power == proto.PowerRunning && vm.State == proto.StateError && vm.Error == proto.ErrVMDirMissing {
+			vm.provisioned = false
+		}
+	})
+	if err != nil {
+		return VM{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return *r.vms[id], nil
+}
+
 // desiredFor lists the node's desired VMs; r.mu must be held.
 func (r *Registry) desiredFor(nodeID string) []proto.DesiredVM {
 	var out []proto.DesiredVM

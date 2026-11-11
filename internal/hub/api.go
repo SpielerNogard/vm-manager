@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"slices"
 	"time"
+
+	"vm-manager/internal/proto"
 )
 
 func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Handler {
@@ -119,6 +121,23 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	for path, act := range map[string]struct {
+		power proto.Power
+		mode  proto.StopMode
+	}{
+		"start":    {proto.PowerRunning, ""},
+		"shutdown": {proto.PowerStopped, proto.StopGraceful},
+		"stop":     {proto.PowerStopped, proto.StopHard},
+	} {
+		mux.HandleFunc("POST /api/vms/{id}/"+path, func(w http.ResponseWriter, req *http.Request) {
+			vm, err := r.SetPower(req.PathValue("id"), act.power, act.mode)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, vm)
+		})
+	}
 	mux.HandleFunc("GET /api/keys", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, keys.List()) })
 	mux.HandleFunc("POST /api/keys", func(w http.ResponseWriter, req *http.Request) {
 		var q struct {
