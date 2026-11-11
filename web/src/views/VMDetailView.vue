@@ -25,10 +25,10 @@ onMounted(async () => {
 const vm = computed(() => vms.value.find((v) => v.id === route.params.id))
 const host = computed(() => vm.value && `${vm.value.name}.mgmt.internal`)
 const sshCommand = computed(() => `ssh ubuntu@${host.value}`)
-// Mirrors the node's cloud-init: root is vda, data disk i is vd(b+i), ext4 labelled with its name.
+// Mirrors the vz attach order (root, data disks, seed ISO last): / lives on vda1, data disk i is vd(b+i).
 const disks = computed(() => {
   if (!vm.value) return []
-  const root = { name: t('vm.rootDisk'), device: '/dev/vda', sizeGB: vm.value.diskGB, fs: 'ext4', mountPath: '/' }
+  const root = { name: t('vm.rootDisk'), device: '/dev/vda1', sizeGB: vm.value.diskGB, fs: 'ext4', mountPath: '/' }
   const data = (vm.value.dataDisks ?? []).map((d, i) => ({
     name: d.name,
     device: `/dev/vd${String.fromCharCode(98 + i)}`,
