@@ -162,6 +162,21 @@ ethernets:
     dhcp4: true
     dhcp-identifier: mac
 `, f.MAC)
+	for i, n := range f.Spec.NICs {
+		// Address, MTU and routes come from OVN DHCP; the guest must not take DNS or hostname from it.
+		// IPv6 link-local makes networkd bump the DHCP MTU to 1280, so mgmt is IPv4-only.
+		networkConfig += fmt.Sprintf(`  mgmt%d:
+    match:
+      macaddress: %q
+    dhcp4: true
+    link-local: []
+    accept-ra: false
+    dhcp4-overrides:
+      use-dns: false
+      use-hostname: false
+      use-domains: false
+`, i, n.MAC)
+	}
 	return userData, metaData, networkConfig
 }
 

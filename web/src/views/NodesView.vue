@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRouter } from 'vue-router'
 
+import ChassisBadge from '@/components/ChassisBadge.vue'
 import DataState from '@/components/DataState.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StateBadge from '@/components/StateBadge.vue'
@@ -25,6 +26,7 @@ const { nodes, loaded } = useFleet()
           <tr>
             <th>{{ t('nodes.node') }}</th>
             <th>{{ t('common.status') }}</th>
+            <th>{{ t('nodes.chassis') }}</th>
             <th>{{ t('nodes.provider') }}</th>
             <th class="text-right">{{ t('nodes.capacity') }}</th>
             <th class="text-right">{{ t('nodes.free') }}</th>
@@ -51,6 +53,13 @@ const { nodes, loaded } = useFleet()
             </td>
             <td>
               <StateBadge :label="t(n.online ? 'state.online' : 'state.offline')" :tone="n.online ? 'good' : 'quiet'" />
+            </td>
+            <td>
+              <template v-if="n.chassis">
+                <ChassisBadge :chassis="n.chassis" />
+                <div class="font-token text-base-content/55 text-[0.7rem]">{{ n.chassis.ip }}</div>
+              </template>
+              <span v-else class="text-base-content/50 text-xs">—</span>
             </td>
             <td><span class="badge badge-sm badge-outline font-token">{{ n.provider }}</span></td>
             <td class="text-right text-sm tabular-nums">

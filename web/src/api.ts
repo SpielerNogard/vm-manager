@@ -13,6 +13,13 @@ export interface Node {
   /** The node's config file without the hub token. */
   config?: Record<string, unknown>
   machine?: Machine
+  chassis?: Chassis
+}
+
+export interface Chassis {
+  ip: string
+  lastHandshake?: string
+  registered: boolean
 }
 
 export interface Machine {
@@ -32,6 +39,15 @@ export interface DataDisk {
   sizeGB: number
 }
 
+export interface Disk {
+  name: string
+  file: string
+  device: string
+  readOnly: boolean
+  sizeBytes: number
+  allocatedBytes: number
+}
+
 export interface VM {
   id: string
   name: string
@@ -39,13 +55,35 @@ export interface VM {
   memoryMB: number
   diskGB: number
   dataDisks?: DataDisk[]
+  disks?: Disk[]
   sshPublicKeys: string[]
-  sshPort: number
+  nics?: NIC[]
   nodeId: string
   provider: string
   state: VMState
   ip?: string
   error?: string
+}
+
+export interface NIC {
+  network: string
+  mac: string
+  ip: string
+  port: string
+}
+
+export interface Network {
+  name: string
+  subnet: string
+  members: number
+}
+
+export interface Device {
+  id: string
+  name: string
+  ip: string
+  publicKey: string
+  createdAt: string
 }
 
 export interface SSHKey {
@@ -65,6 +103,12 @@ export interface CreateVMRequest {
   diskGB: number
   dataDisks: DataDisk[]
   sshKeyIds: string[]
+}
+
+async function text(path: string): Promise<string> {
+  const res = await fetch(path)
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+  return res.text()
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -87,4 +131,9 @@ export const api = {
   keys: () => request<SSHKey[]>('GET', '/api/keys'),
   addKey: (name: string, publicKey: string) => request<SSHKey>('POST', '/api/keys', { name, publicKey }),
   deleteKey: (id: string) => request<void>('DELETE', `/api/keys/${id}`),
+  networks: () => request<Network[]>('GET', '/api/networks'),
+  devices: () => request<Device[]>('GET', '/api/devices'),
+  addDevice: (name: string) => request<{ device: Device; config: string }>('POST', '/api/devices', { name }),
+  deleteDevice: (id: string) => request<void>('DELETE', `/api/devices/${id}`),
+  deviceConfig: (id: string) => text(`/api/devices/${id}/config`),
 }

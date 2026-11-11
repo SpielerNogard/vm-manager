@@ -54,6 +54,13 @@ defineProps<{ name: string }>()
       <circle cx="8" cy="12" r="3.5" />
       <path d="M11.5 12H20M17.5 12v3M14.5 12v2.5" />
     </template>
+    <template v-else-if="name === 'shield'">
+      <path d="M12 3.5 5 6v5.5c0 4.2 2.8 7.4 7 9 4.2-1.6 7-4.8 7-9V6z" />
+    </template>
+    <template v-else-if="name === 'download'">
+      <path d="M12 4v11M7.5 10.5 12 15l4.5-4.5" />
+      <path d="M4.5 14.5v4A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-4" />
+    </template>
     <template v-else-if="name === 'upload'">
       <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
       <path d="M4.5 14.5v4A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-4" />

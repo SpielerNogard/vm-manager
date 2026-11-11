@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -10,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"sync"
@@ -24,6 +24,10 @@ import (
 const (
 	reconnectDelay = 2 * time.Second
 	ipTimeout      = 120 * time.Second
+
+	defaultUnderlayMTU = 1420
+
+	defaultDiskRefresh = 60 * time.Second
 )
 
 type Agent struct {
@@ -32,8 +36,18 @@ type Agent struct {
 	Provider                      Provider
 	Config                        json.RawMessage
 	Machine                       *proto.Machine
+	ChassisKey                    string // public, sent in Register
+	ChassisPrivateKey             string
+	UnderlayEndpoint              string // host:port override of the hub's underlay address
+	UnderlayMTU                   int
 
-	sshPort int // guest SSH port; overridden in tests
+	diskRefresh time.Duration // zero means defaultDiskRefresh
+
+	chassisMu       sync.Mutex
+	chassisPending  *Chassis // newest config not yet applied; older ones are superseded
+	chassisRunning  bool
+	chassisStopping bool
+	chassisWG       sync.WaitGroup
 
 	mu   sync.Mutex
 	vms  map[string]*vmEntry
@@ -49,9 +63,6 @@ type vmEntry struct {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	if a.sshPort == 0 {
-		a.sshPort = 22
-	}
 	a.vms = map[string]*vmEntry{}
 	if err := a.restoreAll(ctx); err != nil {
 		return err
@@ -117,13 +128,15 @@ func (a *Agent) connect(ctx context.Context) error {
 		return err
 	}
 	log.Printf("connected to hub %s", a.HubURL)
+	connCtx, stopRefresh := context.WithCancel(ctx)
+	go a.refreshDisksLoop(connCtx)
 	defer func() {
+		stopRefresh()
 		a.mu.Lock()
 		a.send = nil
 		a.mu.Unlock()
 	}()
 
-	go a.acceptStreams(sess)
 	dec := json.NewDecoder(ctrl)
 	for {
 		var m proto.Message
@@ -135,15 +148,63 @@ func (a *Agent) connect(ctx context.Context) error {
 			a.create(ctx, *m.Create)
 		case m.Type == "delete":
 			go a.delete(m.DeleteID)
+		case m.Type == "underlay" && m.Underlay != nil:
+			go a.startChassis(ctx, *m.Underlay)
 		}
 	}
 }
 
+func (a *Agent) startChassis(ctx context.Context, u proto.Underlay) {
+	endpoint := a.UnderlayEndpoint
+	if endpoint == "" {
+		hu, err := url.Parse(a.HubURL)
+		if err != nil {
+			log.Printf("chassis: hub url: %v", err)
+			return
+		}
+		endpoint = net.JoinHostPort(hu.Hostname(), strconv.Itoa(u.Port))
+	}
+	mtu := a.UnderlayMTU
+	if mtu == 0 {
+		mtu = defaultUnderlayMTU
+	}
+	c := Chassis{
+		Name: a.NodeID, PrivateKey: a.ChassisPrivateKey, Address: u.Address, HubKey: u.HubKey,
+		Endpoint: endpoint, SBRemote: u.SBRemote, MTU: mtu,
+	}
+	a.chassisMu.Lock()
+	if a.chassisStopping {
+		a.chassisMu.Unlock()
+		return
+	}
+	a.chassisPending = &c
+	if a.chassisRunning {
+		a.chassisMu.Unlock()
+		return
+	}
+	a.chassisRunning = true
+	a.chassisWG.Add(1)
+	defer a.chassisWG.Done()
+	for a.chassisPending != nil {
+		next := *a.chassisPending
+		a.chassisPending = nil
+		a.chassisMu.Unlock()
+		if err := a.Provider.StartChassis(ctx, next); err != nil {
+			log.Printf("chassis: %v", err)
+		}
+		a.chassisMu.Lock()
+	}
+	a.chassisRunning = false
+	a.chassisMu.Unlock()
+}
+
 func (a *Agent) registerMsg() *proto.Register {
-	reg := &proto.Register{NodeID: a.NodeID, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
+	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
-		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: e.status})
+		st := e.status
+		st.Disks = a.disks(e.file)
+		reg.VMs = append(reg.VMs, proto.VMRecord{Spec: e.file.Spec, Status: st})
 	}
 	return reg
 }
@@ -241,6 +302,13 @@ func (a *Agent) stopAll() {
 		}()
 	}
 	wg.Wait()
+	a.chassisMu.Lock()
+	a.chassisStopping = true
+	a.chassisMu.Unlock()
+	a.chassisWG.Wait()
+	if err := a.Provider.StopChassis(); err != nil {
+		log.Printf("stop chassis: %v", err)
+	}
 }
 
 func (a *Agent) delete(id string) {
@@ -267,6 +335,16 @@ func (a *Agent) delete(id string) {
 func (a *Agent) report(st proto.VMStatus) {
 	a.mu.Lock()
 	e, ok := a.vms[st.ID]
+	var f VMFile
+	if ok {
+		f = e.file
+	}
+	a.mu.Unlock()
+	if ok {
+		st.Disks = a.disks(f)
+	}
+	a.mu.Lock()
+	e, ok = a.vms[st.ID]
 	if ok {
 		e.status = st
 	}
@@ -279,48 +357,60 @@ func (a *Agent) report(st proto.VMStatus) {
 	}
 }
 
-func (a *Agent) acceptStreams(sess *yamux.Session) {
+func (a *Agent) disks(f VMFile) []proto.Disk {
+	disks, err := a.Provider.Disks(f, VMDir(a.VMsDir, f.Spec.ID))
+	if err != nil {
+		log.Printf("vm %s: disks: %v", f.Spec.ID, err)
+		return nil
+	}
+	return disks
+}
+
+func (a *Agent) refreshDisksLoop(ctx context.Context) {
+	interval := a.diskRefresh
+	if interval == 0 {
+		interval = defaultDiskRefresh
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
 	for {
-		s, err := sess.Accept()
-		if err != nil {
+		select {
+		case <-ctx.Done():
 			return
+		case <-t.C:
+			a.refreshDisks()
 		}
-		go a.handleStream(s)
 	}
 }
 
-func (a *Agent) handleStream(s net.Conn) {
-	br := bufio.NewReader(s)
-	h, err := proto.ReadHeader(br)
-	if err != nil {
-		s.Close()
-		return
-	}
+// refreshDisks re-sends each running VM's stored status with fresh disks, so a newer state is never overwritten.
+func (a *Agent) refreshDisks() {
 	a.mu.Lock()
-	var ip string
-	if e, ok := a.vms[h.VMID]; ok {
-		ip = e.status.IP
+	var running []VMFile
+	for _, e := range a.vms {
+		if e.status.State == proto.StateRunning {
+			running = append(running, e.file)
+		}
 	}
 	a.mu.Unlock()
-	if ip == "" {
-		s.Close()
-		return
+	for _, f := range running {
+		disks := a.disks(f)
+		a.mu.Lock()
+		e, ok := a.vms[f.Spec.ID]
+		if !ok || e.status.State != proto.StateRunning {
+			a.mu.Unlock()
+			continue
+		}
+		e.status.Disks = disks
+		st, send := e.status, a.send
+		a.mu.Unlock()
+		if send != nil {
+			if err := send(proto.Message{Type: "status", Status: &st}); err != nil {
+				log.Printf("vm %s: status: %v", f.Spec.ID, err)
+			}
+		}
 	}
-	vm, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(a.sshPort)), 5*time.Second)
-	if err != nil {
-		s.Close()
-		return
-	}
-	proto.Pipe(bufConn{s, br}, vm)
 }
-
-// bufConn keeps bytes already buffered while reading the stream header.
-type bufConn struct {
-	net.Conn
-	r *bufio.Reader
-}
-
-func (b bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 
 func randomMAC() string {
 	b := make([]byte, 6)

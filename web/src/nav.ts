@@ -1,6 +1,6 @@
 // One list for the router and the sidebar, so a nav entry never points at a missing route.
 
-export type Section = 'nodes' | 'vms' | 'keys'
+export type Section = 'nodes' | 'vms' | 'keys' | 'devices'
 
 export interface NavItem {
   name: Section
@@ -21,7 +21,13 @@ export const NAV: NavGroup[] = [
       { name: 'vms', path: '/vms', icon: 'cube' },
     ],
   },
-  { group: 'access', items: [{ name: 'keys', path: '/keys', icon: 'key' }] },
+  {
+    group: 'access',
+    items: [
+      { name: 'keys', path: '/keys', icon: 'key' },
+      { name: 'devices', path: '/devices', icon: 'shield' },
+    ],
+  },
 ]
 
 export const NAV_ITEMS = NAV.flatMap((g) => g.items)

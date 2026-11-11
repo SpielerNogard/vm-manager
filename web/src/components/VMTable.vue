@@ -21,7 +21,8 @@ const pendingDelete = ref<VM | null>(null)
 const error = ref('')
 const copiedId = ref('')
 
-const sshCommand = (vm: VM) => `ssh -p ${vm.sshPort} ubuntu@${window.location.hostname}`
+const mgmtHost = (vm: VM) => `${vm.name}.mgmt.internal`
+const sshCommand = (vm: VM) => `ssh ubuntu@${mgmtHost(vm)}`
 
 async function copy(vm: VM) {
   await navigator.clipboard?.writeText(sshCommand(vm))
@@ -56,14 +57,14 @@ async function deleteVM() {
         <th>{{ t('vms.node') }}</th>
         <th class="text-right">{{ t('vms.resources') }}</th>
         <th>{{ t('vms.ip') }}</th>
-        <th>{{ t('vms.ssh') }}</th>
+        <th>{{ t('vms.mgmt') }}</th>
         <th class="w-0"></th>
       </tr>
     </thead>
     <tbody>
       <tr v-for="vm in vms" :key="vm.id">
         <td>
-          <div class="font-medium">{{ vm.name }}</div>
+          <RouterLink :to="{ name: 'vm', params: { id: vm.id } }" class="font-medium hover:underline">{{ vm.name }}</RouterLink>
           <div class="font-token text-base-content/55 text-[0.7rem]">{{ vm.id }}</div>
         </td>
         <td>
@@ -83,8 +84,11 @@ async function deleteVM() {
         </td>
         <td class="font-token text-sm">{{ vm.ip || '—' }}</td>
         <td>
-          <div v-if="vm.sshPort" class="flex items-center gap-1">
-            <code class="font-token text-xs">{{ sshCommand(vm) }}</code>
+          <div class="flex items-center gap-1">
+            <div>
+              <div class="font-token text-sm">{{ mgmtHost(vm) }}</div>
+              <code class="font-token text-base-content/55 text-xs">{{ sshCommand(vm) }}</code>
+            </div>
             <button
               type="button"
               class="btn btn-ghost btn-xs"
@@ -95,7 +99,6 @@ async function deleteVM() {
               <span class="sr-only">{{ t('vms.copySsh') }}</span>
             </button>
           </div>
-          <span v-else class="text-base-content/50 text-xs">—</span>
         </td>
         <td>
           <ActionsMenu :name="vm.name">

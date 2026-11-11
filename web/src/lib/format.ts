@@ -2,6 +2,8 @@ import type { VMState } from '@/api'
 
 export const formatMB = (mb: number) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`)
 
+export const formatBytes = (b: number) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.round(b / 1024 ** 2)} MB`)
+
 // Status colours are only ever used for status, and always next to a label.
 export type Tone = 'good' | 'warning' | 'danger' | 'quiet'
 
@@ -27,4 +29,13 @@ export function flatten(value: unknown, prefix = ''): [string, string][] {
     return Object.entries(value).flatMap(([k, v]) => flatten(v, prefix ? `${prefix}.${k}` : k))
   }
   return [[prefix, typeof value === 'string' ? value : JSON.stringify(value)]]
+}
+
+export function downloadText(filename: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

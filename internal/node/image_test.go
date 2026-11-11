@@ -145,3 +145,26 @@ func TestEnsureBaseImageHTTPError(t *testing.T) {
 		t.Fatalf("leftover files: %v", entries)
 	}
 }
+
+func TestCloudInitMgmtNIC(t *testing.T) {
+	f := VMFile{Spec: proto.VMSpec{Name: "dev", NICs: []proto.NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:14", IP: "10.200.0.20", Port: "x-mgmt"}}}, MAC: "7e:30:17:4e:4a:00"}
+	_, _, nc := CloudInit(f)
+	for _, want := range []string{"mgmt0:", `macaddress: "02:0a:c8:00:00:14"`, "dhcp4: true", "use-dns: false", "use-hostname: false", "use-domains: false"} {
+		if !strings.Contains(nc, want) {
+			t.Errorf("network-config missing %q:\n%s", want, nc)
+		}
+	}
+	if strings.Contains(nc, "addresses") || strings.Contains(nc, "mtu") {
+		t.Errorf("mgmt nic must not carry static config:\n%s", nc)
+	}
+	mgmt := nc[strings.Index(nc, "mgmt0:"):]
+	primary := nc[:strings.Index(nc, "mgmt0:")]
+	for _, want := range []string{"link-local: []", "accept-ra: false"} {
+		if !strings.Contains(mgmt, want) {
+			t.Errorf("mgmt block missing %q:\n%s", want, nc)
+		}
+		if strings.Contains(primary, want) {
+			t.Errorf("primary block must not contain %q:\n%s", want, nc)
+		}
+	}
+}

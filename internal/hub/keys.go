@@ -53,11 +53,11 @@ func LoadKeyStore(path string) (*KeyStore, error) {
 	return s, nil
 }
 
-// HubKeyFiles are the public keys ssh itself uses by default.
-func HubKeyFiles(home string) []string {
+// HubKeyFiles are the public keys ssh itself uses by default, inside sshDir.
+func HubKeyFiles(sshDir string) []string {
 	var out []string
 	for _, n := range []string{"id_rsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519", "id_ed25519_sk"} {
-		out = append(out, filepath.Join(home, ".ssh", n+".pub"))
+		out = append(out, filepath.Join(sshDir, n+".pub"))
 	}
 	return out
 }

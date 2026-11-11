@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
+	"log"
 	"path"
 	"regexp"
 	"slices"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/wgkey"
 )
 
 var (
@@ -48,7 +49,6 @@ func reservedMount(p string) bool {
 
 type NodeConn interface {
 	Send(proto.Message) error
-	OpenStream() (net.Conn, error)
 }
 
 type Node struct {
@@ -64,6 +64,13 @@ type Node struct {
 	ConnectedAt time.Time       `json:"connectedAt"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Machine     *proto.Machine  `json:"machine,omitempty"`
+	Chassis     *ChassisState   `json:"chassis,omitempty"`
+}
+
+type ChassisState struct {
+	IP            string     `json:"ip"`
+	LastHandshake *time.Time `json:"lastHandshake,omitempty"`
+	Registered    bool       `json:"registered"`
 }
 
 type VM struct {
@@ -73,6 +80,9 @@ type VM struct {
 	State    proto.VMState `json:"state"`
 	IP       string        `json:"ip,omitempty"`
 	Error    string        `json:"error,omitempty"`
+	Disks    []proto.Disk  `json:"disks,omitempty"`
+	// adoptError pins State to error until the VM is adopted successfully on a later register.
+	adoptError string
 }
 
 type CreateVMRequest struct {
@@ -93,29 +103,30 @@ type nodeEntry struct {
 }
 
 type Registry struct {
-	OnPortOpen  func(port int) error
-	OnPortClose func(port int)
-
-	mu               sync.Mutex
-	portMin, portMax int
-	nodes            map[string]*nodeEntry
-	vms              map[string]*VM
-	ports            map[int]string // port → VM ID
+	mu    sync.Mutex
+	nodes map[string]*nodeEntry
+	vms   map[string]*VM
+	net   *NetModel
+	cfg   Config
 }
 
-func NewRegistry(portMin, portMax int) *Registry {
-	return &Registry{
-		portMin: portMin, portMax: portMax,
-		nodes:       map[string]*nodeEntry{},
-		vms:         map[string]*VM{},
-		ports:       map[int]string{},
-		OnPortOpen:  func(int) error { return nil },
-		OnPortClose: func(int) {},
-	}
+func NewRegistry(net *NetModel, cfg Config) *Registry {
+	return &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, cfg: cfg}
 }
 
 // NodeConnected adopts the reported VMs and drops ones the node no longer has.
+// The hub's NICs win over reported ones; a reported VM the hub does not know keeps its NICs unless they clash.
 func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
+	underlay := r.nodeConnected(reg, c)
+	if underlay == nil {
+		return
+	}
+	if err := c.Send(proto.Message{Type: "underlay", Underlay: underlay}); err != nil {
+		log.Printf("node %s: sending underlay: %v", reg.NodeID, err)
+	}
+}
+
+func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) *proto.Underlay {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nodes[reg.NodeID] = &nodeEntry{
@@ -125,26 +136,64 @@ func (r *Registry) NodeConnected(reg proto.Register, c NodeConn) {
 	}
 	reported := map[string]bool{}
 	for _, rec := range reg.VMs {
-		reported[rec.Spec.ID] = true
-		vm, known := r.vms[rec.Spec.ID]
+		id := rec.Spec.ID
+		reported[id] = true
+		vm, known := r.vms[id]
 		if !known || vm.NodeID != reg.NodeID {
-			if known {
-				r.releasePort(vm.SSHPort)
-			}
-			spec := rec.Spec
-			spec.SSHPort = r.adoptPort(spec.ID, spec.SSHPort)
-			vm = &VM{VMSpec: spec, NodeID: reg.NodeID}
-			r.vms[spec.ID] = vm
+			vm = &VM{VMSpec: rec.Spec, NodeID: reg.NodeID}
+			r.vms[id] = vm
 		}
 		vm.Provider = reg.Provider
 		vm.State, vm.IP, vm.Error = rec.Status.State, rec.Status.IP, rec.Status.Error
+		vm.Disks = rec.Status.Disks
+		vm.adoptError = ""
+		if nics := r.net.NICs(id); len(nics) > 0 {
+			vm.NICs = nics
+		} else if err := r.net.AdoptNICs(id, rec.Spec.Name, rec.Spec.NICs); err != nil {
+			vm.NICs = nil
+			vm.adoptError = adoptErrorText(rec.Spec.NICs, err)
+			vm.State, vm.Error = proto.StateError, vm.adoptError
+		} else {
+			vm.NICs = rec.Spec.NICs
+		}
 	}
 	for id, vm := range r.vms {
 		if vm.NodeID == reg.NodeID && !reported[id] {
-			r.releasePort(vm.SSHPort)
 			delete(r.vms, id)
+			if err := r.net.Release(id); err != nil {
+				log.Printf("releasing NICs of %s: %v", id, err)
+			}
 		}
 	}
+	if reg.ChassisKey == "" {
+		return nil
+	}
+	ch, err := r.net.Enroll(reg.NodeID, reg.ChassisKey)
+	if err != nil {
+		log.Printf("node %s: enrolling chassis: %v", reg.NodeID, err)
+		return nil
+	}
+	underlayPriv, _ := r.net.GatewayKeys()
+	hubKey, err := wgkey.Public(underlayPriv)
+	if err != nil {
+		log.Printf("hub underlay key: %v", err)
+		return nil
+	}
+	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}
+}
+
+func adoptErrorText(nics []proto.NIC, err error) string {
+	ip := ""
+	if len(nics) > 0 {
+		ip = nics[0].IP
+	}
+	if errors.Is(err, ErrInvalid) {
+		return strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
+	}
+	if errors.Is(err, ErrConflict) {
+		return fmt.Sprintf("mgmt IP %s already in use", ip)
+	}
+	return err.Error()
 }
 
 // NodeDisconnected ignores c if the node has already reconnected with a newer connection.
@@ -189,14 +238,14 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 		return VM{}, fmt.Errorf("%w: node %q has %d CPUs / %d MB free", ErrConflict, n.ID, freeCPU, freeMem)
 	}
 	id := newID()
-	port := r.allocPort(id)
-	if port == 0 {
+	nics, err := r.net.AllocNICs(id, req.Name)
+	if err != nil {
 		r.mu.Unlock()
-		return VM{}, fmt.Errorf("%w: no free SSH port", ErrConflict)
+		return VM{}, err
 	}
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
-			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, SSHPort: port},
+			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, NICs: nics},
 		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending,
 	}
 	r.vms[id] = vm
@@ -205,8 +254,10 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 
 	if err := conn.Send(proto.Message{Type: "create", Create: &spec}); err != nil {
 		r.mu.Lock()
-		r.releasePort(port)
 		delete(r.vms, id)
+		if err := r.net.Release(id); err != nil {
+			log.Printf("releasing NICs of %s: %v", id, err)
+		}
 		r.mu.Unlock()
 		return VM{}, fmt.Errorf("%w: sending to node: %v", ErrConflict, err)
 	}
@@ -225,8 +276,10 @@ func (r *Registry) DeleteVM(id string) error {
 		r.mu.Unlock()
 		return fmt.Errorf("%w: node %q is offline", ErrConflict, vm.NodeID)
 	}
-	r.releasePort(vm.SSHPort)
 	delete(r.vms, id)
+	if err := r.net.Release(id); err != nil {
+		log.Printf("releasing NICs of %s: %v", id, err)
+	}
 	conn := n.conn
 	r.mu.Unlock()
 	return conn.Send(proto.Message{Type: "delete", DeleteID: id})
@@ -235,8 +288,11 @@ func (r *Registry) DeleteVM(id string) error {
 func (r *Registry) UpdateStatus(st proto.VMStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if vm, ok := r.vms[st.ID]; ok {
+	if vm, ok := r.vms[st.ID]; ok && vm.adoptError == "" {
 		vm.State, vm.IP, vm.Error = st.State, st.IP, st.Error
+	}
+	if vm, ok := r.vms[st.ID]; ok {
+		vm.Disks = st.Disks
 	}
 }
 
@@ -264,33 +320,6 @@ func (r *Registry) VMs() []VM {
 	return out
 }
 
-// StreamForPort opens a data stream to the node hosting the VM behind port and writes its header.
-func (r *Registry) StreamForPort(port int) (net.Conn, error) {
-	r.mu.Lock()
-	vm, ok := r.vms[r.ports[port]]
-	if !ok {
-		r.mu.Unlock()
-		return nil, ErrNotFound
-	}
-	n := r.nodes[vm.NodeID]
-	if n == nil || !n.Online {
-		r.mu.Unlock()
-		return nil, fmt.Errorf("%w: node %q is offline", ErrConflict, vm.NodeID)
-	}
-	conn, id := n.conn, vm.ID
-	r.mu.Unlock()
-
-	s, err := conn.OpenStream()
-	if err != nil {
-		return nil, err
-	}
-	if err := proto.WriteHeader(s, proto.StreamHeader{VMID: id}); err != nil {
-		s.Close()
-		return nil, err
-	}
-	return s, nil
-}
-
 func (r *Registry) free(n *nodeEntry) (cpus, memMB int) {
 	cpus, memMB = n.CPUs, n.MemoryMB
 	for _, vm := range r.vms {
@@ -300,33 +329,6 @@ func (r *Registry) free(n *nodeEntry) (cpus, memMB int) {
 		}
 	}
 	return cpus, memMB
-}
-
-// adoptPort keeps a VM's previous port when possible, otherwise allocates a new one (0 if exhausted).
-func (r *Registry) adoptPort(vmID string, want int) int {
-	if want >= r.portMin && want <= r.portMax && r.ports[want] == "" && r.OnPortOpen(want) == nil {
-		r.ports[want] = vmID
-		return want
-	}
-	return r.allocPort(vmID)
-}
-
-// allocPort skips ports the OS refuses to bind (e.g. taken by another process).
-func (r *Registry) allocPort(vmID string) int {
-	for p := r.portMin; p <= r.portMax; p++ {
-		if r.ports[p] == "" && r.OnPortOpen(p) == nil {
-			r.ports[p] = vmID
-			return p
-		}
-	}
-	return 0
-}
-
-func (r *Registry) releasePort(p int) {
-	if _, ok := r.ports[p]; ok {
-		delete(r.ports, p)
-		r.OnPortClose(p)
-	}
 }
 
 func validate(q CreateVMRequest) error {

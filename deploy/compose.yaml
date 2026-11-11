@@ -1,0 +1,44 @@
+services:
+  # owns the shared netns, so a gateway restart does not strand the hub in a dead one
+  netns:
+    image: registry.k8s.io/pause:3.10
+    restart: unless-stopped
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    ports:
+      - "${HUB_PORT:-8080}:8080/tcp"
+      - "${UNDERLAY_PORT:-51820}:51820/udp"
+      - "${CLIENTS_PORT:-51821}:51821/udp"
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/gateway.Dockerfile
+    restart: unless-stopped
+    network_mode: service:netns
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    environment:
+      HUB_TOKEN: ${HUB_TOKEN:-}
+      CLIENTS_ENDPOINT: ${CLIENTS_ENDPOINT:-}
+      UNDERLAY_PORT: ${UNDERLAY_PORT:-51820}
+      CLIENTS_PORT: ${CLIENTS_PORT:-51821}
+    volumes:
+      - ovn:/var/lib/ovn
+      - ovs:/etc/openvswitch
+      # read-write: the gateway writes hub.json on first start
+      - data:/data
+  hub:
+    build:
+      context: ..
+      dockerfile: deploy/hub.Dockerfile
+    # the hub exits until gateway-start.sh has written /data/hub.json
+    restart: unless-stopped
+    network_mode: service:netns
+    command: ["-config", "/data/hub.json", "-ssh-dir", "/host-ssh"]
+    volumes:
+      - data:/data
+      - ${HUB_SSH_DIR:-~/.ssh}:/host-ssh:ro
+volumes:
+  ovn:
+  ovs:
+  data:

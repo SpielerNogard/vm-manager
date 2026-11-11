@@ -45,6 +45,9 @@ func LoadVMs(vmsDir string) ([]VMFile, error) {
 	}
 	var out []VMFile
 	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
 		b, err := os.ReadFile(filepath.Join(vmsDir, e.Name(), "vm.json"))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

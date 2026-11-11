@@ -2,7 +2,6 @@
 package proto
 
 import (
-	"bufio"
 	"encoding/json"
 	"io"
 )
@@ -26,7 +25,15 @@ type VMSpec struct {
 	DiskGB        int        `json:"diskGB"`
 	DataDisks     []DataDisk `json:"dataDisks,omitempty"`
 	SSHPublicKeys []string   `json:"sshPublicKeys"`
-	SSHPort       int        `json:"sshPort"`
+	NICs          []NIC      `json:"nics"`
+}
+
+// NIC is one virtual network interface; Port is the OVN logical switch port name.
+type NIC struct {
+	Network string `json:"network"`
+	MAC     string `json:"mac"`
+	IP      string `json:"ip"`
+	Port    string `json:"port"`
 }
 
 // DataDisk is formatted as ext4 labelled Name on first boot and mounted at MountPath.
@@ -36,11 +43,22 @@ type DataDisk struct {
 	SizeGB    int    `json:"sizeGB"`
 }
 
+// Disk is a block device the node attached to the VM; Name is "root", the data disk's name, or "seed".
+type Disk struct {
+	Name           string `json:"name"`
+	File           string `json:"file"`
+	Device         string `json:"device"`
+	ReadOnly       bool   `json:"readOnly"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	AllocatedBytes int64  `json:"allocatedBytes"`
+}
+
 type VMStatus struct {
 	ID    string  `json:"id"`
 	State VMState `json:"state"`
 	IP    string  `json:"ip,omitempty"`
 	Error string  `json:"error,omitempty"`
+	Disks []Disk  `json:"disks,omitempty"`
 }
 
 type VMRecord struct {
@@ -56,8 +74,17 @@ type Register struct {
 	MemoryMB int        `json:"memoryMB"`
 	VMs      []VMRecord `json:"vms,omitempty"`
 	// Config is the node's config file with the hub token removed; shown in the GUI only.
-	Config  json.RawMessage `json:"config,omitempty"`
-	Machine *Machine        `json:"machine,omitempty"`
+	Config     json.RawMessage `json:"config,omitempty"`
+	Machine    *Machine        `json:"machine,omitempty"`
+	ChassisKey string          `json:"chassisKey,omitempty"`
+}
+
+// Underlay tells a node how to join the hub's WireGuard underlay and reach the OVN southbound DB.
+type Underlay struct {
+	Address  string `json:"address"`
+	HubKey   string `json:"hubKey"`
+	SBRemote string `json:"sbRemote"`
+	Port     int    `json:"port"`
 }
 
 type Machine struct {
@@ -69,42 +96,14 @@ type Machine struct {
 	MemoryMB  int    `json:"memoryMB,omitempty"`
 }
 
-// Message types: "register" (node→hub), "create"/"delete" (hub→node), "status" (node→hub).
+// Message types: "register" (node→hub), "create"/"delete"/"underlay" (hub→node), "status" (node→hub).
 type Message struct {
 	Type     string    `json:"type"`
 	Register *Register `json:"register,omitempty"`
 	Create   *VMSpec   `json:"create,omitempty"`
 	DeleteID string    `json:"deleteId,omitempty"`
 	Status   *VMStatus `json:"status,omitempty"`
-}
-
-// StreamHeader is the first line of every hub→node data stream.
-type StreamHeader struct {
-	VMID string `json:"vmId"`
+	Underlay *Underlay `json:"underlay,omitempty"`
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }
-
-func WriteHeader(w io.Writer, h StreamHeader) error { return json.NewEncoder(w).Encode(h) }
-
-// ReadHeader reads exactly one line so the rest of r stays untouched for the payload.
-func ReadHeader(r *bufio.Reader) (StreamHeader, error) {
-	var h StreamHeader
-	line, err := r.ReadBytes('\n')
-	if err != nil {
-		return h, err
-	}
-	err = json.Unmarshal(line, &h)
-	return h, err
-}
-
-// Pipe copies both directions and closes both ends once either side finishes.
-func Pipe(a, b io.ReadWriteCloser) {
-	done := make(chan struct{}, 2)
-	cp := func(dst io.Writer, src io.Reader) { io.Copy(dst, src); done <- struct{}{} }
-	go cp(a, b)
-	go cp(b, a)
-	<-done
-	a.Close()
-	b.Close()
-}

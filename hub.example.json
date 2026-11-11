@@ -1,5 +1,7 @@
 {
   "listen": ":8080",
   "token": "change-me",
-  "sshPorts": { "min": 22000, "max": 22999 }
+  "underlay": { "port": 51820 },
+  "clients": { "endpoint": "vmm.example.lan", "port": 51821 },
+  "guestMTU": 1300
 }

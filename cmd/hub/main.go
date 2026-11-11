@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 func main() {
 	home, _ := os.UserHomeDir()
 	configPath := flag.String("config", filepath.Join(home, ".vm-manager", "hub.json"), "path to hub config")
+	sshDir := flag.String("ssh-dir", "~/.ssh", "directory holding the hub's default SSH public keys")
 	flag.Parse()
 
 	cfg, err := hub.LoadConfig(expandHome(*configPath, home))
@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	hubKeys, err := keys.LoadHubKeys(hub.HubKeyFiles(home))
+	hubKeys, err := keys.LoadHubKeys(hub.HubKeyFiles(expandHome(*sshDir, home)))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -38,22 +38,11 @@ func main() {
 		log.Printf("hub SSH key %s (%s)", k.Name, k.Fingerprint)
 	}
 
-	r := hub.NewRegistry(cfg.SSHPorts.Min, cfg.SSHPorts.Max)
-	listeners := map[int]io.Closer{} // only touched from registry hooks, which run under the registry lock
-	r.OnPortOpen = func(p int) error {
-		l, err := hub.ServeSSHPort(r, p)
-		if err != nil {
-			return err
-		}
-		listeners[p] = l
-		return nil
+	netModel, err := hub.LoadNetModel(filepath.Join(filepath.Dir(expandHome(*configPath, home)), "network.json"))
+	if err != nil {
+		log.Fatal(err)
 	}
-	r.OnPortClose = func(p int) {
-		if l, ok := listeners[p]; ok {
-			l.Close()
-			delete(listeners, p)
-		}
-	}
+	r := hub.NewRegistry(netModel, cfg)
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
@@ -61,10 +50,10 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, cfg.Token))
-	mux.Handle("/api/", hub.APIHandler(r, keys))
+	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg))
 	mux.Handle("/", spa(dist))
 
-	log.Printf("hub listening on %s, SSH ports %d-%d, keys in %s", cfg.Listen, cfg.SSHPorts.Min, cfg.SSHPorts.Max, keysPath)
+	log.Printf("hub listening on %s, keys in %s", cfg.Listen, keysPath)
 	log.Fatal(http.ListenAndServe(cfg.Listen, mux))
 }
 

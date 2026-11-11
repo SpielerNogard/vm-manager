@@ -17,19 +17,19 @@ func writeFile(t *testing.T, content string) string {
 }
 
 func TestLoadHubConfig(t *testing.T) {
-	c, err := LoadConfig(writeFile(t, `{"token":"s3cret"}`))
+	c, err := LoadConfig(writeFile(t, `{"token":"s3cret","sshPorts":{"min":1,"max":2}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != ":8080" || c.Token != "s3cret" || c.SSHPorts.Min != 22000 || c.SSHPorts.Max != 22999 {
+	if c.Listen != ":8080" || c.Token != "s3cret" || c.Underlay.Port != 51820 || c.Clients.Port != 51821 || c.GuestMTU != 1300 {
 		t.Fatalf("config = %+v", c)
 	}
 
-	c, err = LoadConfig(writeFile(t, `{"listen":":9000","token":"x","sshPorts":{"min":23000,"max":23010}}`))
+	c, err = LoadConfig(writeFile(t, `{"listen":":9000","token":"x","underlay":{"port":1},"clients":{"endpoint":"vmm.lan","port":2},"guestMTU":1280}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != ":9000" || c.SSHPorts.Min != 23000 || c.SSHPorts.Max != 23010 {
+	if c.Listen != ":9000" || c.Underlay.Port != 1 || c.Clients.Endpoint != "vmm.lan" || c.Clients.Port != 2 || c.GuestMTU != 1280 {
 		t.Fatalf("config = %+v", c)
 	}
 }
@@ -37,7 +37,6 @@ func TestLoadHubConfig(t *testing.T) {
 func TestLoadHubConfigErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ body, want string }{
 		"missing token": {`{}`, "token"},
-		"min > max":     {`{"token":"x","sshPorts":{"min":23000,"max":22000}}`, "sshPorts"},
 		"bad json":      {`{`, "hub.json"},
 	} {
 		_, err := LoadConfig(writeFile(t, tc.body))

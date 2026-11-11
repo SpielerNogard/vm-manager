@@ -1,15 +1,11 @@
 package hub
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -67,43 +63,18 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-func freePort(t *testing.T) int {
+func startHub(t *testing.T) (*Registry, *httptest.Server) {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
-
-func startHub(t *testing.T, portMin, portMax int) (*Registry, *httptest.Server) {
-	t.Helper()
-	r := NewRegistry(portMin, portMax)
-	listeners := map[int]io.Closer{}
-	r.OnPortOpen = func(p int) error {
-		l, err := ServeSSHPort(r, p)
-		if err == nil {
-			listeners[p] = l
-		}
-		return err
-	}
-	r.OnPortClose = func(p int) { listeners[p].Close(); delete(listeners, p) }
+	r := NewRegistry(newTestNet(t), Config{})
 	srv := httptest.NewServer(NodeHandler(r, testToken))
-	t.Cleanup(func() {
-		srv.Close()
-		for _, l := range listeners {
-			l.Close()
-		}
-	})
+	t.Cleanup(srv.Close)
 	return r, srv
 }
 
 var testReg = proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}
 
 func TestNodeRegisterAndCreate(t *testing.T) {
-	p := freePort(t)
-	r, srv := startHub(t, p, p)
+	r, srv := startHub(t)
 	n, err := dialNode(t, srv.URL, testToken, testReg)
 	if err != nil {
 		t.Fatal(err)
@@ -129,86 +100,15 @@ func TestNodeRegisterAndCreate(t *testing.T) {
 }
 
 func TestBadToken(t *testing.T) {
-	_, srv := startHub(t, 22000, 22999)
+	_, srv := startHub(t)
 	_, err := dialNode(t, srv.URL, "wrong", testReg)
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestSSHProxy(t *testing.T) {
-	p := freePort(t)
-	r, srv := startHub(t, p, p)
-	n, err := dialNode(t, srv.URL, testToken, testReg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotID := make(chan string, 1)
-	go func() {
-		for {
-			s, err := n.sess.Accept()
-			if err != nil {
-				return
-			}
-			br := bufio.NewReader(s)
-			h, err := proto.ReadHeader(br)
-			if err != nil {
-				return
-			}
-			gotID <- h.VMID
-			go io.Copy(s, br)
-		}
-	}()
-	waitFor(t, "node online", func() bool { return len(r.Nodes()) == 1 })
-	vm, err := r.CreateVM(validReq())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(vm.SSHPort)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	c.Write([]byte("ping"))
-	buf := make([]byte, 4)
-	c.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "ping" {
-		t.Fatalf("read %q err %v", buf, err)
-	}
-	if id := <-gotID; id != vm.ID {
-		t.Fatalf("header VMID = %q", id)
-	}
-}
-
-func TestSSHProxyNodeOffline(t *testing.T) {
-	p := freePort(t)
-	r, srv := startHub(t, p, p)
-	n, err := dialNode(t, srv.URL, testToken, testReg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "node online", func() bool { return len(r.Nodes()) == 1 })
-	vm, err := r.CreateVM(validReq())
-	if err != nil {
-		t.Fatal(err)
-	}
-	n.sess.Close()
-	waitFor(t, "node offline", func() bool { return !r.Nodes()[0].Online })
-
-	c, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(vm.SSHPort)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	c.SetReadDeadline(time.Now().Add(time.Second))
-	if _, err := c.Read(make([]byte, 1)); err != io.EOF {
-		t.Fatalf("err = %v, want EOF", err)
-	}
-}
-
 func TestStaleDisconnectKeepsNewSessionOnline(t *testing.T) {
-	r, srv := startHub(t, 22000, 22999)
+	r, srv := startHub(t)
 	old, err := dialNode(t, srv.URL, testToken, testReg)
 	if err != nil {
 		t.Fatal(err)

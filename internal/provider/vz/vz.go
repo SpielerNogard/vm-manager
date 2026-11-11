@@ -10,19 +10,28 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Code-Hex/vz/v3"
 
 	"vm-manager/internal/node"
+	"vm-manager/internal/proto"
 )
 
 const DefaultImageURL = "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img"
 
 type Provider struct {
-	ImagesDir, ImageURL, LeasesPath string
+	VMsDir, ImagesDir, ImageURL, LeasesPath string
 
-	imageMu sync.Mutex // concurrent creates must not download the same base image twice
+	imageMu  sync.Mutex // concurrent creates must not download the same base image twice
+	nextPort atomic.Uint32
+
+	netMu   sync.Mutex
+	netvm   *instance
+	netStop chan struct{} // closed by StopChassis; nil until the netvm was first booted
+	netDone chan struct{} // closed when the supervisor exits
+	netMAC  string
 }
 
 func New(c node.Config) (*Provider, error) {
@@ -33,7 +42,7 @@ func New(c node.Config) (*Provider, error) {
 	if err := c.ProviderSection(&s); err != nil {
 		return nil, fmt.Errorf("config vz section: %w", err)
 	}
-	p := &Provider{ImagesDir: c.Paths.Images, ImageURL: s.ImageURL, LeasesPath: s.LeasesPath}
+	p := &Provider{VMsDir: c.Paths.VMs, ImagesDir: c.Paths.Images, ImageURL: s.ImageURL, LeasesPath: s.LeasesPath}
 	if p.ImageURL == "" {
 		p.ImageURL = DefaultImageURL
 	}
@@ -58,11 +67,33 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CreateDataDisks(dir, f.Spec.DataDisks); err != nil {
 		return err
 	}
-	return makeSeedISO(ctx, dir, f)
+	return makeSeedISO(ctx, dir, writeGuestSeed(f))
 }
 
 func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
-	cfg, err := p.vmConfig(f, dir)
+	var nics []guestNIC
+	closeNICs := func() {
+		for _, n := range nics {
+			n.guestEnd.Close()
+			n.vmEnd.Close()
+		}
+	}
+	started := false
+	defer func() {
+		if !started {
+			closeNICs()
+		}
+	}()
+	var nicCfgs []*vz.VirtioNetworkDeviceConfiguration
+	for _, n := range f.Spec.NICs {
+		gn, err := newGuestNIC(n)
+		if err != nil {
+			return nil, fmt.Errorf("nic %s: %w", n.Port, err)
+		}
+		nics = append(nics, gn)
+		nicCfgs = append(nicCfgs, gn.cfg)
+	}
+	cfg, err := p.vmConfig(f, dir, nicCfgs, false)
 	if err != nil {
 		return nil, err
 	}
@@ -77,12 +108,64 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	if err := vm.Start(); err != nil {
 		return nil, err
 	}
+	started = true
 	inst := &instance{vm: vm, mac: f.MAC, leasesPath: p.LeasesPath, prevLease: prevLease, done: make(chan struct{})}
 	go inst.watch()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var relays sync.WaitGroup
+	for _, n := range nics {
+		relays.Add(1)
+		// ponytail: provider-wide counter wraps after 65535 attached NICs; reuse freed IDs if a node ever gets there.
+		port := uint16(p.nextPort.Add(1))
+		go func() {
+			defer relays.Done()
+			relayNIC(ctx, n.vmEnd, p.dialNetvm, port, n.port)
+		}()
+	}
+	go func() {
+		<-inst.done
+		cancel()
+		relays.Wait()
+		closeNICs()
+	}()
 	return inst, nil
 }
 
-func (p *Provider) vmConfig(f node.VMFile, dir string) (*vz.VirtualMachineConfiguration, error) {
+type guestNIC struct {
+	guestEnd, vmEnd *os.File // guestEnd must stay open while vz uses its fd
+	port            string
+	cfg             *vz.VirtioNetworkDeviceConfiguration
+}
+
+func newGuestNIC(n proto.NIC) (guestNIC, error) {
+	hw, err := net.ParseMAC(n.MAC)
+	if err != nil {
+		return guestNIC{}, err
+	}
+	mac, err := vz.NewMACAddress(hw)
+	if err != nil {
+		return guestNIC{}, err
+	}
+	guestEnd, vmEnd, err := newNICSocketpair()
+	if err != nil {
+		return guestNIC{}, err
+	}
+	// MTU stays at vz's default 1500: it rejects smaller values on file-handle attachments; the guest MTU comes from DHCP.
+	att, err := vz.NewFileHandleNetworkDeviceAttachment(guestEnd)
+	if err == nil {
+		var cfg *vz.VirtioNetworkDeviceConfiguration
+		if cfg, err = vz.NewVirtioNetworkDeviceConfiguration(att); err == nil {
+			cfg.SetMACAddress(mac)
+			return guestNIC{guestEnd: guestEnd, vmEnd: vmEnd, port: n.Port, cfg: cfg}, nil
+		}
+	}
+	guestEnd.Close()
+	vmEnd.Close()
+	return guestNIC{}, err
+}
+
+func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNetworkDeviceConfiguration, vsock bool) (*vz.VirtualMachineConfiguration, error) {
 	varsPath := filepath.Join(dir, "efi.vars")
 	var opts []vz.NewEFIVariableStoreOption
 	if _, err := os.Stat(varsPath); errors.Is(err, os.ErrNotExist) {
@@ -106,16 +189,12 @@ func (p *Provider) vmConfig(f node.VMFile, dir string) (*vz.VirtualMachineConfig
 	}
 	cfg.SetPlatformVirtualMachineConfiguration(platform)
 
-	disks := []string{"root.img"}
-	for i := range f.Spec.DataDisks {
-		disks = append(disks, node.DataDiskName(i))
-	}
 	var storage []vz.StorageDeviceConfiguration
-	for _, d := range append(disks, seedISO) {
+	for _, d := range attachOrder(f) {
 		// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
-		att, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d), d == seedISO, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
+		att, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.file), d.readOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
 		if err != nil {
-			return nil, fmt.Errorf("disk %s: %w", d, err)
+			return nil, fmt.Errorf("disk %s: %w", d.file, err)
 		}
 		blk, err := vz.NewVirtioBlockDeviceConfiguration(att)
 		if err != nil {
@@ -142,7 +221,15 @@ func (p *Provider) vmConfig(f node.VMFile, dir string) (*vz.VirtualMachineConfig
 		return nil, err
 	}
 	nic.SetMACAddress(mac)
-	cfg.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{nic})
+	cfg.SetNetworkDevicesVirtualMachineConfiguration(append([]*vz.VirtioNetworkDeviceConfiguration{nic}, extraNICs...))
+
+	if vsock {
+		dev, err := vz.NewVirtioSocketDeviceConfiguration()
+		if err != nil {
+			return nil, err
+		}
+		cfg.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{dev})
+	}
 
 	serialAtt, err := vz.NewFileSerialPortAttachment(filepath.Join(dir, "console.log"), true)
 	if err != nil {

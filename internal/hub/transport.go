@@ -3,10 +3,8 @@ package hub
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"sync"
 
@@ -17,9 +15,8 @@ import (
 )
 
 type yamuxNode struct {
-	sess *yamux.Session
-	mu   sync.Mutex
-	enc  *json.Encoder
+	mu  sync.Mutex
+	enc *json.Encoder
 }
 
 func (n *yamuxNode) Send(m proto.Message) error {
@@ -27,8 +24,6 @@ func (n *yamuxNode) Send(m proto.Message) error {
 	defer n.mu.Unlock()
 	return n.enc.Encode(m)
 }
-
-func (n *yamuxNode) OpenStream() (net.Conn, error) { return n.sess.Open() }
 
 // NodeHandler accepts node connections: WebSocket → yamux, first node-opened stream is the control stream.
 func NodeHandler(r *Registry, token string) http.Handler {
@@ -58,7 +53,7 @@ func NodeHandler(r *Registry, token string) http.Handler {
 			log.Printf("node %s: expected register message", req.RemoteAddr)
 			return
 		}
-		node := &yamuxNode{sess: sess, enc: proto.NewEncoder(ctrl)}
+		node := &yamuxNode{enc: proto.NewEncoder(ctrl)}
 		id := m.Register.NodeID
 		r.NodeConnected(*m.Register, node)
 		log.Printf("node %s connected (%d VMs)", id, len(m.Register.VMs))
@@ -76,31 +71,6 @@ func NodeHandler(r *Registry, token string) http.Handler {
 			}
 		}
 	})
-}
-
-// ServeSSHPort forwards every TCP connection on port to the VM currently mapped to it.
-func ServeSSHPort(r *Registry, port int) (io.Closer, error) {
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		for {
-			c, err := l.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				s, err := r.StreamForPort(port)
-				if err != nil {
-					c.Close()
-					return
-				}
-				proto.Pipe(c, s)
-			}()
-		}
-	}()
-	return l, nil
 }
 
 func yamuxConfig() *yamux.Config {

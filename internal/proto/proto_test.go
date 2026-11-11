@@ -1,10 +1,8 @@
 package proto
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"io"
 	"reflect"
 	"testing"
 )
@@ -15,7 +13,7 @@ func TestMessageRoundTrip(t *testing.T) {
 		Register: &Register{
 			NodeID: "n1", Hostname: "mac", Provider: "vz", CPUs: 8, MemoryMB: 16384,
 			VMs: []VMRecord{{
-				Spec:   VMSpec{ID: "abc", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, DataDisks: []DataDisk{{Name: "data", MountPath: "/data", SizeGB: 5}}, SSHPublicKeys: []string{"ssh-ed25519 AAA"}, SSHPort: 22001},
+				Spec:   VMSpec{ID: "abc", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, DataDisks: []DataDisk{{Name: "data", MountPath: "/data", SizeGB: 5}}, SSHPublicKeys: []string{"ssh-ed25519 AAA"}, NICs: []NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Port: "abc-mgmt"}}},
 				Status: VMStatus{ID: "abc", State: StateRunning, IP: "192.168.64.2"},
 			}},
 		},
@@ -33,22 +31,12 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStreamHeader(t *testing.T) {
-	var buf bytes.Buffer
-	if err := WriteHeader(&buf, StreamHeader{VMID: "abc"}); err != nil {
-		t.Fatal(err)
-	}
-	buf.WriteString("SSH-2.0")
-	r := bufio.NewReader(&buf)
-	h, err := ReadHeader(r)
+func TestNICJSONAndNoSSHPort(t *testing.T) {
+	b, err := json.Marshal(VMSpec{ID: "a", NICs: []NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Port: "a-mgmt"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.VMID != "abc" {
-		t.Fatalf("VMID = %q", h.VMID)
-	}
-	rest, _ := io.ReadAll(r)
-	if string(rest) != "SSH-2.0" {
-		t.Fatalf("rest = %q", rest)
+	if !bytes.Contains(b, []byte(`"nics"`)) || bytes.Contains(b, []byte("sshPort")) {
+		t.Fatalf("unexpected JSON: %s", b)
 	}
 }
