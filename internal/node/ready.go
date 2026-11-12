@@ -30,7 +30,12 @@ func ConsoleOffset(path string) (int64, error) {
 
 // WaitReady polls the console log until ReadyMarker appears after offset.
 func WaitReady(ctx context.Context, path string, offset int64, every time.Duration) error {
-	marker := []byte(ReadyMarker)
+	return WaitConsole(ctx, path, offset, every, ReadyMarker)
+}
+
+// WaitConsole polls the console log until text appears after offset.
+func WaitConsole(ctx context.Context, path string, offset int64, every time.Duration, text string) error {
+	marker := []byte(text)
 	var tail []byte // keeps a marker split across two reads findable
 	t := time.NewTicker(every)
 	defer t.Stop()

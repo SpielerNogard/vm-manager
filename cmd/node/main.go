@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,7 +10,6 @@ import (
 	"syscall"
 
 	"vm-manager/internal/node"
-	"vm-manager/internal/provider/vz"
 )
 
 func main() {
@@ -52,14 +50,5 @@ func main() {
 	log.Printf("node %s: provider %s, %d CPUs, %d MB", cfg.NodeID, provider.Name(), cfg.Capacity.CPUs, cfg.Capacity.MemoryMB)
 	if err := a.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
-	}
-}
-
-func newProvider(cfg node.Config) (node.Provider, error) {
-	switch cfg.Provider {
-	case "vz":
-		return vz.New(cfg)
-	default:
-		return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
 	}
 }

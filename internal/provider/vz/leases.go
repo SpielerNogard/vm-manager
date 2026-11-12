@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Package vz implements node.Provider with Apple's Virtualization.framework.
 package vz
 
