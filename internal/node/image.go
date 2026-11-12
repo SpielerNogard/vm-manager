@@ -191,7 +191,8 @@ if [ -b "$dev" ]; then
   rm -f /run/vmm-probe
   mkdir -p %[2]s && { mountpoint -q %[2]s || mount "$dev" %[2]s; } && {
     resize2fs "$dev" >/dev/null 2>&1
-    [ -n "$new" ] && chown ubuntu:ubuntu %[2]s
+    # bootcmd runs before cloud-init creates ubuntu on first boot; 1000 is its uid/gid in the Ubuntu cloud image.
+    [ -n "$new" ] && chown 1000:1000 %[2]s
   }
 fi
 `, dev, mnt)

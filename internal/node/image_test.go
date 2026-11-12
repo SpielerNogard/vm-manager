@@ -177,10 +177,13 @@ func TestDiskScript(t *testing.T) {
 	s := DiskScript(VMFile{Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}, {DiskID: "d2", MountPath: "/it's"}}}})
 	for _, want := range []string{"virtio-d1", "virtio-d2", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`,
 		`if [ $rc -eq 2 ] && dd if="$dev" of=/run/vmm-probe bs=1M count=1 iflag=direct,fullblock 2>/dev/null && [ "$(wc -c </run/vmm-probe)" -eq 1048576 ] && [ "$(tr -d '\000' </run/vmm-probe | wc -c)" -eq 0 ]; then`,
-		`mkfs.ext4 -q -E nodiscard "$dev" && new=1`, "mountpoint -q '/data' || mount \"$dev\" '/data'; } && {", "'/data'", `'/it'\''s'`, "resize2fs", "chown ubuntu:ubuntu '/data'"} {
+		`mkfs.ext4 -q -E nodiscard "$dev" && new=1`, "mountpoint -q '/data' || mount \"$dev\" '/data'; } && {", "'/data'", `'/it'\''s'`, "resize2fs", "chown 1000:1000 '/data'"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script missing %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "chown ubuntu") {
+		t.Errorf("chown by name fails on first boot, before cloud-init creates the user:\n%s", s)
 	}
 	if strings.Contains(s, "|| { mkfs") {
 		t.Errorf("formats on any blkid failure:\n%s", s)
