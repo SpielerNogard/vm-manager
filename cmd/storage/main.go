@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,6 +25,9 @@ func main() {
 	flag.Parse()
 	if *hubURL == "" || *advertise == "" {
 		log.Fatal("-hub and -advertise (or STORAGE_ENDPOINT) are required")
+	}
+	if host, _, err := net.SplitHostPort(*advertise); err != nil || host == "" {
+		log.Fatalf("-advertise %q must be host:port", *advertise)
 	}
 	if err := os.MkdirAll(*dir, 0o755); err != nil {
 		log.Fatal(err)

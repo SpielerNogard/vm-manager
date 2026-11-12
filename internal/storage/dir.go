@@ -104,8 +104,19 @@ func (d Dir) ensure(disk proto.StorageDisk) error {
 	}
 	if err != nil {
 		os.Remove(partial)
+		return err
 	}
-	return err
+	// The rename is only durable once the directory is synced; without it a crash could lose the new disk.
+	return syncDir(d.Path)
+}
+
+func syncDir(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
 }
 
 // ponytail: zero-chunk sparse copy, use FICLONE where the fs supports reflink if copies get slow

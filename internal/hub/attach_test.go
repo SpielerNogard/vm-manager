@@ -546,3 +546,15 @@ func TestAttachURLWaitsForSeen(t *testing.T) {
 		t.Fatalf("url after hub restart = %q", a.URL)
 	}
 }
+
+func TestStorageRegisterNeedsHostPort(t *testing.T) {
+	r, _, fs := newAttachRegistry(t)
+	for _, ep := range []string{"storage", "storage:1:2", "nbd://storage:10809"} {
+		if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: ep}, fs); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("%q: err = %v", ep, err)
+		}
+	}
+	if r.Storage().Endpoint != "st:10809" {
+		t.Fatal("invalid endpoint saved")
+	}
+}
