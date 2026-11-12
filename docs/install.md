@@ -43,10 +43,11 @@ Settings page:
 
 Changes apply without a restart; the gateway re-reads the token automatically.
 
-Besides `VMM_VERSION`, `deploy/.env` only sets the published ports (and the SSH dir); the hub writes the ports into `hub.json` on start:
+`deploy/.env` sets the release (`VMM_VERSION`), the published ports and the SSH dir; the hub writes the ports into `hub.json` on start:
 
 | Variable | Default | |
 |---|---|---|
+| `VMM_VERSION` | none, required | Release whose binaries the images use, e.g. `v0.1.0` |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
