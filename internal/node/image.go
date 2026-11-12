@@ -182,9 +182,13 @@ func DiskScript(f VMFile) string {
 		fmt.Fprintf(&b, `dev=%s
 i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
 if [ -b "$dev" ]; then
-  # blkid exits 2 only when it found no filesystem; any other failure must never lead to a format.
+  # blkid also exits 2 when it cannot open or read the device, so only a readable, all-zero first MiB counts as blank.
   new=; blkid -p "$dev" >/dev/null 2>&1; rc=$?
-  [ $rc -eq 2 ] && mkfs.ext4 -q "$dev" && new=1
+  if [ $rc -eq 2 ] && dd if="$dev" of=/run/vmm-probe bs=1M count=1 iflag=direct,fullblock 2>/dev/null && [ "$(wc -c </run/vmm-probe)" -eq 1048576 ] && [ "$(tr -d '\000' </run/vmm-probe | wc -c)" -eq 0 ]; then
+    # nodiscard: a discard on NBD punches holes into the backing file, a wipe if this ever misjudges.
+    mkfs.ext4 -q -E nodiscard "$dev" && new=1
+  fi
+  rm -f /run/vmm-probe
   mkdir -p %[2]s && { mountpoint -q %[2]s || mount "$dev" %[2]s; } && {
     resize2fs "$dev" >/dev/null 2>&1
     [ -n "$new" ] && chown ubuntu:ubuntu %[2]s
