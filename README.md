@@ -8,7 +8,7 @@ This is a proof of concept. Nodes are Apple Silicon Macs using Virtualization.fr
 
 - Hub stack: Docker with Compose. Supported hosts are OrbStack on macOS and Docker on Linux. The Docker host kernel must have the `openvswitch` and `wireguard` modules loaded (the gateway container fails fast otherwise). Docker Desktop is not supported or tested.
 - Build: Go and Node.js/npm.
-- Node: Apple Silicon, macOS 13 or later, Go with cgo (Xcode Command Line Tools).
+- Node: Apple Silicon, macOS 14 or later, Go with cgo (Xcode Command Line Tools).
 
 ## Build
 
@@ -47,10 +47,12 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
 | `HUB_SSH_DIR` | `~/.ssh` | Directory with the default SSH public keys offered as hub keys |
+| `STORAGE_ENDPOINT` | none | `host:port` nodes use to reach the storage server's NBD port. Only for the `storage` profile |
+| `STORAGE_PORT` | `10809` | Published NBD port of the storage server (tcp) |
 
 To change a port, set it in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
 
-Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint. To run the hub without the stack, start `./bin/hub`; it creates `~/.vm-manager/hub.json` on first start (random token, empty client endpoint) and you finish setup in the GUI. Without the gateway container, VMs get no network.
+Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint; nodes need tcp `STORAGE_PORT` if you run the storage server. To run the hub without the stack, start `./bin/hub`; it creates `~/.vm-manager/hub.json` on first start (random token, empty client endpoint) and you finish setup in the GUI. Without the gateway container, VMs get no network.
 
 Add a node: on the **Nodes** page click **Add node** (name: lowercase letters, digits, hyphens). The node appears as `pending` and its detail page shows its `node.json` with copy and download. The hub address in it is editable and defaults to the client endpoint; use `localhost` on the hub's own Mac, or a LAN IP if nodes reach the hub differently. Save it as `~/.vm-manager/node.json` on the node and start it:
 
@@ -69,9 +71,28 @@ curl -X POST http://<hub>:8080/api/keys -d '{"name": "laptop", "publicKey": "'"$
 # → {"id": "<key-id>", ...}
 curl -X POST http://<hub>:8080/api/vms -d '{
   "nodeId": "mac-mini-1", "name": "dev", "cpus": 2, "memoryMB": 2048,
-  "diskGB": 20, "dataDisks": [{"name": "data", "mountPath": "/data", "sizeGB": 10}], "sshKeyIds": ["<key-id>"]
+  "diskGB": 20, "sshKeyIds": ["<key-id>"]
 }'
 ```
+
+### Disks
+
+Standalone disks hold data that outlives VMs. They live on a storage server and nodes attach them to VMs over NBD, so a disk can move between VMs and nodes. The storage server is optional and runs as a compose profile (an nbdkit server plus an agent that connects to the hub), usually on the hub host:
+
+```sh
+# in deploy/.env: STORAGE_ENDPOINT=<host>:<STORAGE_PORT>, reachable from the nodes
+docker compose -f deploy/compose.yaml --profile storage up -d --build
+```
+
+Without it, disks stay `creating` and VMs with disks fail to start with `storage unreachable`. Create a disk with `POST /api/disks` or the GUI (**Disks** page), then attach it at VM creation (`disks` on `POST /api/vms`) or later:
+
+```sh
+curl -X POST http://<hub>:8080/api/disks -d '{"name": "data", "sizeGB": 10}'
+# → {"id": "<disk-id>", ...}
+curl -X PUT 'http://<hub>:8080/api/vms/<vm-id>/disks?restartAllowed=true' -d '{"disks": [{"diskId": "<disk-id>", "mountPath": "/data"}]}'
+```
+
+A disk is attached to at most one VM at a time, and mounted at `mountPath` (owned by `ubuntu` after the first format). Disk names are lowercase letters, digits and dashes. System paths such as `/etc`, `/usr`, `/home/ubuntu` or `/var` are rejected as mount paths.
 
 ### Reaching VMs
 
@@ -106,9 +127,9 @@ Networks are standalone objects (they can be empty) that give VMs private connec
 
 Guests send only `*.internal` queries to the gateway (`10.201.0.1`, via the management NIC). The management network is built in and cannot be deleted; a network with members cannot be deleted either.
 
-On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. On first boot, cloud-init formats each data disk as ext4, labels it with its `name`, and mounts it at `mountPath`. The mount is owned by `ubuntu`. System paths such as `/etc`, `/usr`, `/home/ubuntu` or `/var` are rejected as mount paths.
+On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
 
-VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
+Upgrade note: local data disks (`dataDisks`) were removed without migration. Recreate the affected VMs and move their data to standalone disks. Upgrade the hub and all nodes together.
 
 Upgrade note: VMs created before the hub became the source of truth are deleted when their node first connects. Recreate them. Upgrade the hub and all nodes together; old and new versions don't work with each other. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
 
@@ -143,9 +164,10 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |
-| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`, optional `networkIds`). Also works for an offline node: the VM shows `pending` until the node connects |
+| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `sshKeyIds`, optional `networkIds`, optional `disks` (`diskId`, `mountPath`)). Also works for an offline node: the VM shows `pending` until the node connects |
 | DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
 | PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`, required; `[]` detaches all). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
+| PUT | `/api/vms/{id}/disks?restartAllowed=true` | Set the VM's full disk list (`{"disks": [{"diskId", "mountPath"}]}`, required; `[]` detaches all). A running VM is restarted and needs `restartAllowed=true`, else 409. Removed disks become `releasing` |
 | POST | `/api/vms/{id}/start` | Power the VM on |
 | POST | `/api/vms/{id}/shutdown` | ACPI shutdown, hard power-off after 10 s |
 | POST | `/api/vms/{id}/stop` | Immediate hard power-off |
@@ -156,6 +178,13 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | GET | `/api/networks/{id}` | One network, same fields as in the list (`mgmt` included); 404 if unknown |
 | POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
 | DELETE | `/api/networks/{id}` | Delete a network. 409 while it has members; the management network cannot be deleted |
+| GET | `/api/disks` | Disks with state (`creating`, `ready`, `releasing`), size, allocated bytes and attachment |
+| POST | `/api/disks` | Create a disk (`name`, `sizeGB`) |
+| POST | `/api/disks/{id}/copy` | Copy a disk to a new one (`name`, same size). Returns `{"disk", "warning"}`; the warning is set if the source is attached or releasing, as the copy is then only crash-consistent |
+| PATCH | `/api/disks/{id}?restartAllowed=true` | Grow a disk (`sizeGB`, must be larger; no shrinking). An attached running VM is restarted to see the new size and needs `restartAllowed=true`, else 409 |
+| POST | `/api/disks/{id}/release?force=true` | Force-end a release that the node cannot confirm. Only while the node is offline (else 409); `force=true` is required. Anything the node still writes to the disk is lost |
+| DELETE | `/api/disks/{id}` | Delete a disk. 409 while it is attached, releasing, or the source of a pending copy |
+| GET | `/api/storage` | Storage server state: `online`, `endpoint`, and `orphans` (files on the server that no disk refers to) |
 | GET | `/api/devices` | Client devices |
 | POST | `/api/devices` | Add a device (`name`, optional `onHub` for a device on the hub machine), returns the device and its WireGuard config |
 | DELETE | `/api/devices/{id}` | Remove a device |
@@ -165,6 +194,10 @@ Provider settings go in a section named after the provider. For `vz` these are `
 
 ## Behaviour
 
+- The hub keeps disks in `disks.json` next to its config file, with the storage endpoint and tombstones of deleted disks. The storage server holds one file per disk and follows the hub: it creates, copies and grows files, and deletes those of deleted disks. Files it has no disk for are reported as orphans (`GET /api/storage`) and are never deleted.
+- A disk is `creating` until the storage server reports its file at full size, `ready` after that, and `releasing` from detach or VM delete until the node confirms it no longer uses the disk. A releasing disk cannot be attached, grown or deleted. If the node stays offline, force the release (see API).
+- A node starts a VM with disks only after the hub has confirmed that they are still wanted, and fails it with `storage unreachable` if an NBD server cannot be reached. A VM that is already running keeps working when the storage container restarts.
+- On every boot, the guest formats a disk only if it is blank, mounts it at `mountPath` (found by `/dev/disk/by-id/virtio-<diskID>`) and grows the filesystem to the disk size. The first format makes the mount owned by `ubuntu`.
 - The hub keeps SSH keys in `keys.json`, the network model (WireGuard keys, VM NICs, chassis, devices) in `network.json`, and VMs and nodes in `vms.json`, all next to its config file. The hub is the source of truth for VMs.
 - The hub also lists its own user's default public keys (`~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`, `id_rsa.pub`, …), read on each start. They cannot be deleted through the API and are preselected in the GUI.
 - On connect and on every change, the hub pushes the desired VMs and their power state to the node. The node converges to it: it deletes VMs the hub does not know, creates missing ones and applies power. A VM that should run is restarted with backoff, and goes to `error` after repeated quick failures.
