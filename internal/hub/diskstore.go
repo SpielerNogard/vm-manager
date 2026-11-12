@@ -19,7 +19,8 @@ type StoredDisk struct {
 	CopyFrom  string    `json:"copyFrom,omitempty"` // cleared once the storage agent reports the file
 	CreatedAt time.Time `json:"createdAt"`
 	// ReleasingOn is the node that must confirm it stopped using the disk before it can be attached again.
-	ReleasingOn string `json:"releasingOn,omitempty"`
+	ReleasingOn  string `json:"releasingOn,omitempty"`
+	ReleasingSeq uint64 `json:"releasingSeq,omitempty"` // first desired seq that no longer uses the disk
 }
 
 type diskState struct {
@@ -114,7 +115,7 @@ func (s *DiskStore) Delete(id string) error {
 }
 
 // SetReleasing sets ReleasingOn of every listed disk in one save.
-func (s *DiskStore) SetReleasing(ids []string, nodeID string) error {
+func (s *DiskStore) SetReleasing(ids []string, nodeID string, seq uint64) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -123,7 +124,7 @@ func (s *DiskStore) SetReleasing(ids []string, nodeID string) error {
 	return s.mutate(func() {
 		for _, id := range ids {
 			if d, ok := s.disks[id]; ok {
-				d.ReleasingOn = nodeID
+				d.ReleasingOn, d.ReleasingSeq = nodeID, seq
 				s.disks[id] = d
 			}
 		}

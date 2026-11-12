@@ -25,12 +25,13 @@ type StoredVM struct {
 }
 
 type StoredNode struct {
-	ID       string         `json:"id"`
-	Hostname string         `json:"hostname"`
-	Provider string         `json:"provider"`
-	CPUs     int            `json:"cpus"`
-	MemoryMB int            `json:"memoryMB"`
-	Machine  *proto.Machine `json:"machine,omitempty"`
+	ID         string         `json:"id"`
+	Hostname   string         `json:"hostname"`
+	Provider   string         `json:"provider"`
+	CPUs       int            `json:"cpus"`
+	MemoryMB   int            `json:"memoryMB"`
+	Machine    *proto.Machine `json:"machine,omitempty"`
+	DesiredSeq uint64         `json:"desiredSeq,omitempty"` // persisted so a hub restart never reuses a seq
 	// Pending marks a node created on the hub that has never registered.
 	Pending bool `json:"pending,omitempty"`
 }

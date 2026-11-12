@@ -37,6 +37,13 @@ func createWithDisks(t *testing.T, r *Registry, name string, disks ...AttachRequ
 	return vm
 }
 
+func mustDelete(t *testing.T, r *Registry, id string) {
+	t.Helper()
+	if err := r.DeleteVM(id); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func diskOf(t *testing.T, r *Registry, id string) DiskView {
 	t.Helper()
 	for _, d := range r.Disks() {
@@ -152,25 +159,24 @@ func TestAttachMountPathRules(t *testing.T) {
 }
 
 func TestDeleteVMReleasesOnConfirm(t *testing.T) {
-	r, _, _ := newAttachRegistry(t)
+	r, n, _ := newAttachRegistry(t)
 	d := mustDisk(t, r, "data", 1)
 	markReady(r, d.ID)
 	vm := createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
-	if err := r.DeleteVM(vm.ID); err != nil {
-		t.Fatal(err)
-	}
+	mustDelete(t, r, vm.ID)
 	if v := diskOf(t, r, d.ID); v.State != "releasing" || v.ReleasingOn != "n1" || v.Attachment != nil {
 		t.Fatalf("view = %+v", v)
 	}
-	r.DisksInUse("n2", nil)
+	seq := n.last().Seq
+	r.DisksInUse("n2", nil, seq)
 	if v := diskOf(t, r, d.ID); v.State != "releasing" {
 		t.Fatalf("other node released: %+v", v)
 	}
-	r.DisksInUse("n1", []string{d.ID})
+	r.DisksInUse("n1", []string{d.ID}, seq)
 	if v := diskOf(t, r, d.ID); v.State != "releasing" {
 		t.Fatalf("released while in use: %+v", v)
 	}
-	r.DisksInUse("n1", nil)
+	r.DisksInUse("n1", nil, seq)
 	if v := diskOf(t, r, d.ID); v.State != "ready" || v.ReleasingOn != "" {
 		t.Fatalf("view = %+v", v)
 	}
@@ -181,14 +187,27 @@ func TestRegisterConfirmsRelease(t *testing.T) {
 	d := mustDisk(t, r, "data", 1)
 	vm := createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
 	r.NodeDisconnected("n1", n)
-	r.DeleteVM(vm.ID)
-	reg := proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, DisksInUse: []string{d.ID}}
-	r.NodeConnected(reg, &fakeNode{})
+	mustDelete(t, r, vm.ID)
+	// The node saw the attach but not the delete yet.
+	reg := proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, AppliedSeq: n.last().Seq}
+	n2 := &fakeNode{}
+	if err := r.NodeConnected(reg, n2); err != nil {
+		t.Fatal(err)
+	}
 	if v := diskOf(t, r, d.ID); v.ReleasingOn != "n1" {
-		t.Fatalf("view = %+v", v)
+		t.Fatalf("released before the delete reached the node: %+v", v)
+	}
+	reg.AppliedSeq, reg.DisksInUse = n2.last().Seq, []string{d.ID}
+	if err := r.NodeConnected(reg, &fakeNode{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := diskOf(t, r, d.ID); v.ReleasingOn != "n1" {
+		t.Fatalf("released while in use: %+v", v)
 	}
 	reg.DisksInUse = nil
-	r.NodeConnected(reg, &fakeNode{})
+	if err := r.NodeConnected(reg, &fakeNode{}); err != nil {
+		t.Fatal(err)
+	}
 	if v := diskOf(t, r, d.ID); v.ReleasingOn != "" {
 		t.Fatalf("view = %+v", v)
 	}
@@ -198,7 +217,7 @@ func TestReleasingSurvivesHubRestart(t *testing.T) {
 	r, _, _ := newAttachRegistry(t)
 	d := mustDisk(t, r, "data", 1)
 	vm := createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
-	r.DeleteVM(vm.ID)
+	mustDelete(t, r, vm.ID)
 	disks, err := LoadDiskStore(r.disks.path)
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +235,10 @@ func TestReleasingSurvivesHubRestart(t *testing.T) {
 func TestSetVMDisksNeedsRestartAllowed(t *testing.T) {
 	r, n, _ := newAttachRegistry(t)
 	d := mustDisk(t, r, "data", 1)
-	vm, _ := r.CreateVM(validReq())
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
 	attach := []AttachRequest{{DiskID: d.ID, MountPath: "/data"}}
 	if _, err := r.SetVMDisks(vm.ID, attach, false); !errors.Is(err, ErrConflict) {
 		t.Fatalf("running: err = %v", err)
@@ -253,7 +275,7 @@ func TestForceRelease(t *testing.T) {
 		t.Fatalf("not releasing: err = %v", err)
 	}
 	vm := createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
-	r.DeleteVM(vm.ID)
+	mustDelete(t, r, vm.ID)
 	if err := r.ForceRelease(d.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("online: err = %v", err)
 	}
@@ -326,10 +348,14 @@ func TestEndpointChangeBumpsVMs(t *testing.T) {
 	if g := gens(); g["with"] != 2 || g["without"] != 1 {
 		t.Fatalf("gens = %+v", g)
 	}
+	var urls []string
 	for _, dv := range n.last().Desired {
-		if len(dv.Spec.Attachments) == 1 && dv.Spec.Attachments[0].URL != "nbd://st2:10809/"+d.ID+".img" {
-			t.Fatalf("url = %s", dv.Spec.Attachments[0].URL)
+		for _, a := range dv.Spec.Attachments {
+			urls = append(urls, a.URL)
 		}
+	}
+	if len(urls) != 1 || urls[0] != "nbd://st2:10809/"+d.ID+".img" {
+		t.Fatalf("urls = %v", urls)
 	}
 	if err := r.StorageConnected(proto.StorageMessage{Type: "register"}, fs); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty endpoint: err = %v", err)
@@ -355,8 +381,81 @@ func TestCopyDiskWarnsWhenAttachedOrReleasing(t *testing.T) {
 	if _, warn, err := r.CopyDisk(d.ID, "c1"); err != nil || warn == "" {
 		t.Fatalf("attached: %q %v", warn, err)
 	}
-	r.DeleteVM(vm.ID)
+	mustDelete(t, r, vm.ID)
 	if _, warn, err := r.CopyDisk(d.ID, "c2"); err != nil || warn == "" {
 		t.Fatalf("releasing: %q %v", warn, err)
+	}
+}
+
+func TestStaleDisksMessageKeepsReleasing(t *testing.T) {
+	r, n, _ := newAttachRegistry(t)
+	d := mustDisk(t, r, "data", 1)
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetPower(vm.ID, proto.PowerStopped, proto.StopHard); err != nil {
+		t.Fatal(err)
+	}
+	beforeAttach := n.last().Seq
+	if _, err := r.SetVMDisks(vm.ID, []AttachRequest{{DiskID: d.ID, MountPath: "/data"}}, false); err != nil {
+		t.Fatal(err)
+	}
+	attachSeq := n.last().Seq
+	if _, err := r.SetVMDisks(vm.ID, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	detachSeq := n.last().Seq
+	if !(beforeAttach < attachSeq && attachSeq < detachSeq) {
+		t.Fatalf("seqs %d %d %d", beforeAttach, attachSeq, detachSeq)
+	}
+	// sent before the node applied the attach, processed after the detach
+	r.DisksInUse("n1", nil, beforeAttach)
+	r.DisksInUse("n1", nil, attachSeq)
+	if v := diskOf(t, r, d.ID); v.ReleasingOn != "n1" {
+		t.Fatalf("stale message released: %+v", v)
+	}
+	r.DisksInUse("n1", nil, detachSeq)
+	if v := diskOf(t, r, d.ID); v.ReleasingOn != "" {
+		t.Fatalf("view = %+v", v)
+	}
+}
+
+func TestDesiredSeqSurvivesHubRestart(t *testing.T) {
+	r, n, _ := newAttachRegistry(t)
+	createWithDisks(t, r, "dev")
+	last := n.last().Seq
+	if last == 0 {
+		t.Fatal("desired without seq")
+	}
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, Config{}))
+	n2 := &fakeNode{}
+	if err := r2.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n2); err != nil {
+		t.Fatal(err)
+	}
+	if got := n2.last().Seq; got <= last {
+		t.Fatalf("seq after restart = %d, before %d", got, last)
+	}
+}
+
+func TestAttachSizeFollowsReportedFile(t *testing.T) {
+	r, n, _ := newAttachRegistry(t)
+	d := mustDisk(t, r, "data", 1)
+	markReady(r, d.ID)
+	if _, err := r.GrowDisk(d.ID, 3, false); err != nil {
+		t.Fatal(err)
+	}
+	vm := createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
+	if a := r.VMs()[0].Attachments[0]; a.SizeGB != 1 {
+		t.Fatalf("attached size = %d before the file grew", a.SizeGB)
+	}
+	markReady(r, d.ID)
+	got := r.VMs()[0]
+	if got.ID != vm.ID || got.Attachments[0].SizeGB != 3 || got.generation != 2 || n.last().Desired[0].Spec.Attachments[0].SizeGB != 3 {
+		t.Fatalf("after report: gen %d %+v", got.generation, got.Attachments)
 	}
 }

@@ -127,6 +127,12 @@ type AttachRequest struct {
 type nodeEntry struct {
 	Node
 	conn NodeConn
+	seq  uint64 // of the last desired list sent
+}
+
+func (n *nodeEntry) stored() StoredNode {
+	return StoredNode{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, DesiredSeq: n.seq,
+		Pending: n.State == NodePending}
 }
 
 type Registry struct {
@@ -153,7 +159,8 @@ func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigSto
 		if n.Pending {
 			state = NodePending
 		}
-		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state}}
+		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state},
+			seq: n.DesiredSeq}
 	}
 	for _, s := range store.VMs() {
 		vm := &VM{VMSpec: s.Spec, NodeID: s.NodeID, Provider: s.Provider, State: proto.StateUnknown, Power: s.Power,
@@ -213,25 +220,29 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	if len(foreign) > 0 {
 		return nil, fmt.Errorf("reports VMs of other nodes: %s; was its nodeId or hostname changed?", strings.Join(foreign, ", "))
 	}
-	if err := r.store.PutNode(StoredNode{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs,
-		MemoryMB: reg.MemoryMB, Machine: reg.Machine}); err != nil {
-		// A pending node must not go online while the store still says pending; the node retries on reconnect.
-		if prev := r.nodes[reg.NodeID]; prev != nil && prev.State == NodePending {
-			return nil, fmt.Errorf("saving node: %w", err)
-		}
-		log.Printf("node %s: saving: %v", reg.NodeID, err)
-	}
-	r.nodes[reg.NodeID] = &nodeEntry{
+	prev := r.nodes[reg.NodeID]
+	n := &nodeEntry{
 		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, State: NodeOnline,
 			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
 		conn: c,
 	}
+	if prev != nil {
+		n.seq = prev.seq
+	}
+	if err := r.store.PutNode(n.stored()); err != nil {
+		// A pending node must not go online while the store still says pending; the node retries on reconnect.
+		if prev != nil && prev.State == NodePending {
+			return nil, fmt.Errorf("saving node: %w", err)
+		}
+		log.Printf("node %s: saving: %v", reg.NodeID, err)
+	}
+	r.nodes[reg.NodeID] = n
 	for _, st := range reg.VMs {
 		if vm, ok := r.vms[st.ID]; ok && vm.NodeID == reg.NodeID {
 			r.applyStatus(vm, st)
 		}
 	}
-	r.disksInUseLocked(reg.NodeID, reg.DisksInUse)
+	r.disksInUseLocked(reg.NodeID, reg.DisksInUse, reg.AppliedSeq)
 	if reg.ChassisKey == "" {
 		return nil, nil
 	}
@@ -417,12 +428,12 @@ func (r *Registry) DeleteVM(id string) error {
 		return ErrNotFound
 	}
 	diskIDs := attachedIDs(vm.Attachments)
-	if err := r.disks.SetReleasing(diskIDs, vm.NodeID); err != nil {
+	if err := r.disks.SetReleasing(diskIDs, vm.NodeID, r.nextSeqLocked(vm.NodeID)); err != nil {
 		r.mu.Unlock()
 		return err
 	}
 	if err := r.store.DeleteVM(id); err != nil {
-		if rerr := r.disks.SetReleasing(diskIDs, ""); rerr != nil {
+		if rerr := r.disks.SetReleasing(diskIDs, "", 0); rerr != nil {
 			log.Printf("vm %s: restoring disks: %v", id, rerr)
 		}
 		r.mu.Unlock()
@@ -543,13 +554,13 @@ func (r *Registry) SetVMDisks(id string, disks []AttachRequest, restartAllowed b
 			removed = append(removed, a.DiskID)
 		}
 	}
-	if err := r.disks.SetReleasing(removed, vm.NodeID); err != nil {
+	if err := r.disks.SetReleasing(removed, vm.NodeID, r.nextSeqLocked(vm.NodeID)); err != nil {
 		r.mu.Unlock()
 		return VM{}, err
 	}
 	out, err := r.bumpLocked(vm, func(vm *VM) { vm.Attachments = atts })
 	if err != nil {
-		if rerr := r.disks.SetReleasing(removed, ""); rerr != nil {
+		if rerr := r.disks.SetReleasing(removed, "", 0); rerr != nil {
 			log.Printf("vm %s: restoring disks: %v", id, rerr)
 		}
 		r.mu.Unlock()
@@ -572,6 +583,10 @@ func (r *Registry) attachmentsLocked(vm *VM, disks []AttachRequest) ([]proto.Dis
 			return nil, fmt.Errorf("%w: disk %q is still being released by node %q", ErrConflict, d.Name, d.ReleasingOn)
 		}
 		a := proto.DiskAttachment{DiskID: d.ID, MountPath: q.MountPath, SizeGB: d.SizeGB}
+		// The guest must not see more than the file holds; the grow path raises it once the file is reported grown.
+		if f, ok := r.storageFileLocked(d.ID); ok && f.SizeBytes < int64(d.SizeGB)<<30 {
+			a.SizeGB = max(1, int(f.SizeBytes>>30))
+		}
 		if owner, i := r.attachmentLocked(d.ID); owner != nil {
 			if owner != vm {
 				return nil, fmt.Errorf("%w: disk %q is attached to VM %q", ErrConflict, d.Name, owner.Name)
@@ -602,21 +617,30 @@ func attachedIDs(atts []proto.DiskAttachment) []string {
 	return ids
 }
 
-// DisksInUse ends the release of every disk releasing on nodeID that the node no longer uses.
-func (r *Registry) DisksInUse(nodeID string, ids []string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.disksInUseLocked(nodeID, ids)
+// nextSeqLocked is the seq of the next desired list sent to the node; r.mu must be held.
+func (r *Registry) nextSeqLocked(nodeID string) uint64 {
+	if n := r.nodes[nodeID]; n != nil {
+		return n.seq + 1
+	}
+	return 1
 }
 
-func (r *Registry) disksInUseLocked(nodeID string, ids []string) {
+// DisksInUse ends the release of every disk releasing on nodeID that the node no longer uses.
+// appliedSeq guards against a report from before the node saw the detach.
+func (r *Registry) DisksInUse(nodeID string, ids []string, appliedSeq uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disksInUseLocked(nodeID, ids, appliedSeq)
+}
+
+func (r *Registry) disksInUseLocked(nodeID string, ids []string, appliedSeq uint64) {
 	var released []string
 	for _, d := range r.disks.Disks() {
-		if d.ReleasingOn == nodeID && !slices.Contains(ids, d.ID) {
+		if d.ReleasingOn == nodeID && appliedSeq >= d.ReleasingSeq && !slices.Contains(ids, d.ID) {
 			released = append(released, d.ID)
 		}
 	}
-	if err := r.disks.SetReleasing(released, ""); err != nil {
+	if err := r.disks.SetReleasing(released, "", 0); err != nil {
 		log.Printf("node %s: releasing disks: %v", nodeID, err)
 	}
 }
@@ -635,7 +659,7 @@ func (r *Registry) ForceRelease(diskID string) error {
 	if n := r.nodes[d.ReleasingOn]; n != nil && n.State == NodeOnline {
 		return fmt.Errorf("%w: node %q is online and will confirm the release itself", ErrConflict, d.ReleasingOn)
 	}
-	return r.disks.SetReleasing([]string{diskID}, "")
+	return r.disks.SetReleasing([]string{diskID}, "", 0)
 }
 
 func (r *Registry) SetPower(id string, power proto.Power, mode proto.StopMode) (VM, error) {
@@ -687,9 +711,16 @@ func (r *Registry) push(nodeID string) {
 		r.mu.Unlock()
 		return
 	}
-	conn, desired := n.conn, r.desiredFor(nodeID)
+	n.seq++
+	if err := r.store.PutNode(n.stored()); err != nil {
+		n.seq--
+		r.mu.Unlock()
+		log.Printf("node %s: saving desired seq: %v", nodeID, err)
+		return
+	}
+	conn, m := n.conn, proto.Message{Type: "desired", Desired: r.desiredFor(nodeID), Seq: n.seq}
 	r.mu.Unlock()
-	if err := conn.Send(proto.Message{Type: "desired", Desired: desired}); err != nil {
+	if err := conn.Send(m); err != nil {
 		log.Printf("node %s: sending desired state: %v", nodeID, err)
 	}
 }

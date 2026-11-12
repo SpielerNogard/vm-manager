@@ -558,7 +558,9 @@ func TestAPIForceRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.DeleteVM(vm.ID)
+	if err := r.DeleteVM(vm.ID); err != nil {
+		t.Fatal(err)
+	}
 	url := srv.URL + "/api/disks/" + d.ID + "/release"
 	if s, out := doJSON(t, "POST", url, ""); s != http.StatusBadRequest {
 		t.Fatalf("no force: %d %s", s, out)

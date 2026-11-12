@@ -99,6 +99,7 @@ type Register struct {
 	Machine    *Machine        `json:"machine,omitempty"`
 	ChassisKey string          `json:"chassisKey,omitempty"`
 	DisksInUse []string        `json:"disksInUse,omitempty"`
+	AppliedSeq uint64          `json:"appliedSeq,omitempty"` // seq of the last desired list the node fully reconciled
 }
 
 // Underlay tells a node how to join the hub's WireGuard underlay and reach the OVN southbound DB.
@@ -127,6 +128,8 @@ type Message struct {
 	// Desired (type "desired") is the full VM list for the node; nil means no VMs.
 	Desired    []DesiredVM `json:"desired,omitempty"`
 	DisksInUse []string    `json:"disksInUse,omitempty"` // type "disks": every disk ID a local VM still uses
+	Seq        uint64      `json:"seq,omitempty"`        // type "desired": increases with every list sent to the node
+	AppliedSeq uint64      `json:"appliedSeq,omitempty"` // type "disks": seq of the last desired list the node fully reconciled
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }

@@ -30,13 +30,10 @@ type DiskView struct {
 // diskViewLocked requires r.mu.
 func (r *Registry) diskViewLocked(d StoredDisk) DiskView {
 	v := DiskView{ID: d.ID, Name: d.Name, SizeGB: d.SizeGB, State: "creating", ReleasingOn: d.ReleasingOn, CopyFrom: d.CopyFrom, CreatedAt: d.CreatedAt}
-	name := proto.StorageFileName(d.ID)
-	for _, f := range r.storageFiles {
-		if f.Name == name {
-			v.AllocatedBytes = f.AllocatedBytes
-			if f.SizeBytes >= int64(d.SizeGB)<<30 {
-				v.State = "ready"
-			}
+	if f, ok := r.storageFileLocked(d.ID); ok {
+		v.AllocatedBytes = f.AllocatedBytes
+		if f.SizeBytes >= int64(d.SizeGB)<<30 {
+			v.State = "ready"
 		}
 	}
 	if d.ReleasingOn != "" {
@@ -46,6 +43,16 @@ func (r *Registry) diskViewLocked(d StoredDisk) DiskView {
 		v.Attachment = &AttachmentView{VMID: vm.ID, VMName: vm.Name, NodeID: vm.NodeID, MountPath: vm.Attachments[i].MountPath}
 	}
 	return v
+}
+
+// storageFileLocked returns the agent's last report of the disk's file; r.mu must be held.
+func (r *Registry) storageFileLocked(diskID string) (proto.StorageFile, bool) {
+	name := proto.StorageFileName(diskID)
+	i := slices.IndexFunc(r.storageFiles, func(f proto.StorageFile) bool { return f.Name == name })
+	if i < 0 {
+		return proto.StorageFile{}, false
+	}
+	return r.storageFiles[i], true
 }
 
 func (r *Registry) Disks() []DiskView {
