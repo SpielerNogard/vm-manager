@@ -26,7 +26,7 @@ func TestGatewayStateListsPortsAndPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dev, err := r.net.AddDevice("laptop")
+	dev, err := r.net.AddDevice("laptop", false)
 	if err != nil {
 		t.Fatal(err)
 	}

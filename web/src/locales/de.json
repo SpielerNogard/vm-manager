@@ -184,7 +184,10 @@
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Das Gerät verliert sofort den Zugriff auf alle VMs.",
     "deleteConfirm": "Gerät löschen",
-    "qrFailed": "Der QR-Code konnte nicht erzeugt werden. Nutze den Konfigurationstext oder den Download."
+    "qrFailed": "Der QR-Code konnte nicht erzeugt werden. Nutze den Konfigurationstext oder den Download.",
+    "onHub": "Dieses Gerät ist der Hub-Rechner",
+    "onHubHint": "Die WireGuard-Config verbindet sich über 127.0.0.1, was die WireGuard-App auf dem Hub-Rechner braucht.",
+    "onHubBadge": "Hub-Rechner"
   },
   "networks": {
     "add": "Netzwerk hinzufügen",

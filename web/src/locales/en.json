@@ -184,7 +184,10 @@
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The device loses access to all VMs immediately.",
     "deleteConfirm": "Delete device",
-    "qrFailed": "The QR code could not be generated. Use the config text or the download."
+    "qrFailed": "The QR code could not be generated. Use the config text or the download.",
+    "onHub": "This device is the hub machine",
+    "onHubHint": "Its WireGuard config connects via 127.0.0.1, which the WireGuard app on the hub machine needs.",
+    "onHubBadge": "hub machine"
   },
   "networks": {
     "add": "Add network",
