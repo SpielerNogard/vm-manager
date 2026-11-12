@@ -58,7 +58,24 @@ To change a port, set it in `deploy/.env` and run `docker compose -f deploy/comp
 
 Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint; nodes need tcp `STORAGE_PORT` if you run the storage server. To run the hub without the stack, start `./bin/hub`; it creates `~/.vm-manager/hub.json` on first start (random token, empty client endpoint) and you finish setup in the GUI. Without the gateway container, VMs get no network.
 
-Add a node: on the **Nodes** page click **Add node** (name: lowercase letters, digits, hyphens). The node appears as `pending` and its detail page shows its `node.json` with copy and download. The hub address in it is editable and defaults to the client endpoint; use `localhost` on the hub's own Mac, or a LAN IP if nodes reach the hub differently. Save it as `~/.vm-manager/node.json` on the node and start it:
+Add a node: on the **Nodes** page click **Add node**, enter a name (lowercase letters, digits, hyphens) and the hypervisor: `vz` for an Apple Silicon Mac, `firecracker` for an amd64 Linux host with KVM (Debian 13 or Ubuntu 24.04). The node appears as `pending`; its detail page shows the install command. The hub address in it is editable and defaults to the client endpoint; use `localhost` on the hub's own Mac, or a LAN IP if nodes reach the hub differently. Run the command on the machine (on Linux as root or a user with sudo):
+
+```sh
+curl -fsSL http://<hub>:8080/node/install.sh | sh -s -- --hub http://<hub>:8080 --token <token> --name <name> --provider firecracker
+```
+
+The installer downloads the node of the hub's release (verified against `SHA256SUMS`), writes the config, prepares the host and starts the node as a service; it is `online` when the command finishes. Running it again updates the node and keeps its config, chassis key, images and VMs. Optional arguments: `--memory-mb N` (needed on hosts with 4 GB of RAM or less), `--underlay-endpoint host:port`, `--underlay-mtu N`, and `--version vX.Y.Z` (required if the hub itself is a `dev` build).
+
+| | Linux (`firecracker`) | macOS (`vz`) |
+|---|---|---|
+| Binary | `/usr/local/bin/vm-manager-node` | `~/.vm-manager/bin/node` |
+| Config | `/etc/vm-manager/node.json` | `~/.vm-manager/node.json` |
+| Data | `/var/lib/vm-manager/{vms,images}` | `~/.vm-manager/{vms,images}` |
+| Service | systemd `vm-manager-node` (`journalctl -u vm-manager-node`) | launchd agent `dev.vm-manager.node` (log `~/.vm-manager/node.log`) |
+
+On macOS, a hub in the LAN needs Local Network access for `node` (System Settings → Privacy & Security → Local Network); macOS asks on the first connection.
+
+The detail page also shows the plain `node.json` under **Manual setup**. Save it as `~/.vm-manager/node.json` on the node and start it:
 
 ```sh
 ./bin/node   # config defaults to ~/.vm-manager/node.json
@@ -81,7 +98,7 @@ curl -X POST http://<hub>:8080/api/vms -d '{
 
 ## Linux node (Firecracker)
 
-Linux nodes are amd64 hosts with KVM (Debian 13 or Ubuntu 24.04) using the `firecracker` provider. OVS and OVN run on the host itself, there is no helper VM. Until the one-line installer exists, set the host up by hand, as root:
+Linux nodes are amd64 hosts with KVM (Debian 13 or Ubuntu 24.04) using the `firecracker` provider. OVS and OVN run on the host itself, there is no helper VM. The installer does all of this. To set the host up by hand instead, as root:
 
 ```sh
 apt-get install -y openvswitch-switch ovn-host wireguard-tools nbd-client nftables
@@ -105,7 +122,9 @@ EOT
 systemctl enable --now systemd-networkd && networkctl reload
 echo net.ipv4.ip_forward=1 > /etc/sysctl.d/90-vmm.conf && sysctl --system
 mkdir -p /etc/nftables.d
-cat > /etc/nftables.d/vmm.nft <<'EOT'
+cat > /etc/nftables.d/vm-manager.nft <<'EOT'
+table ip vmm {}
+flush table ip vmm
 table ip vmm {
   chain post {
     type nat hook postrouting priority 100;
@@ -113,10 +132,11 @@ table ip vmm {
   }
 }
 EOT
-echo 'include "/etc/nftables.d/*.nft"' >> /etc/nftables.conf && systemctl enable --now nftables
+grep -qs 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf || echo 'include "/etc/nftables.d/*.nft"' >> /etc/nftables.conf
+systemctl enable nftables && nft -f /etc/nftables.d/vm-manager.nft   # restarting nftables would flush Docker's rules
 ```
 
-Copy `bin/node-linux-amd64` to `/usr/local/bin/node` and use a `node.json` with `"provider": "firecracker"` (see `node.firecracker.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if Firecracker, `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
+Copy `bin/node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` (see `node.firecracker.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if Firecracker, `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
 
 Differences to vz nodes: a VM's `eth0` gets a static address on `vmm0` instead of DHCP, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, ..., and a VM halted from inside the guest (`poweroff`) is stopped by the node because Firecracker has no ACPI power-off.
 
