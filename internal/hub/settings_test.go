@@ -13,7 +13,7 @@ func settingsServer(t *testing.T, c Config) (*httptest.Server, *ConfigStore, *Re
 	t.Helper()
 	cfg := newTestConfig(t, c)
 	nm := newTestNet(t)
-	r := NewRegistry(nm, newTestStore(t), cfg)
+	r := NewRegistry(nm, newTestStore(t), newTestDisks(t), cfg)
 	keys, err := LoadKeyStore(t.TempDir() + "/keys.json")
 	if err != nil {
 		t.Fatal(err)

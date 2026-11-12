@@ -115,3 +115,27 @@ func TestScanIgnoresPartial(t *testing.T) {
 		t.Fatalf("%+v", files)
 	}
 }
+
+func TestApplyRejectsPathIDs(t *testing.T) {
+	root := t.TempDir()
+	d := Dir{filepath.Join(root, "disks")}
+	os.MkdirAll(d.Path, 0o755)
+	os.WriteFile(filepath.Join(root, "victim.img"), nil, 0o644)
+	os.WriteFile(filepath.Join(d.Path, "ok.img"), []byte("data"), 0o644)
+	bad := []string{"", ".", "..", "../victim", "sub/x", `sub\x`}
+	var disks []proto.StorageDisk
+	for _, id := range bad {
+		disks = append(disks, proto.StorageDisk{ID: id, SizeBytes: 1 << 20})
+	}
+	disks = append(disks, proto.StorageDisk{ID: "copy", SizeBytes: 1 << 20, CopyFrom: "../victim"}, proto.StorageDisk{ID: "good", SizeBytes: 1 << 20})
+	if err := d.Apply(disks, append(bad, "ok/../../victim")); err == nil {
+		t.Fatal("no error")
+	}
+	if _, err := os.Stat(filepath.Join(root, "victim.img")); err != nil {
+		t.Fatalf("victim: %v", err)
+	}
+	files, _ := d.Scan()
+	if len(files) != 2 || files[0].Name != "good.img" || files[1].Name != "ok.img" {
+		t.Fatalf("%+v", files)
+	}
+}

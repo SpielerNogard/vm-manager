@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 
 	"vm-manager/internal/proto"
@@ -27,16 +28,29 @@ func (d Dir) Apply(disks []proto.StorageDisk, deleted []string) error {
 	}
 	var errs []error
 	for _, id := range deleted {
+		if !plainName(id) {
+			errs = append(errs, fmt.Errorf("delete %q: not a plain file name", id))
+			continue
+		}
 		if err := os.Remove(d.file(id)); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, fmt.Errorf("delete %s: %w", id, err))
 		}
 	}
 	for _, disk := range disks {
+		if !plainName(disk.ID) || (disk.CopyFrom != "" && !plainName(disk.CopyFrom)) {
+			errs = append(errs, fmt.Errorf("disk %q (copy from %q): not a plain file name", disk.ID, disk.CopyFrom))
+			continue
+		}
 		if err := d.ensure(disk); err != nil {
 			errs = append(errs, fmt.Errorf("disk %s: %w", disk.ID, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// plainName rejects IDs that would resolve outside Path.
+func plainName(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, `/\`)
 }
 
 func (d Dir) file(id string) string { return filepath.Join(d.Path, proto.StorageFileName(id)) }
@@ -74,6 +88,10 @@ func (d Dir) ensure(disk proto.StorageDisk) error {
 	}
 	if err == nil {
 		err = dst.Truncate(disk.SizeBytes)
+	}
+	// Without it a crash after the rename could leave a file with the copied data missing.
+	if err == nil {
+		err = dst.Sync()
 	}
 	if cerr := dst.Close(); err == nil {
 		err = cerr

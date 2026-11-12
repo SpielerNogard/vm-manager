@@ -61,6 +61,15 @@ func newTestNet(t *testing.T) *NetModel {
 	return m
 }
 
+func newTestDisks(t *testing.T) *DiskStore {
+	t.Helper()
+	s, err := LoadDiskStore(filepath.Join(t.TempDir(), "disks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func newTestStore(t *testing.T) *VMStore {
 	t.Helper()
 	s, err := LoadVMStore(filepath.Join(t.TempDir(), "vms.json"))
@@ -74,7 +83,7 @@ func newTestRegistry(t *testing.T) (*Registry, *fakeNode) {
 	t.Helper()
 	var cfg Config
 	cfg.Underlay.Port = 51820
-	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, cfg))
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, cfg))
 	n := &fakeNode{}
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n)
 	return r, n
@@ -196,7 +205,7 @@ func TestHubRestartRestoresVMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2 := NewRegistry(net, store, newTestConfig(t, Config{}))
+	r2 := NewRegistry(net, store, newTestDisks(t), newTestConfig(t, Config{}))
 	byID := func() map[string]VM {
 		out := map[string]VM{}
 		for _, v := range r2.VMs() {
@@ -232,7 +241,7 @@ func TestCreateOnStoredOfflineNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2 := NewRegistry(newTestNet(t), store, newTestConfig(t, Config{}))
+	r2 := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, Config{}))
 	if _, err := r2.CreateVM(validReq()); err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +716,7 @@ func TestNewRegistryReleasesOrphanNICs(t *testing.T) {
 	if _, err := nm.AllocNICs("ghost", "x", nil); err != nil {
 		t.Fatal(err)
 	}
-	r := NewRegistry(nm, newTestStore(t), newTestConfig(t, Config{}))
+	r := NewRegistry(nm, newTestStore(t), newTestDisks(t), newTestConfig(t, Config{}))
 	if len(nm.NICs("ghost")) != 0 {
 		t.Fatalf("NICs = %+v", nm.NICs("ghost"))
 	}
@@ -751,7 +760,7 @@ func TestCreateNodePending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2 := NewRegistry(newTestNet(t), store, newTestConfig(t, Config{}))
+	r2 := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, Config{}))
 	if n, _ := nodeByID(r2, "mac-x"); n.State != "pending" {
 		t.Fatalf("after restart: %+v", n)
 	}
@@ -776,7 +785,7 @@ func TestPendingNodeGoesOnline(t *testing.T) {
 		t.Fatalf("node = %+v", n)
 	}
 	store, _ := LoadVMStore(r.store.path)
-	if n, _ := nodeByID(NewRegistry(newTestNet(t), store, newTestConfig(t, Config{})), "mac-x"); n.State != "offline" {
+	if n, _ := nodeByID(NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, Config{})), "mac-x"); n.State != "offline" {
 		t.Fatalf("after restart: %+v", n)
 	}
 }
@@ -826,7 +835,7 @@ func TestDeleteNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, _ := LoadVMStore(r.store.path)
-	if nodes := NewRegistry(newTestNet(t), store, newTestConfig(t, Config{})).Nodes(); len(nodes) != 0 {
+	if nodes := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, Config{})).Nodes(); len(nodes) != 0 {
 		t.Fatalf("after restart: %+v", nodes)
 	}
 }
@@ -845,7 +854,7 @@ func TestNodeConfig(t *testing.T) {
 	var c Config
 	c.Token, c.Hub.Port, c.Clients.Endpoint = "tok-1234567890abcdef", 8080, "100.114.108.108"
 	cfg := newTestConfig(t, c)
-	r := NewRegistry(newTestNet(t), newTestStore(t), cfg)
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), cfg)
 	r.CreateNode("mac-x")
 	parse := func(host string) map[string]any {
 		t.Helper()
@@ -883,7 +892,7 @@ func TestNodeConfig(t *testing.T) {
 }
 
 func TestNodeConfigWithoutEndpointConflicts(t *testing.T) {
-	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, Config{Token: "t"}))
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, Config{Token: "t"}))
 	r.CreateNode("mac-x")
 	if _, err := r.NodeConfig("mac-x", ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v", err)
@@ -905,7 +914,7 @@ func TestDeleteNodeStoreFailureKeepsNodeAndChassis(t *testing.T) {
 }
 
 func TestPendingNodeStoreFailureRefusesRegistration(t *testing.T) {
-	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, Config{}))
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, Config{}))
 	r.CreateNode("mac-x")
 	good := r.store.path
 	r.store.path = brokenStorePath(t)
@@ -944,7 +953,7 @@ func TestNewRegistryReleasesOrphanChassis(t *testing.T) {
 	if err := store.PutNode(StoredNode{ID: "kept"}); err != nil {
 		t.Fatal(err)
 	}
-	NewRegistry(nm, store, newTestConfig(t, Config{}))
+	NewRegistry(nm, store, newTestDisks(t), newTestConfig(t, Config{}))
 	if ch := nm.Chassis(); len(ch) != 1 || ch[0].NodeID != "kept" {
 		t.Errorf("chassis = %+v", ch)
 	}

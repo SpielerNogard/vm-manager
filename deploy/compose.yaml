@@ -35,7 +35,22 @@ services:
     volumes:
       - data:/data
       - ${HUB_SSH_DIR:-~/.ssh}:/host-ssh:ro
+  storage:
+    build:
+      context: ..
+      dockerfile: deploy/storage.Dockerfile
+    profiles: [storage]
+    restart: unless-stopped
+    ports:
+      - "${STORAGE_PORT:-10809}:10809/tcp"
+    environment:
+      HUB_TOKEN: ${HUB_TOKEN:-}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
+    command: ["-hub", "ws://netns:8080/api/storage/connect"]
+    volumes:
+      - disks:/disks
 volumes:
   ovn:
   ovs:
   data:
+  disks:

@@ -206,7 +206,11 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := hub.NewRegistry(net, store, hcfg)
+	disks, err := hub.LoadDiskStore(filepath.Join(t.TempDir(), "disks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := hub.NewRegistry(net, store, disks, hcfg)
 	srv := httptest.NewServer(hub.NodeHandler(reg, func() string { return hcfg.Get().Token }))
 
 	p := newFakeProvider()

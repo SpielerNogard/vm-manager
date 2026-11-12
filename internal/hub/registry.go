@@ -128,13 +128,19 @@ type Registry struct {
 	vms   map[string]*VM
 	net   *NetModel
 	store *VMStore
+	disks *DiskStore
 	cfg   *ConfigStore
 	// sendMu (per node, kept across reconnects and node deletion so ordering survives re-registration) orders desired lists so a node never receives an older one after a newer one.
 	sendMu map[string]*sync.Mutex
+
+	storage       StorageConn
+	storageFiles  []proto.StorageFile
+	storageSendMu sync.Mutex
 }
 
-func NewRegistry(net *NetModel, store *VMStore, cfg *ConfigStore) *Registry {
-	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg, sendMu: map[string]*sync.Mutex{}}
+func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigStore) *Registry {
+	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, disks: disks, cfg: cfg,
+		sendMu: map[string]*sync.Mutex{}}
 	for _, n := range store.Nodes() {
 		state := NodeOffline
 		if n.Pending {

@@ -30,7 +30,7 @@ func apiServerWith(t *testing.T, c Config) (*httptest.Server, *Registry, *NetMod
 	t.Helper()
 	cfg := newTestConfig(t, c)
 	nm := newTestNet(t)
-	r := NewRegistry(nm, newTestStore(t), cfg)
+	r := NewRegistry(nm, newTestStore(t), newTestDisks(t), cfg)
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})
 	keysPath := filepath.Join(t.TempDir(), "keys.json")
 	seed := `[{"id":"k1","name":"test","publicKey":"` + testKey + `","type":"ssh-ed25519","fingerprint":"` + testFingerprint + `"}]`

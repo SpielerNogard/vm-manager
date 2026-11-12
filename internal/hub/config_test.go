@@ -174,7 +174,7 @@ func TestConfigStoreUpdateAtomic(t *testing.T) {
 
 func TestLiveTokenCheck(t *testing.T) {
 	cfg := newTestConfig(t, Config{Token: "old"})
-	r := NewRegistry(newTestNet(t), newTestStore(t), cfg)
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), cfg)
 	srv := httptest.NewServer(NodeHandler(r, func() string { return cfg.Get().Token }))
 	t.Cleanup(srv.Close)
 
