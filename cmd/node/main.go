@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"vm-manager/internal/node"
+	"vm-manager/internal/version"
 )
 
 func main() {
@@ -47,7 +48,7 @@ func main() {
 		CPUs: cfg.Capacity.CPUs, MemoryMB: cfg.Capacity.MemoryMB, Provider: provider,
 		Config: public, Machine: node.MachineInfo(),
 	}
-	log.Printf("node %s: provider %s, %d CPUs, %d MB", cfg.NodeID, provider.Name(), cfg.Capacity.CPUs, cfg.Capacity.MemoryMB)
+	log.Printf("node %s (%s): provider %s, %d CPUs, %d MB", cfg.NodeID, version.Version, provider.Name(), cfg.Capacity.CPUs, cfg.Capacity.MemoryMB)
 	if err := a.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}

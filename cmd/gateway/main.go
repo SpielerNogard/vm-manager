@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"vm-manager/internal/hub"
+	"vm-manager/internal/version"
 )
 
 func main() {
@@ -24,6 +26,7 @@ func main() {
 	tokenFile := flag.String("token-file", "/data/hub.json", "hub config holding the API token")
 	nbDB := flag.String("nb", "unix:/var/run/ovn/ovnnb_db.sock", "OVN NB database")
 	flag.Parse()
+	log.Printf("%s %s", filepath.Base(os.Args[0]), version.Version)
 
 	token := waitForToken(*tokenFile)
 
