@@ -64,7 +64,7 @@ Add a node: on the **Nodes** page click **Add node**, enter a name (lowercase le
 curl -fsSL http://<hub>:8080/node/install.sh | sh -s -- --hub http://<hub>:8080 --token <token> --name <name> --provider firecracker
 ```
 
-The installer downloads the node of the hub's release (verified against `SHA256SUMS`), writes the config, prepares the host and starts the node as a service; it is `online` when the command finishes. Running it again updates the node and keeps its config, chassis key, images and VMs. Optional arguments: `--memory-mb N` (needed on hosts with 4 GB of RAM or less), `--underlay-endpoint host:port`, `--underlay-mtu N`, and `--version vX.Y.Z` (required if the hub itself is a `dev` build).
+The installer downloads the node of the hub's release (verified against `SHA256SUMS`), writes the config, prepares the host and starts the node as a service; it is `online` when the command finishes. Running it again updates the node and keeps its config, chassis key, images and VMs; the VMs restart with the node. Optional arguments: `--memory-mb N` (needed on hosts with 4 GB of RAM or less), `--underlay-endpoint host:port`, `--underlay-mtu N`, and `--version vX.Y.Z` (required if the hub itself is a `dev` build).
 
 | | Linux (`firecracker`) | macOS (`vz`) |
 |---|---|---|

@@ -39,7 +39,19 @@ while [ $# -gt 0 ]; do
 	*) usage ;;
 	esac
 done
-[ -n "$HUB" ] && [ -n "$TOKEN" ] && [ -n "$NAME" ] && [ -n "$PROVIDER" ] || usage
+missing=''
+[ -n "$HUB" ] || missing="$missing --hub"
+[ -n "$TOKEN" ] || missing="$missing --token"
+[ -n "$NAME" ] || missing="$missing --name"
+[ -n "$PROVIDER" ] || missing="$missing --provider"
+if [ -n "$missing" ]; then
+	for m in $missing; do echo "install.sh: $m is required" >&2; done
+	usage
+fi
+case $HUB in
+http://*:[0-9]* | https://*:[0-9]*) ;;
+*) die "--hub must be http://HOST:PORT, got '$HUB'" ;;
+esac
 
 OS=$(uname -s)
 ARCH=$(uname -m)
@@ -52,7 +64,7 @@ Darwin/*/vz) die "vz nodes need an Apple Silicon Mac, this one is $ARCH" ;;
 esac
 
 if [ -z "$VERSION" ]; then
-	answer=$(curl -fsS "$HUB/api/version" 2>/dev/null) || die "cannot reach the hub at $HUB"
+	answer=$(curl -fsS --connect-timeout 10 "$HUB/api/version" 2>/dev/null) || die "cannot reach the hub at $HUB"
 	VERSION=$(printf '%s' "$answer" | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p')
 	[ -n "$VERSION" ] || die "unexpected answer from $HUB/api/version"
 	[ "$VERSION" != dev ] || die "the hub at $HUB is a development build; pass --version vX.Y.Z to install a released node"
@@ -94,6 +106,14 @@ wait_connected() {
 		sleep 1
 	done
 	return 1
+}
+
+node_journal() {
+	if [ -n "$cursor" ]; then
+		$SUDO journalctl -u vm-manager-node --after-cursor "$cursor" "$@" 2>/dev/null
+	else
+		$SUDO journalctl -u vm-manager-node "$@" 2>/dev/null
+	fi
 }
 
 install_linux() {
@@ -162,20 +182,21 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-	since=$(date '+%Y-%m-%d %H:%M:%S')
+	# Only log lines after this cursor belong to the restarted node.
+	cursor=$($SUDO journalctl -u vm-manager-node -n 0 --show-cursor 2>/dev/null | sed -n 's/^-- cursor: //p')
 	$SUDO systemctl daemon-reload
 	$SUDO systemctl enable vm-manager-node >/dev/null 2>&1
 	$SUDO systemctl restart vm-manager-node
 	i=0
 	while [ $i -lt 30 ]; do
-		if $SUDO journalctl -u vm-manager-node --since "$since" -o cat 2>/dev/null | grep -q "connected to hub"; then return 0; fi
+		if node_journal -o cat | grep -q "connected to hub"; then return 0; fi
 		i=$((i + 1))
 		sleep 1
 	done
-	logs=$($SUDO journalctl -u vm-manager-node --since "$since" -n 20 -o cat 2>/dev/null || true)
+	logs=$(node_journal -n 20 -o cat || true)
 	echo "$logs" >&2
-	case $logs in *capacity.memoryMB*) die "the node needs --memory-mb on this host (it has 4 GB of RAM or less)" ;; esac
-	die "the node did not connect to $HUB within 30 s (journalctl -u vm-manager-node)"
+	case $logs in *capacity.memoryMB*) die "the node needs --memory-mb on this host (it has 4 GB of RAM or less); the service keeps retrying until you re-run the installer with it" ;; esac
+	die "the node did not connect to $HUB within 30 s (journalctl -u vm-manager-node); the service keeps retrying, re-run the installer after fixing the cause"
 }
 
 install_macos() {

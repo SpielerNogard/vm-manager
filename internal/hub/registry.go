@@ -338,7 +338,6 @@ func (r *Registry) DeleteNode(id string) error {
 	return releaseErr
 }
 
-// NodeConfig renders a node.json for the node; host is how the node reaches the hub and defaults to clients.endpoint.
 // nodeHub resolves the node's provider and the hub address it should use; host defaults to the client endpoint.
 func (r *Registry) nodeHub(id, host string) (provider, hubAddr string, c Config, err error) {
 	r.mu.Lock()
@@ -384,6 +383,7 @@ func shellWord(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// NodeConfig renders a node.json for the node; host is how the node reaches the hub and defaults to clients.endpoint.
 func (r *Registry) NodeConfig(id, host string) ([]byte, error) {
 	provider, hub, c, err := r.nodeHub(id, host)
 	if err != nil {

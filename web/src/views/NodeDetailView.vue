@@ -55,21 +55,16 @@ async function loadConfig() {
   const h = host.value
   fetchedHost = h
   const current = () => id === route.params.id && h === host.value
-  try {
-    const [json, cmd] = await Promise.all([
-      api.nodeConfig(id, h.trim() || undefined),
-      api.installCommand(id, h.trim() || undefined),
-    ])
-    if (!current()) return
-    nodeJson.value = json
-    installCmd.value = cmd
-    configError.value = ''
-  } catch (e) {
-    if (!current()) return
-    nodeJson.value = ''
-    installCmd.value = ''
-    configError.value = (e as Error).message
-  }
+  // Settled separately: a node without a hypervisor has no install command but still has a node.json.
+  const [json, cmd] = await Promise.allSettled([
+    api.nodeConfig(id, h.trim() || undefined),
+    api.installCommand(id, h.trim() || undefined),
+  ])
+  if (!current()) return
+  nodeJson.value = json.status === 'fulfilled' ? json.value : ''
+  installCmd.value = cmd.status === 'fulfilled' ? cmd.value : ''
+  const failed = [cmd, json].find((r) => r.status === 'rejected')
+  configError.value = failed ? (failed.reason as Error).message : ''
 }
 
 watch(

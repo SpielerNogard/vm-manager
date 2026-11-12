@@ -171,7 +171,7 @@
     "deleteBodyOnline": "Die Node wird vom Hub entfernt und getrennt; läuft sie weiter, verbindet sie sich neu und taucht wieder auf.",
     "deleteConfirm": "Node löschen",
     "install": "Installation",
-    "installHint": "Auf der Maschine ausführen (unter Linux als Benutzer mit sudo). Erneutes Ausführen aktualisiert den Node und behält seine VMs.",
+    "installHint": "Auf der Maschine ausführen (unter Linux als Benutzer mit sudo). Erneutes Ausführen aktualisiert den Node und behält seine VMs; sie starten mit dem Node neu.",
     "manualConfig": "Manuelle Einrichtung (node.json)",
     "providerMismatch": "Hypervisor weicht von dem beim Anlegen gewählten ab: {error}."
   },

@@ -171,7 +171,7 @@
     "deleteBodyOnline": "The node is removed from the hub and disconnected; if it keeps running it reconnects and appears again.",
     "deleteConfirm": "Delete node",
     "install": "Install",
-    "installHint": "Run this on the machine (on Linux as a user with sudo). Running it again updates the node and keeps its VMs.",
+    "installHint": "Run this on the machine (on Linux as a user with sudo). Running it again updates the node and keeps its VMs; they restart with the node.",
     "manualConfig": "Manual setup (node.json)",
     "providerMismatch": "Hypervisor differs from the one chosen when adding the node: {error}."
   },

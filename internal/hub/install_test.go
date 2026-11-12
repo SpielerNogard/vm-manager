@@ -20,7 +20,7 @@ func runInstaller(t *testing.T, osName, arch, versionJSON string, args ...string
 	stubs := map[string]string{
 		"uname": `case "$1" in -s) echo "$STUB_OS" ;; -m) echo "$STUB_ARCH" ;; esac`,
 		"curl": `for a; do last=$a; done
-case "$last" in */api/version) printf '%s' "$STUB_VERSION" ;; *) exit 22 ;; esac`,
+case "$last" in */api/version) [ -n "$STUB_VERSION" ] || exit 7; printf '%s' "$STUB_VERSION" ;; *) exit 22 ;; esac`,
 	}
 	for _, name := range []string{"sudo", "apt-get", "systemctl", "launchctl", "modprobe", "nft", "networkctl", "install"} {
 		stubs[name] = ""
@@ -51,12 +51,13 @@ func TestInstallScriptRejects(t *testing.T) {
 		code                    int
 		want                    string
 	}{
-		{"missing token", "Linux", "x86_64", `{"version":"v1.0.0"}`, []string{"--hub", "http://h:1", "--name", "n", "--provider", "firecracker"}, 2, "usage"},
+		{"missing token", "Linux", "x86_64", `{"version":"v1.0.0"}`, []string{"--hub", "http://h:1", "--name", "n", "--provider", "firecracker"}, 2, "--token is required"},
+		{"hub without port", "Linux", "x86_64", `{"version":"v1.0.0"}`, []string{"--hub", "http://hub.lan", "--token", stubToken, "--name", "n1", "--provider", "firecracker"}, 1, "http://HOST:PORT"},
 		{"vz on linux", "Linux", "x86_64", `{"version":"v1.0.0"}`, append(full, "--provider", "vz"), 1, "not supported on Linux"},
 		{"arm64 linux", "Linux", "aarch64", `{"version":"v1.0.0"}`, append(full, "--provider", "firecracker"), 1, "amd64"},
 		{"firecracker on mac", "Darwin", "arm64", `{"version":"v1.0.0"}`, append(full, "--provider", "firecracker"), 1, "not supported on Darwin"},
 		{"dev hub", "Linux", "x86_64", `{"version":"dev"}`, append(full, "--provider", "firecracker"), 1, "--version"},
-		{"unreachable hub", "Linux", "x86_64", "", append(full, "--provider", "firecracker"), 1, "hub.lan"},
+		{"unreachable hub", "Linux", "x86_64", "", append(full, "--provider", "firecracker"), 1, "cannot reach the hub at http://hub.lan:8080"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,5 +94,12 @@ func TestInstallScriptHostSafety(t *testing.T) {
 	// Docker sets the FORWARD policy to DROP; VM traffic must be allowed in DOCKER-USER.
 	if !strings.Contains(script, "DOCKER-USER") {
 		t.Error("no DOCKER-USER rule for vmm0")
+	}
+	if !strings.Contains(script, "--connect-timeout") {
+		t.Error("hub requests have no connect timeout")
+	}
+	// --since has 1 s resolution; the previous instance's log must not count as this start's connect.
+	if !strings.Contains(script, "--after-cursor") {
+		t.Error("node start is not tracked by journal cursor")
 	}
 }
