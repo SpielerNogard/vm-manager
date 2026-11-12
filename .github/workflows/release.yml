@@ -14,7 +14,7 @@ concurrency:
 jobs:
   bump:
     # The bump commit is pushed with GITHUB_TOKEN and triggers nothing; this guards manual re-runs on it.
-    if: ${{ !startsWith(github.event.head_commit.message, 'bump:') }}
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'bump:') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -33,13 +33,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           set +e
-          uvx --from commitizen==4.19.3 cz bump --yes --changelog-to-stdout > notes.md
+          uvx --from commitizen==4.19.3 cz bump --yes --changelog-to-stdout --git-output-to-stderr > notes.md
           rc=$?
           set -e
           # 21 = NO_COMMITS_TO_BUMP: nothing release-worthy since the last tag.
           if [ "$rc" = 21 ]; then echo "nothing to release"; exit 0; fi
           [ "$rc" = 0 ] || exit "$rc"
-          git push --follow-tags
+          # Atomic: a rejected branch push (main moved meanwhile) must not leave the tag behind.
+          git push --atomic --follow-tags
           echo "version=$(uvx --from commitizen==4.19.3 cz version --project)" >> "$GITHUB_OUTPUT"
       - if: steps.bump.outputs.version != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
