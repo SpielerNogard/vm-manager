@@ -92,6 +92,64 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("GET /api/disks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.Disks()) })
+	mux.HandleFunc("POST /api/disks", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			Name   string `json:"name"`
+			SizeGB int    `json:"sizeGB"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		d, err := r.CreateDisk(q.Name, q.SizeGB)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, d)
+	})
+	mux.HandleFunc("POST /api/disks/{id}/copy", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		d, warning, err := r.CopyDisk(req.PathValue("id"), q.Name)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, struct {
+			Disk    DiskView `json:"disk"`
+			Warning string   `json:"warning,omitempty"`
+		}{d, warning})
+	})
+	mux.HandleFunc("PATCH /api/disks/{id}", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			SizeGB int `json:"sizeGB"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		d, err := r.GrowDisk(req.PathValue("id"), q.SizeGB, req.URL.Query().Get("restartAllowed") == "true")
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, d)
+	})
+	mux.HandleFunc("DELETE /api/disks/{id}", func(w http.ResponseWriter, req *http.Request) {
+		if err := r.DeleteDisk(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/storage", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.Storage()) })
 	mux.HandleFunc("GET /api/devices", func(w http.ResponseWriter, _ *http.Request) {
 		out := []deviceView{}
 		for _, d := range net.Devices() {

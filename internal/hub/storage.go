@@ -96,18 +96,31 @@ func (r *Registry) StorageDisconnected(c StorageConn) {
 // StorageReport records the agent's files, ends finished copies and drops tombstones whose file is gone.
 func (r *Registry) StorageReport(files []proto.StorageFile) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	repush := r.storageReportLocked(files)
+	r.mu.Unlock()
+	if repush {
+		r.pushStorage()
+	}
+}
+
+// storageReportLocked reports whether a copy's source has appeared, which the agent skipped earlier.
+func (r *Registry) storageReportLocked(files []proto.StorageFile) bool {
 	r.storageFiles = files
 	present := map[string]bool{}
 	for _, f := range files {
 		present[f.Name] = true
 	}
+	repush := false
 	for _, d := range r.disks.Disks() {
-		if d.CopyFrom != "" && present[proto.StorageFileName(d.ID)] {
+		switch {
+		case d.CopyFrom == "":
+		case present[proto.StorageFileName(d.ID)]:
 			d.CopyFrom = ""
 			if err := r.disks.Put(d); err != nil {
 				log.Printf("disk %s: clearing copy source: %v", d.ID, err)
 			}
+		case present[proto.StorageFileName(d.CopyFrom)]:
+			repush = true
 		}
 	}
 	for _, id := range r.disks.Tombstones() {
@@ -117,6 +130,7 @@ func (r *Registry) StorageReport(files []proto.StorageFile) {
 			}
 		}
 	}
+	return repush
 }
 
 // pushStorage sends the agent every disk and tombstone if it is online.
