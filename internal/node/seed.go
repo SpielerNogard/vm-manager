@@ -14,8 +14,8 @@ import (
 const SeedISO = "seed.iso"
 
 // GuestSeedFiles is the cloud-init NoCloud seed of a guest VM.
-func GuestSeedFiles(f VMFile) map[string][]byte {
-	userData, metaData, networkConfig := CloudInit(f)
+func GuestSeedFiles(f VMFile, primary PrimaryNet) map[string][]byte {
+	userData, metaData, networkConfig := CloudInit(f, primary)
 	return map[string][]byte{
 		"user-data": []byte(userData), "meta-data": []byte(metaData),
 		"network-config": []byte(networkConfig), "vmm-disks.sh": []byte(DiskScript(f)),

@@ -116,7 +116,10 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func CloudInit(f VMFile) (userData, metaData, networkConfig string) {
+// PrimaryNet is a static address for the primary NIC (CIDR); the zero value means DHCP.
+type PrimaryNet struct{ Address, Gateway string }
+
+func CloudInit(f VMFile, primary PrimaryNet) (userData, metaData, networkConfig string) {
 	var keys strings.Builder
 	for _, k := range f.Spec.SSHPublicKeys {
 		j, _ := json.Marshal(k) // JSON string is valid YAML and escapes anything odd in the key
@@ -141,14 +144,16 @@ updates:
 `, f.Spec.Name, keys.String())
 	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
 	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
+	addressing := "    dhcp4: true\n    dhcp-identifier: mac\n"
+	if primary.Address != "" {
+		addressing = fmt.Sprintf("    addresses: [%q]\n    routes: [{to: default, via: %s}]\n    nameservers: {addresses: [1.1.1.1, 9.9.9.9]}\n", primary.Address, primary.Gateway)
+	}
 	networkConfig = fmt.Sprintf(`version: 2
 ethernets:
   primary:
     match:
       macaddress: %q
-    dhcp4: true
-    dhcp-identifier: mac
-`, f.MAC)
+%s`, f.MAC, addressing)
 	netIdx := 0
 	for _, n := range f.Spec.NICs {
 		name, dns := "mgmt0", "    nameservers:\n      addresses: [10.201.0.1]\n      search: [\"~internal\"]\n"

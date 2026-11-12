@@ -71,11 +71,11 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CloneResize(base, filepath.Join(dir, "root.img"), f.Spec.DiskGB); err != nil {
 		return err
 	}
-	return node.WriteSeedISO(dir, node.GuestSeedFiles(f))
+	return node.WriteSeedISO(dir, node.GuestSeedFiles(f, node.PrimaryNet{}))
 }
 
 func (p *Provider) Reseed(ctx context.Context, f node.VMFile, dir string) error {
-	return node.WriteSeedISO(dir, node.GuestSeedFiles(f))
+	return node.WriteSeedISO(dir, node.GuestSeedFiles(f, node.PrimaryNet{}))
 }
 
 func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
@@ -101,7 +101,7 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		nics = append(nics, gn)
 		nicCfgs = append(nicCfgs, gn.cfg)
 	}
-	if err := node.WriteSeedISO(dir, node.GuestSeedFiles(f)); err != nil {
+	if err := node.WriteSeedISO(dir, node.GuestSeedFiles(f, node.PrimaryNet{})); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
 	}
 	console := filepath.Join(dir, node.ConsoleLog)
