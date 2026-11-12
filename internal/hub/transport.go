@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"log"
@@ -15,9 +16,12 @@ import (
 )
 
 type yamuxNode struct {
-	mu  sync.Mutex
-	enc *json.Encoder
+	mu   sync.Mutex
+	enc  *json.Encoder
+	sess *yamux.Session
 }
+
+func (n *yamuxNode) Close() error { return n.sess.Close() }
 
 func (n *yamuxNode) Send(m proto.Message) error {
 	n.mu.Lock()
@@ -26,9 +30,9 @@ func (n *yamuxNode) Send(m proto.Message) error {
 }
 
 // NodeHandler accepts node connections: WebSocket → yamux, first node-opened stream is the control stream.
-func NodeHandler(r *Registry, token string) http.Handler {
+func NodeHandler(r *Registry, token func() string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Authorization") != "Bearer "+token {
+		if subtle.ConstantTimeCompare([]byte(req.Header.Get("Authorization")), []byte("Bearer "+token())) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -53,7 +57,7 @@ func NodeHandler(r *Registry, token string) http.Handler {
 			log.Printf("node %s: expected register message", req.RemoteAddr)
 			return
 		}
-		node := &yamuxNode{enc: proto.NewEncoder(ctrl)}
+		node := &yamuxNode{enc: proto.NewEncoder(ctrl), sess: sess}
 		id := m.Register.NodeID
 		if err := r.NodeConnected(*m.Register, node); err != nil {
 			log.Printf("node %s refused: %v", id, err)

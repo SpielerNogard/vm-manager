@@ -5,8 +5,6 @@ for mod in openvswitch wireguard; do
   [ -d /sys/module/$mod ] || { echo "the Docker host kernel lacks the $mod module" >&2; exit 1; }
 done
 
-[ -f /data/hub.json ] || gateway -init-config /data/hub.json
-
 # a restarted container keeps /var/run, so stale pidfiles would make ovn-ctl skip starting the daemons
 rm -rf /var/run/ovn /var/run/openvswitch
 mkdir -p /var/run/ovn /var/run/openvswitch /var/log/ovn /var/log/openvswitch

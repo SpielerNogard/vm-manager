@@ -1,7 +1,0 @@
-{
-  "listen": ":8080",
-  "token": "change-me",
-  "underlay": { "port": 51820 },
-  "clients": { "endpoint": "vmm.example.lan", "port": 51821 },
-  "guestMTU": 1300
-}

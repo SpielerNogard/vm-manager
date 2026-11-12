@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import { api } from '@/api'
 import { useFleet } from '@/composables/useFleet'
+import { NAME_PATTERN } from '@/lib/names'
 import { downloadText } from '@/lib/format'
 
 import AppIcon from './AppIcon.vue'
@@ -79,7 +80,7 @@ async function submit() {
             class="input w-full"
             required
             maxlength="63"
-            pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"
+            :pattern="NAME_PATTERN"
             placeholder="macbook"
           />
           <span class="text-base-content/60 mt-1 block text-xs">{{ t('devices.nameHint') }}</span>

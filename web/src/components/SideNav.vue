@@ -8,11 +8,14 @@ import { NAV, type Section } from '@/nav'
 import AppIcon from './AppIcon.vue'
 
 const { t } = useI18n()
-const { nodes, vms, keys, devices, networks } = useFleet()
+const { nodes, vms, keys, devices, networks, settings } = useFleet()
+
+const locked = (section: Section) => section !== 'settings' && settings.value?.setupComplete === false
 
 const route = useRoute()
 
-const count = (section: Section) => ({ nodes, vms, keys, devices, networks })[section].value.length
+const counts: Record<Exclude<Section, 'settings'>, { value: unknown[] }> = { nodes, vms, keys, devices, networks }
+const count = (section: Exclude<Section, 'settings'>) => counts[section].value.length
 const isActive = (section: Section) => route.name === section || route.meta.section === section
 </script>
 
@@ -24,7 +27,13 @@ const isActive = (section: Section) => route.name === section || route.meta.sect
       </p>
       <ul class="menu menu-sm w-full gap-0.5 p-0">
         <li v-for="item in group.items" :key="item.name">
+          <span v-if="locked(item.name)" class="menu-disabled flex items-center gap-2.5" aria-disabled="true">
+            <AppIcon :name="item.icon" />
+            <span class="grow">{{ t(`nav.${item.name}.label`) }}</span>
+            <AppIcon name="lock" />
+          </span>
           <RouterLink
+            v-else
             :to="item.path"
             class="flex items-center gap-2.5"
             :class="isActive(item.name) ? 'menu-active' : ''"
@@ -32,7 +41,7 @@ const isActive = (section: Section) => route.name === section || route.meta.sect
           >
             <AppIcon :name="item.icon" class="opacity-70" />
             <span class="grow">{{ t(`nav.${item.name}.label`) }}</span>
-            <span class="text-xs tabular-nums opacity-60">{{ count(item.name) }}</span>
+            <span v-if="item.name !== 'settings'" class="text-xs tabular-nums opacity-60">{{ count(item.name) }}</span>
           </RouterLink>
         </li>
       </ul>

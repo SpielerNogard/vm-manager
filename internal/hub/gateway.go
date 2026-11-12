@@ -2,8 +2,10 @@ package hub
 
 import (
 	"fmt"
+	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"vm-manager/internal/wgkey"
@@ -50,7 +52,7 @@ type GatewayStatus struct {
 
 func (r *Registry) GatewayState() GatewayState {
 	underlay, clients := r.net.GatewayKeys()
-	st := GatewayState{UnderlayKey: underlay, ClientsKey: clients, GuestMTU: r.cfg.GuestMTU,
+	st := GatewayState{UnderlayKey: underlay, ClientsKey: clients, GuestMTU: r.cfg.Get().GuestMTU,
 		Chassis: r.net.Chassis(), Devices: []DevicePeer{}, Networks: []GatewayNetwork{}, Ports: []GatewayPort{}}
 	for _, d := range r.net.Devices() {
 		st.Devices = append(st.Devices, DevicePeer{PublicKey: d.PublicKey, IP: d.IP})
@@ -109,10 +111,10 @@ MTU = %d
 
 [Peer]
 PublicKey = %s
-Endpoint = %s:%d
+Endpoint = %s
 AllowedIPs = 10.200.0.0/16, 10.201.0.0/24
 PersistentKeepalive = 25
-`, d.IP, d.PrivateKey, mtu, clientsPub, endpoint, port)
+`, d.IP, d.PrivateKey, mtu, clientsPub, net.JoinHostPort(endpoint, strconv.Itoa(port)))
 }
 
 func (r *Registry) clientsPublicKey() (string, error) {

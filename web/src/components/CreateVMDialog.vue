@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 
 import { api, type CreateVMRequest } from '@/api'
 import { useFleet } from '@/composables/useFleet'
+import { NAME_PATTERN } from '@/lib/names'
 
 import AppIcon from './AppIcon.vue'
 import NetworkRows from './NetworkRows.vue'
@@ -83,7 +84,7 @@ async function submit() {
             v-model="form.name"
             class="input w-full"
             required
-            pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"
+            :pattern="NAME_PATTERN"
             placeholder="dev-1"
           />
         </label>

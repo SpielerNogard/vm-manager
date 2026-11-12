@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRouter } from 'vue-router'
 
+import AddNodeDialog from '@/components/AddNodeDialog.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import ChassisBadge from '@/components/ChassisBadge.vue'
 import DataState from '@/components/DataState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -12,11 +15,20 @@ import { formatMB } from '@/lib/format'
 const { t } = useI18n()
 const router = useRouter()
 const { nodes, loaded } = useFleet()
+
+const addOpen = ref(false)
 </script>
 
 <template>
   <div>
-    <PageHeader section="nodes" />
+    <PageHeader section="nodes">
+      <template #actions>
+        <button type="button" class="btn btn-sm btn-primary" @click="addOpen = true">
+          <AppIcon name="plus" />
+          {{ t('nodes.add') }}
+        </button>
+      </template>
+    </PageHeader>
 
     <DataState :loading="!loaded" :empty="!nodes.length" :empty-title="t('nodes.emptyTitle')">
       <template #empty-body>{{ t('nodes.emptyBody') }}</template>
@@ -49,10 +61,13 @@ const { nodes, loaded } = useFleet()
               >
                 {{ n.id }}
               </RouterLink>
-              <div class="font-token text-base-content/55 text-[0.7rem]">{{ n.hostname }}</div>
+              <div v-if="n.hostname" class="font-token text-base-content/55 text-[0.7rem]">{{ n.hostname }}</div>
             </td>
             <td>
-              <StateBadge :label="t(n.online ? 'state.online' : 'state.offline')" :tone="n.online ? 'good' : 'quiet'" />
+              <StateBadge
+                :label="n.state === 'pending' ? t('nodes.pendingLabel') : t(`state.${n.state}`)"
+                :tone="n.state === 'online' ? 'good' : 'quiet'"
+              />
             </td>
             <td>
               <template v-if="n.chassis">
@@ -61,16 +76,27 @@ const { nodes, loaded } = useFleet()
               </template>
               <span v-else class="text-base-content/50 text-xs">—</span>
             </td>
-            <td><span class="badge badge-sm badge-outline font-token">{{ n.provider }}</span></td>
-            <td class="text-right text-sm tabular-nums">
-              {{ n.cpus }} vCPU<br /><span class="text-base-content/55 text-xs">{{ formatMB(n.memoryMB) }}</span>
+            <td>
+              <span v-if="n.provider" class="badge badge-sm badge-outline font-token">{{ n.provider }}</span>
+              <span v-else class="text-base-content/50 text-xs">—</span>
             </td>
             <td class="text-right text-sm tabular-nums">
-              {{ n.freeCpus }} vCPU<br /><span class="text-base-content/55 text-xs">{{ formatMB(n.freeMemoryMB) }}</span>
+              <span v-if="n.state === 'pending'" class="text-base-content/50">—</span>
+              <template v-else>
+                {{ n.cpus }} vCPU<br /><span class="text-base-content/55 text-xs">{{ formatMB(n.memoryMB) }}</span>
+              </template>
+            </td>
+            <td class="text-right text-sm tabular-nums">
+              <span v-if="n.state === 'pending'" class="text-base-content/50">—</span>
+              <template v-else>
+                {{ n.freeCpus }} vCPU<br /><span class="text-base-content/55 text-xs">{{ formatMB(n.freeMemoryMB) }}</span>
+              </template>
             </td>
           </tr>
         </tbody>
       </table>
     </DataState>
+
+    <AddNodeDialog v-model:open="addOpen" />
   </div>
 </template>

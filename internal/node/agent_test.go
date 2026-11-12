@@ -194,14 +194,20 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var hcfg hub.Config
-	hcfg.Underlay.Port = 51820
+	hcfgPath := filepath.Join(t.TempDir(), "hub.json")
+	if err := os.WriteFile(hcfgPath, []byte(`{"token":"tok","underlay":{"port":51820}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hcfg, err := hub.LoadOrCreateConfig(hcfgPath, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
 	store, err := hub.LoadVMStore(filepath.Join(t.TempDir(), "vms.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	reg := hub.NewRegistry(net, store, hcfg)
-	srv := httptest.NewServer(hub.NodeHandler(reg, "tok"))
+	srv := httptest.NewServer(hub.NodeHandler(reg, func() string { return hcfg.Get().Token }))
 
 	p := newFakeProvider()
 	a := &Agent{
@@ -219,7 +225,7 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 		srv.Close()
 		<-done
 	})
-	eventually(t, "node online", func() bool { n := reg.Nodes(); return len(n) == 1 && n[0].Online })
+	eventually(t, "node online", func() bool { n := reg.Nodes(); return len(n) == 1 && n[0].State == "online" })
 	return &testEnv{reg: reg, agent: a, provider: p, stop: cancel, runDone: done}
 }
 
