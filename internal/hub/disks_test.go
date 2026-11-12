@@ -40,7 +40,7 @@ func (f *fakeStorage) count() int {
 
 func newDiskRegistry(t *testing.T) (*Registry, *fakeStorage) {
 	t.Helper()
-	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), Config{})
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, Config{}))
 	fs := &fakeStorage{}
 	r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "s:1"}, fs)
 	return r, fs

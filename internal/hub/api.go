@@ -142,6 +142,17 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		}
 		writeJSON(w, http.StatusOK, d)
 	})
+	mux.HandleFunc("POST /api/disks/{id}/release", func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Query().Get("force") != "true" {
+			writeError(w, fmt.Errorf("%w: a node releases its disks itself; pass force=true only if it will not come back", ErrInvalid))
+			return
+		}
+		if err := r.ForceRelease(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("DELETE /api/disks/{id}", func(w http.ResponseWriter, req *http.Request) {
 		if err := r.DeleteDisk(req.PathValue("id")); err != nil {
 			writeError(w, err)
@@ -280,6 +291,25 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 			return
 		}
 		vm, err := r.SetVMNetworks(req.PathValue("id"), *q.NetworkIDs, req.URL.Query().Get("restartAllowed") == "true")
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, vm)
+	})
+	mux.HandleFunc("PUT /api/vms/{id}/disks", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			Disks *[]AttachRequest `json:"disks"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		if q.Disks == nil {
+			writeError(w, fmt.Errorf("%w: disks is required", ErrInvalid))
+			return
+		}
+		vm, err := r.SetVMDisks(req.PathValue("id"), *q.Disks, req.URL.Query().Get("restartAllowed") == "true")
 		if err != nil {
 			writeError(w, err)
 			return

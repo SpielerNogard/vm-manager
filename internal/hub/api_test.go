@@ -525,3 +525,55 @@ func TestAPICreateNodeMalformedJSON(t *testing.T) {
 		t.Fatalf("status = %d body = %s", code, b)
 	}
 }
+
+func TestAPISetVMDisksRequiresField(t *testing.T) {
+	srv, r, _ := apiServerWith(t, testAPIConfig())
+	d := mustDisk(t, r, "data", 1)
+	vm, err := r.CreateVM(validReq())
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := srv.URL + "/api/vms/" + vm.ID + "/disks"
+	body := `{"disks":[{"diskId":"` + d.ID + `","mountPath":"/data"}]}`
+	if s, out := doJSON(t, "PUT", url, body); s != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	if s, out := doJSON(t, "PUT", url+"?restartAllowed=true", `{}`); s != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+	s, out := doJSON(t, "PUT", url+"?restartAllowed=true", body)
+	var got VM
+	json.Unmarshal(out, &got)
+	if s != http.StatusOK || len(got.Attachments) != 1 || got.Attachments[0].DiskID != d.ID {
+		t.Fatalf("status = %d body = %s", s, out)
+	}
+}
+
+func TestAPIForceRelease(t *testing.T) {
+	srv, r, _ := apiServerWith(t, testAPIConfig())
+	d := mustDisk(t, r, "data", 1)
+	q := validReq()
+	q.Disks = []AttachRequest{{DiskID: d.ID, MountPath: "/data"}}
+	vm, err := r.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.DeleteVM(vm.ID)
+	url := srv.URL + "/api/disks/" + d.ID + "/release"
+	if s, out := doJSON(t, "POST", url, ""); s != http.StatusBadRequest {
+		t.Fatalf("no force: %d %s", s, out)
+	}
+	if s, out := doJSON(t, "POST", url+"?force=true", ""); s != http.StatusConflict {
+		t.Fatalf("node online: %d %s", s, out)
+	}
+	r.mu.Lock()
+	conn := r.nodes["n1"].conn
+	r.mu.Unlock()
+	r.NodeDisconnected("n1", conn)
+	if s, out := doJSON(t, "POST", url+"?force=true", ""); s != http.StatusNoContent {
+		t.Fatalf("offline: %d %s", s, out)
+	}
+	if s, out := doJSON(t, "DELETE", srv.URL+"/api/disks/"+d.ID, ""); s != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", s, out)
+	}
+}

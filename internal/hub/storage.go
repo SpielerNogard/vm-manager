@@ -3,8 +3,10 @@ package hub
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log"
 	"net/http"
+	"slices"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -53,7 +55,10 @@ func StorageHandler(r *Registry, token func() string) http.Handler {
 			return
 		}
 		conn := &wsStorage{ctx: ctx, c: c}
-		r.StorageConnected(m, conn)
+		if err := r.StorageConnected(m, conn); err != nil {
+			log.Printf("storage %s refused: %v", req.RemoteAddr, err)
+			return
+		}
 		log.Printf("storage connected, endpoint %s", m.Endpoint)
 		defer func() {
 			r.StorageDisconnected(conn)
@@ -72,16 +77,36 @@ func StorageHandler(r *Registry, token func() string) http.Handler {
 }
 
 // StorageConnected makes c the storage connection (newest wins), saves its endpoint and sends it the desired disks.
-func (r *Registry) StorageConnected(m proto.StorageMessage, c StorageConn) {
+// A new endpoint changes every attachment URL, so VMs with disks get a new generation.
+func (r *Registry) StorageConnected(m proto.StorageMessage, c StorageConn) error {
+	if m.Endpoint == "" {
+		return fmt.Errorf("%w: register without endpoint", ErrInvalid)
+	}
 	r.mu.Lock()
 	r.storage = c
+	nodes := map[string]bool{}
 	if r.disks.Endpoint() != m.Endpoint {
 		if err := r.disks.SetEndpoint(m.Endpoint); err != nil {
 			log.Printf("storage: saving endpoint: %v", err)
+		} else {
+			for _, vm := range r.vms {
+				if len(vm.Attachments) == 0 {
+					continue
+				}
+				if _, err := r.bumpLocked(vm, func(*VM) {}); err != nil {
+					log.Printf("vm %s: saving: %v", vm.ID, err)
+					continue
+				}
+				nodes[vm.NodeID] = true
+			}
 		}
 	}
 	r.mu.Unlock()
 	r.pushStorage()
+	for n := range nodes {
+		r.push(n)
+	}
+	return nil
 }
 
 // StorageDisconnected ignores c if the agent has already reconnected with a newer connection.
@@ -97,10 +122,42 @@ func (r *Registry) StorageDisconnected(c StorageConn) {
 func (r *Registry) StorageReport(files []proto.StorageFile) {
 	r.mu.Lock()
 	repush := r.storageReportLocked(files)
+	nodes := r.growAttachedLocked(files)
 	r.mu.Unlock()
 	if repush {
 		r.pushStorage()
 	}
+	for n := range nodes {
+		r.push(n)
+	}
+}
+
+// growAttachedLocked gives the new size to VMs whose disk file has grown and returns their nodes; r.mu must be held.
+func (r *Registry) growAttachedLocked(files []proto.StorageFile) map[string]bool {
+	sizes := map[string]int64{}
+	for _, f := range files {
+		sizes[f.Name] = f.SizeBytes
+	}
+	nodes := map[string]bool{}
+	for _, vm := range r.vms {
+		atts := slices.Clone(vm.Attachments)
+		grown := false
+		for i, a := range atts {
+			d, ok := r.disks.Get(a.DiskID)
+			if ok && a.SizeGB < d.SizeGB && sizes[proto.StorageFileName(d.ID)] >= int64(d.SizeGB)<<30 {
+				atts[i].SizeGB, grown = d.SizeGB, true
+			}
+		}
+		if !grown {
+			continue
+		}
+		if _, err := r.bumpLocked(vm, func(vm *VM) { vm.Attachments = atts }); err != nil {
+			log.Printf("vm %s: saving: %v", vm.ID, err)
+			continue
+		}
+		nodes[vm.NodeID] = true
+	}
+	return nodes
 }
 
 // storageReportLocked reports whether a copy's source has appeared, which the agent skipped earlier.

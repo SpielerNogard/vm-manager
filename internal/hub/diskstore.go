@@ -113,6 +113,23 @@ func (s *DiskStore) Delete(id string) error {
 	})
 }
 
+// SetReleasing sets ReleasingOn of every listed disk in one save.
+func (s *DiskStore) SetReleasing(ids []string, nodeID string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutate(func() {
+		for _, id := range ids {
+			if d, ok := s.disks[id]; ok {
+				d.ReleasingOn = nodeID
+				s.disks[id] = d
+			}
+		}
+	})
+}
+
 func (s *DiskStore) Tombstones() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

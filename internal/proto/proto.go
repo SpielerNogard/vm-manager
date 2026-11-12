@@ -18,13 +18,21 @@ const (
 )
 
 type VMSpec struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	CPUs          int      `json:"cpus"`
-	MemoryMB      int      `json:"memoryMB"`
-	DiskGB        int      `json:"diskGB"`
-	SSHPublicKeys []string `json:"sshPublicKeys"`
-	NICs          []NIC    `json:"nics"`
+	ID            string           `json:"id"`
+	Name          string           `json:"name"`
+	CPUs          int              `json:"cpus"`
+	MemoryMB      int              `json:"memoryMB"`
+	DiskGB        int              `json:"diskGB"`
+	SSHPublicKeys []string         `json:"sshPublicKeys"`
+	NICs          []NIC            `json:"nics"`
+	Attachments   []DiskAttachment `json:"attachments,omitempty"`
+}
+
+type DiskAttachment struct {
+	DiskID    string `json:"diskId"`
+	MountPath string `json:"mountPath"`
+	SizeGB    int    `json:"sizeGB"`        // size the guest should see; a change restarts the VM
+	URL       string `json:"url,omitempty"` // set by the hub in DesiredVM only
 }
 
 // NIC is one virtual network interface; Port is the OVN logical switch port name.
@@ -90,6 +98,7 @@ type Register struct {
 	Config     json.RawMessage `json:"config,omitempty"`
 	Machine    *Machine        `json:"machine,omitempty"`
 	ChassisKey string          `json:"chassisKey,omitempty"`
+	DisksInUse []string        `json:"disksInUse,omitempty"`
 }
 
 // Underlay tells a node how to join the hub's WireGuard underlay and reach the OVN southbound DB.
@@ -109,14 +118,15 @@ type Machine struct {
 	MemoryMB  int    `json:"memoryMB,omitempty"`
 }
 
-// Message types: "register" (node→hub), "desired"/"underlay" (hub→node), "status" (node→hub).
+// Message types: "register" (node→hub), "desired"/"underlay" (hub→node), "status" and "disks" (node→hub).
 type Message struct {
 	Type     string    `json:"type"`
 	Register *Register `json:"register,omitempty"`
 	Status   *VMStatus `json:"status,omitempty"`
 	Underlay *Underlay `json:"underlay,omitempty"`
 	// Desired (type "desired") is the full VM list for the node; nil means no VMs.
-	Desired []DesiredVM `json:"desired,omitempty"`
+	Desired    []DesiredVM `json:"desired,omitempty"`
+	DisksInUse []string    `json:"disksInUse,omitempty"` // type "disks": every disk ID a local VM still uses
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }

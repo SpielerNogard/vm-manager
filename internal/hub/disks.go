@@ -42,6 +42,9 @@ func (r *Registry) diskViewLocked(d StoredDisk) DiskView {
 	if d.ReleasingOn != "" {
 		v.State = "releasing"
 	}
+	if vm, i := r.attachmentLocked(d.ID); vm != nil {
+		v.Attachment = &AttachmentView{VMID: vm.ID, VMName: vm.Name, NodeID: vm.NodeID, MountPath: vm.Attachments[i].MountPath}
+	}
 	return v
 }
 
@@ -69,37 +72,46 @@ func (r *Registry) checkNewDiskLocked(name string, sizeGB int) error {
 }
 
 func (r *Registry) CreateDisk(name string, sizeGB int) (DiskView, error) {
-	return r.addDisk(name, sizeGB, "")
+	v, _, err := r.addDisk(name, sizeGB, "")
+	return v, err
 }
 
-func (r *Registry) addDisk(name string, sizeGB int, copyFrom string) (DiskView, error) {
+// CopyDisk returns a warning when the source is attached or releasing, as the copy may then be inconsistent.
+func (r *Registry) CopyDisk(srcID, name string) (DiskView, string, error) {
+	return r.addDisk(name, 0, srcID)
+}
+
+// addDisk takes the size from the source disk if copyFrom is set.
+func (r *Registry) addDisk(name string, sizeGB int, copyFrom string) (DiskView, string, error) {
 	r.mu.Lock()
+	var warning string
+	if copyFrom != "" {
+		src, ok := r.disks.Get(copyFrom)
+		if !ok {
+			r.mu.Unlock()
+			return DiskView{}, "", fmt.Errorf("%w: disk %q", ErrNotFound, copyFrom)
+		}
+		sizeGB = src.SizeGB
+		if vm, _ := r.attachmentLocked(copyFrom); vm != nil || src.ReleasingOn != "" {
+			warning = fmt.Sprintf("disk %q may still be written by a VM; the copy is only crash-consistent", src.Name)
+		}
+	}
 	if err := r.checkNewDiskLocked(name, sizeGB); err != nil {
 		r.mu.Unlock()
-		return DiskView{}, err
+		return DiskView{}, "", err
 	}
 	d := StoredDisk{ID: newID(), Name: name, SizeGB: sizeGB, CopyFrom: copyFrom, CreatedAt: time.Now().UTC()}
 	if err := r.disks.Put(d); err != nil {
 		r.mu.Unlock()
-		return DiskView{}, err
+		return DiskView{}, "", err
 	}
 	v := r.diskViewLocked(d)
 	r.mu.Unlock()
 	r.pushStorage()
-	return v, nil
+	return v, warning, nil
 }
 
-// CopyDisk returns a warning when the source is attached, as the copy may then be inconsistent.
-func (r *Registry) CopyDisk(srcID, name string) (DiskView, string, error) {
-	src, ok := r.disks.Get(srcID)
-	if !ok {
-		return DiskView{}, "", fmt.Errorf("%w: disk %q", ErrNotFound, srcID)
-	}
-	v, err := r.addDisk(name, src.SizeGB, srcID)
-	return v, "", err
-}
-
-// GrowDisk handles unattached disks only; restartAllowed matters once disks can be attached.
+// GrowDisk only changes the disk; an attached VM sees the new size once the storage agent reports the grown file.
 func (r *Registry) GrowDisk(id string, sizeGB int, restartAllowed bool) (DiskView, error) {
 	r.mu.Lock()
 	d, ok := r.disks.Get(id)
@@ -114,6 +126,10 @@ func (r *Registry) GrowDisk(id string, sizeGB int, restartAllowed bool) (DiskVie
 	if d.ReleasingOn != "" {
 		r.mu.Unlock()
 		return DiskView{}, fmt.Errorf("%w: disk %q is still being released by node %q", ErrConflict, id, d.ReleasingOn)
+	}
+	if vm, _ := r.attachmentLocked(id); vm != nil && vm.Power == proto.PowerRunning && !restartAllowed {
+		r.mu.Unlock()
+		return DiskView{}, fmt.Errorf("%w: disk is attached to running VM %q: restart required: pass restartAllowed=true", ErrConflict, vm.Name)
 	}
 	d.SizeGB = sizeGB
 	if err := r.disks.Put(d); err != nil {
@@ -136,6 +152,10 @@ func (r *Registry) DeleteDisk(id string) error {
 	if d.ReleasingOn != "" {
 		r.mu.Unlock()
 		return fmt.Errorf("%w: disk %q is still being released by node %q", ErrConflict, id, d.ReleasingOn)
+	}
+	if vm, _ := r.attachmentLocked(id); vm != nil {
+		r.mu.Unlock()
+		return fmt.Errorf("%w: disk %q is attached to VM %q", ErrConflict, id, vm.Name)
 	}
 	for _, o := range r.disks.Disks() {
 		if o.CopyFrom == id {
