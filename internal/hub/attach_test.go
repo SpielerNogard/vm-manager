@@ -549,12 +549,22 @@ func TestAttachURLWaitsForSeen(t *testing.T) {
 
 func TestStorageRegisterNeedsHostPort(t *testing.T) {
 	r, _, fs := newAttachRegistry(t)
-	for _, ep := range []string{"storage", "storage:1:2", "nbd://storage:10809"} {
+	for _, ep := range []string{"storage", "storage:1:2", "nbd://storage:10809", "st:", "st:abc", "st:0", "st:65536"} {
 		if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: ep}, fs); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("%q: err = %v", ep, err)
 		}
 	}
 	if r.Storage().Endpoint != "st:10809" {
 		t.Fatal("invalid endpoint saved")
+	}
+}
+
+func TestCopyDiskRefusesMissingSource(t *testing.T) {
+	r, _, _ := newAttachRegistry(t)
+	d := mustDisk(t, r, "data", 1)
+	markReady(r, d.ID)
+	r.StorageReport(nil)
+	if _, _, err := r.CopyDisk(d.ID, "c"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("err = %v", err)
 	}
 }

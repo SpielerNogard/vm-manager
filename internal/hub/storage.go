@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"slices"
 
@@ -80,7 +79,7 @@ func StorageHandler(r *Registry, token func() string) http.Handler {
 // StorageConnected makes c the storage connection (newest wins), saves its endpoint and sends it the desired disks.
 // A new endpoint changes every attachment URL, so VMs with disks get a new generation.
 func (r *Registry) StorageConnected(m proto.StorageMessage, c StorageConn) error {
-	if host, _, err := net.SplitHostPort(m.Endpoint); err != nil || host == "" {
+	if !proto.ValidEndpoint(m.Endpoint) {
 		return fmt.Errorf("%w: register endpoint %q is not host:port", ErrInvalid, m.Endpoint)
 	}
 	r.mu.Lock()

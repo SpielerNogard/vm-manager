@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"log"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"vm-manager/internal/proto"
 	"vm-manager/internal/storage"
 )
 
@@ -26,7 +26,7 @@ func main() {
 	if *hubURL == "" || *advertise == "" {
 		log.Fatal("-hub and -advertise (or STORAGE_ENDPOINT) are required")
 	}
-	if host, _, err := net.SplitHostPort(*advertise); err != nil || host == "" {
+	if !proto.ValidEndpoint(*advertise) {
 		log.Fatalf("-advertise %q must be host:port", *advertise)
 	}
 	if err := os.MkdirAll(*dir, 0o755); err != nil {

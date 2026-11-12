@@ -107,6 +107,10 @@ func (r *Registry) addDisk(name string, sizeGB int, copyFrom string) (DiskView, 
 			r.mu.Unlock()
 			return DiskView{}, "", fmt.Errorf("%w: disk %q", ErrNotFound, copyFrom)
 		}
+		if r.missingLocked(src) {
+			r.mu.Unlock()
+			return DiskView{}, "", fmt.Errorf("%w: disk %q is missing on the storage server and cannot be copied", ErrConflict, src.Name)
+		}
 		sizeGB = src.SizeGB
 		if vm, _ := r.attachmentLocked(copyFrom); vm != nil || src.ReleasingOn != "" {
 			warning = fmt.Sprintf("disk %q may still be written by a VM; the copy is only crash-consistent", src.Name)

@@ -189,7 +189,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | DELETE | `/api/networks/{id}` | Delete a network. 409 while it has members; the management network cannot be deleted |
 | GET | `/api/disks` | Disks with state (`creating`, `ready`, `releasing`, `missing`), size, allocated bytes and attachment |
 | POST | `/api/disks` | Create a disk (`name`, `sizeGB`) |
-| POST | `/api/disks/{id}/copy` | Copy a disk to a new one (`name`, same size). Returns `{"disk", "warning"}`; the warning is set if the source is attached or releasing, as the copy is then only crash-consistent |
+| POST | `/api/disks/{id}/copy` | Copy a disk to a new one (`name`, same size). Returns `{"disk", "warning"}`; the warning is set if the source is attached or releasing, as the copy is then only crash-consistent. 409 if the source is `missing` |
 | PATCH | `/api/disks/{id}?restartAllowed=true` | Grow a disk (`sizeGB`, must be larger; no shrinking). An attached running VM is restarted to see the new size and needs `restartAllowed=true`, else 409 |
 | POST | `/api/disks/{id}/release?force=true` | Force-end a release that the node cannot confirm. Only while the node is offline (else 409); `force=true` is required. Anything the node still writes to the disk is lost |
 | DELETE | `/api/disks/{id}` | Delete a disk. 409 while it is attached, releasing, or the source of a pending copy |

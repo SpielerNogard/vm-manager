@@ -4,6 +4,8 @@ package proto
 import (
 	"encoding/json"
 	"io"
+	"net"
+	"strconv"
 )
 
 type VMState string
@@ -158,4 +160,14 @@ type StorageMessage struct {
 	Files    []StorageFile `json:"files,omitempty"`
 	Disks    []StorageDisk `json:"disks,omitempty"`
 	Deleted  []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
+}
+
+// ValidEndpoint reports whether s is host:port with a non-empty host and a port in 1-65535.
+func ValidEndpoint(s string) bool {
+	host, port, err := net.SplitHostPort(s)
+	if err != nil || host == "" {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
 }
