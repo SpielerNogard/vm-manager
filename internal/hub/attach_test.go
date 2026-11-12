@@ -537,7 +537,7 @@ func TestAttachURLWaitsForSeen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2 := NewRegistry(newTestNet(t), store, disks, Config{})
+	r2 := NewRegistry(newTestNet(t), store, disks, newTestConfig(t, Config{}))
 	n2 := &fakeNode{}
 	if err := r2.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n2); err != nil {
 		t.Fatal(err)

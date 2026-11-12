@@ -18,9 +18,10 @@ const (
 )
 
 // Run keeps a link to the hub: it applies every desired list, then reports its files, and also reports every `report`.
-func Run(ctx context.Context, hubURL, token, endpoint string, dir Dir, report time.Duration) error {
+// token is called before every connect, so a token changed on the hub is picked up on reconnect.
+func Run(ctx context.Context, hubURL string, token func() (string, error), endpoint string, dir Dir, report time.Duration) error {
 	for {
-		if err := connect(ctx, hubURL, token, endpoint, dir, report); err != nil && ctx.Err() == nil {
+		if err := dial(ctx, hubURL, token, endpoint, dir, report); err != nil && ctx.Err() == nil {
 			log.Printf("hub connection: %v", err)
 		}
 		select {
@@ -29,6 +30,14 @@ func Run(ctx context.Context, hubURL, token, endpoint string, dir Dir, report ti
 		case <-time.After(reconnectDelay):
 		}
 	}
+}
+
+func dial(ctx context.Context, hubURL string, token func() (string, error), endpoint string, dir Dir, report time.Duration) error {
+	t, err := token()
+	if err != nil {
+		return err
+	}
+	return connect(ctx, hubURL, t, endpoint, dir, report)
 }
 
 func connect(ctx context.Context, hubURL, token, endpoint string, dir Dir, report time.Duration) error {

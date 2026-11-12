@@ -29,7 +29,7 @@ func startStorage(t *testing.T, prep func(dir string)) (*Registry, *DiskStore, s
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		storage.Run(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), testToken, "storage:10809", storage.Dir{Path: dir}, 50*time.Millisecond)
+		storage.Run(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), func() (string, error) { return testToken, nil }, "storage:10809", storage.Dir{Path: dir}, 50*time.Millisecond)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 	waitFor(t, "storage online", func() bool { return r.Storage().Online })

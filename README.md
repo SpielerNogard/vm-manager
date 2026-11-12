@@ -84,7 +84,7 @@ Standalone disks hold data that outlives VMs. They live on a storage server and 
 docker compose -f deploy/compose.yaml --profile storage up -d --build
 ```
 
-The compose `storage` service reads `HUB_TOKEN` from `deploy/.env`; it must match the `token` in `/data/hub.json`. To run the storage server on another host, build and run it there:
+The compose `storage` service reads the hub token from `/data/hub.json` on every connect, so a token changed in Settings is picked up after a reconnect. To run the storage server on another host, build and run it there with the token from Settings (update it there after changing the token):
 
 ```sh
 docker build -f deploy/storage.Dockerfile -t vm-manager-storage .
