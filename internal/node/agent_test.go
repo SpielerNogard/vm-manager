@@ -27,6 +27,7 @@ type fakeInstance struct {
 	killed  atomic.Bool
 	p       *fakeProvider
 	staleIP bool // simulates finding the previous boot's lease only after the VM already died
+	hang    bool // Stop and Kill do not end the instance
 }
 
 func (i *fakeInstance) WaitIP(context.Context) (string, error) {
@@ -39,6 +40,10 @@ func (i *fakeInstance) Done() <-chan struct{} { return i.done }
 func (i *fakeInstance) guestShutdown()        { i.once.Do(func() { close(i.done) }) }
 
 func (i *fakeInstance) Stop() error {
+	if i.hang {
+		i.p.record("stop-guest")
+		return nil
+	}
 	i.once.Do(func() { i.stopped.Store(true); close(i.done) })
 	if i.p != nil {
 		i.p.record("stop-guest")
@@ -47,6 +52,10 @@ func (i *fakeInstance) Stop() error {
 }
 
 func (i *fakeInstance) Kill() error {
+	if i.hang {
+		i.p.record("kill-guest")
+		return nil
+	}
 	i.once.Do(func() { i.killed.Store(true); close(i.done) })
 	if i.p != nil {
 		i.p.record("kill-guest")
@@ -206,7 +215,11 @@ func startEnv(t *testing.T, prep func(a *Agent, p *fakeProvider)) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := hub.NewRegistry(net, store, hcfg)
+	disks, err := hub.LoadDiskStore(filepath.Join(t.TempDir(), "disks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := hub.NewRegistry(net, store, disks, hcfg)
 	srv := httptest.NewServer(hub.NodeHandler(reg, func() string { return hcfg.Get().Token }))
 
 	p := newFakeProvider()

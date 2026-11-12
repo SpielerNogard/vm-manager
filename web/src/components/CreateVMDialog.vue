@@ -14,9 +14,19 @@ const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
 const router = useRouter()
-const { onlineNodes, keys, networks, refresh } = useFleet()
+const { onlineNodes, keys, networks, disks, refresh } = useFleet()
 
-const form = ref<CreateVMRequest & { networkIds: string[] }>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, dataDisks: [], sshKeyIds: [], networkIds: [] })
+interface DiskRow {
+  mode: 'existing' | 'new'
+  diskId: string
+  name: string
+  sizeGB: number
+  mountPath: string
+}
+
+const rows = ref<DiskRow[]>([])
+
+const form = ref<Omit<CreateVMRequest, 'disks'> & { networkIds: string[] }>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, sshKeyIds: [], networkIds: [] })
 const error = ref('')
 const busy = ref(false)
 
@@ -33,10 +43,12 @@ watch(open, (isOpen) => {
 
 const userNetworks = computed(() => networks.value.filter((n) => !n.builtin))
 
+const freeDisks = computed(() => disks.value.filter((d) => !d.attachment && d.state !== 'releasing' && d.state !== 'missing'))
+
 function addDisk() {
-  const n = form.value.dataDisks.length
+  const n = rows.value.length
   const name = n ? `data${n + 1}` : 'data'
-  form.value.dataDisks.push({ name, mountPath: `/mnt/${name}`, sizeGB: 10 })
+  rows.value.push({ mode: freeDisks.value.length ? 'existing' : 'new', diskId: '', name, sizeGB: 10, mountPath: `/mnt/${name}` })
 }
 
 function goToKeys() {
@@ -53,9 +65,20 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    await api.createVM(form.value)
+    const attach: CreateVMRequest['disks'] = []
+    for (const r of rows.value) {
+      if (r.mode === 'existing') {
+        attach.push({ diskId: r.diskId, mountPath: r.mountPath })
+        continue
+      }
+      // Replacing the row keeps a retry from creating the same disk twice.
+      const disk = await api.createDisk(r.name, r.sizeGB)
+      Object.assign(r, { mode: 'existing', diskId: disk.id })
+      attach.push({ diskId: disk.id, mountPath: r.mountPath })
+    }
+    await api.createVM({ ...form.value, disks: attach })
     form.value.name = ''
-    form.value.dataDisks = []
+    rows.value = []
     form.value.networkIds = []
     open.value = false
     await refresh()
@@ -104,48 +127,43 @@ async function submit() {
         <fieldset class="col-span-2">
           <legend class="mb-1 text-sm font-medium">{{ t('create.dataDisks') }}</legend>
           <p class="text-base-content/60 mb-2 text-xs">{{ t('create.dataDisksHint') }}</p>
-          <div
-            v-if="form.dataDisks.length"
-            class="text-base-content/60 mb-1 grid grid-cols-[1fr_1.5fr_5rem_2rem] gap-2 text-xs"
-          >
-            <span>{{ t('common.name') }}</span><span>{{ t('create.mountPath') }}</span><span>{{ t('create.sizeGB') }}</span><span></span>
-          </div>
-          <div
-            v-for="(d, i) in form.dataDisks"
-            :key="i"
-            class="mb-2 grid grid-cols-[1fr_1.5fr_5rem_2rem] items-center gap-2"
-          >
+          <div v-for="(r, i) in rows" :key="i" class="mb-2 grid grid-cols-[6rem_1fr_1.5fr_2rem] items-center gap-2">
+            <select v-model="r.mode" class="select select-sm w-full" :aria-label="t('create.diskSource')">
+              <option value="existing" :disabled="!freeDisks.length">{{ t('create.existingDisk') }}</option>
+              <option value="new">{{ t('create.newDisk') }}</option>
+            </select>
+            <select v-if="r.mode === 'existing'" v-model="r.diskId" class="select select-sm w-full" required :aria-label="t('create.diskName')">
+              <option value="" disabled>—</option>
+              <option v-for="d in freeDisks" :key="d.id" :value="d.id">{{ d.name }} ({{ d.sizeGB }} GB)</option>
+            </select>
+            <div v-else class="flex gap-2">
+              <input
+                v-model="r.name"
+                class="input input-sm w-full min-w-0"
+                required
+                maxlength="63"
+                pattern="[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?"
+                placeholder="data"
+                :aria-label="t('create.diskName')"
+              />
+              <input
+                v-model.number="r.sizeGB"
+                class="input input-sm w-20"
+                type="number"
+                min="1"
+                required
+                :aria-label="t('create.diskSize')"
+              />
+            </div>
             <input
-              v-model="d.name"
-              class="input input-sm w-full"
-              required
-              maxlength="16"
-              pattern="[a-z0-9]([a-z0-9\-]{0,14}[a-z0-9])?"
-              placeholder="data"
-              :aria-label="t('create.diskName')"
-            />
-            <input
-              v-model="d.mountPath"
+              v-model="r.mountPath"
               class="input input-sm font-token w-full"
               required
               pattern="(/[A-Za-z0-9._\-]+)+"
               placeholder="/mnt/data"
               :aria-label="t('create.mountPath')"
             />
-            <input
-              v-model.number="d.sizeGB"
-              class="input input-sm w-full"
-              type="number"
-              min="1"
-              required
-              :aria-label="t('create.diskSize')"
-            />
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm btn-square"
-              :title="t('create.removeDisk')"
-              @click="form.dataDisks.splice(i, 1)"
-            >
+            <button type="button" class="btn btn-ghost btn-sm btn-square" :title="t('create.removeDisk')" @click="rows.splice(i, 1)">
               <AppIcon name="trash" />
               <span class="sr-only">{{ t('create.removeDisk') }}</span>
             </button>

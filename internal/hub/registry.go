@@ -30,8 +30,6 @@ var (
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// ext4 labels are limited to 16 bytes.
-var diskNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$`)
 var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
 
 // Mounting here (or below, for the first list) would hide files the guest needs to boot or to let us in via SSH.
@@ -109,21 +107,32 @@ func (vm *VM) desired() proto.DesiredVM {
 }
 
 type CreateVMRequest struct {
-	NodeID     string           `json:"nodeId"`
-	Name       string           `json:"name"`
-	CPUs       int              `json:"cpus"`
-	MemoryMB   int              `json:"memoryMB"`
-	DiskGB     int              `json:"diskGB"`
-	DataDisks  []proto.DataDisk `json:"dataDisks"`
-	SSHKeyIDs  []string         `json:"sshKeyIds"`
-	NetworkIDs []string         `json:"networkIds"`
+	NodeID     string          `json:"nodeId"`
+	Name       string          `json:"name"`
+	CPUs       int             `json:"cpus"`
+	MemoryMB   int             `json:"memoryMB"`
+	DiskGB     int             `json:"diskGB"`
+	SSHKeyIDs  []string        `json:"sshKeyIds"`
+	NetworkIDs []string        `json:"networkIds"`
+	Disks      []AttachRequest `json:"disks"`
 	// SSHPublicKeys is resolved from SSHKeyIDs by the API.
 	SSHPublicKeys []string `json:"-"`
+}
+
+type AttachRequest struct {
+	DiskID    string `json:"diskId"`
+	MountPath string `json:"mountPath"`
 }
 
 type nodeEntry struct {
 	Node
 	conn NodeConn
+	seq  uint64 // of the last desired list sent
+}
+
+func (n *nodeEntry) stored() StoredNode {
+	return StoredNode{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, DesiredSeq: n.seq,
+		Pending: n.State == NodePending}
 }
 
 type Registry struct {
@@ -132,19 +141,28 @@ type Registry struct {
 	vms   map[string]*VM
 	net   *NetModel
 	store *VMStore
+	disks *DiskStore
 	cfg   *ConfigStore
 	// sendMu (per node, kept across reconnects and node deletion so ordering survives re-registration) orders desired lists so a node never receives an older one after a newer one.
 	sendMu map[string]*sync.Mutex
+
+	storage      StorageConn
+	storageFiles []proto.StorageFile
+	// storageReported is whether storageFiles came from the current connection, so an absent file means missing.
+	storageReported bool
+	storageSendMu   sync.Mutex
 }
 
-func NewRegistry(net *NetModel, store *VMStore, cfg *ConfigStore) *Registry {
-	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg, sendMu: map[string]*sync.Mutex{}}
+func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigStore) *Registry {
+	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, disks: disks, cfg: cfg,
+		sendMu: map[string]*sync.Mutex{}}
 	for _, n := range store.Nodes() {
 		state := NodeOffline
 		if n.Pending {
 			state = NodePending
 		}
-		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state}}
+		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state},
+			seq: n.DesiredSeq}
 	}
 	for _, s := range store.VMs() {
 		vm := &VM{VMSpec: s.Spec, NodeID: s.NodeID, Provider: s.Provider, State: proto.StateUnknown, Power: s.Power,
@@ -204,24 +222,29 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	if len(foreign) > 0 {
 		return nil, fmt.Errorf("reports VMs of other nodes: %s; was its nodeId or hostname changed?", strings.Join(foreign, ", "))
 	}
-	if err := r.store.PutNode(StoredNode{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs,
-		MemoryMB: reg.MemoryMB, Machine: reg.Machine}); err != nil {
-		// A pending node must not go online while the store still says pending; the node retries on reconnect.
-		if prev := r.nodes[reg.NodeID]; prev != nil && prev.State == NodePending {
-			return nil, fmt.Errorf("saving node: %w", err)
-		}
-		log.Printf("node %s: saving: %v", reg.NodeID, err)
-	}
-	r.nodes[reg.NodeID] = &nodeEntry{
+	prev := r.nodes[reg.NodeID]
+	n := &nodeEntry{
 		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, State: NodeOnline,
 			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
 		conn: c,
 	}
+	if prev != nil {
+		n.seq = prev.seq
+	}
+	if err := r.store.PutNode(n.stored()); err != nil {
+		// A pending node must not go online while the store still says pending; the node retries on reconnect.
+		if prev != nil && prev.State == NodePending {
+			return nil, fmt.Errorf("saving node: %w", err)
+		}
+		log.Printf("node %s: saving: %v", reg.NodeID, err)
+	}
+	r.nodes[reg.NodeID] = n
 	for _, st := range reg.VMs {
 		if vm, ok := r.vms[st.ID]; ok && vm.NodeID == reg.NodeID {
 			r.applyStatus(vm, st)
 		}
 	}
+	r.disksInUseLocked(reg.NodeID, reg.DisksInUse, reg.AppliedSeq)
 	if reg.ChassisKey == "" {
 		return nil, nil
 	}
@@ -369,6 +392,11 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 		r.mu.Unlock()
 		return VM{}, fmt.Errorf("%w: node %q has %d CPUs / %d MB free", ErrConflict, n.ID, freeCPU, freeMem)
 	}
+	atts, err := r.attachmentsLocked(nil, req.Disks)
+	if err != nil {
+		r.mu.Unlock()
+		return VM{}, err
+	}
 	id := newID()
 	nics, err := r.net.AllocNICs(id, req.Name, req.NetworkIDs)
 	if err != nil {
@@ -377,7 +405,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	}
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
-			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, NICs: nics},
+			SSHPublicKeys: req.SSHPublicKeys, NICs: nics, Attachments: atts},
 		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending, Power: proto.PowerRunning, generation: 1,
 	}
 	if err := r.store.PutVM(vm.stored()); err != nil {
@@ -393,6 +421,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 }
 
 // DeleteVM forgets the VM at once; an offline node deletes it as unknown when it reconnects.
+// Its disks stay releasing until the node confirms it no longer uses them.
 func (r *Registry) DeleteVM(id string) error {
 	r.mu.Lock()
 	vm, ok := r.vms[id]
@@ -400,7 +429,15 @@ func (r *Registry) DeleteVM(id string) error {
 		r.mu.Unlock()
 		return ErrNotFound
 	}
+	diskIDs := attachedIDs(vm.Attachments)
+	if err := r.disks.SetReleasing(diskIDs, vm.NodeID, r.nextSeqLocked(vm.NodeID)); err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	if err := r.store.DeleteVM(id); err != nil {
+		if rerr := r.disks.SetReleasing(diskIDs, "", 0); rerr != nil {
+			log.Printf("vm %s: restoring disks: %v", id, rerr)
+		}
 		r.mu.Unlock()
 		return err
 	}
@@ -487,6 +524,150 @@ func (r *Registry) SetVMNetworks(id string, networkIDs []string, restartAllowed 
 	return out, nil
 }
 
+// SetVMDisks replaces the VM's attachments; like networks, a running VM needs restartAllowed. Removed disks become releasing.
+func (r *Registry) SetVMDisks(id string, disks []AttachRequest, restartAllowed bool) (VM, error) {
+	if err := validateDisks(disks); err != nil {
+		return VM{}, err
+	}
+	r.mu.Lock()
+	vm, ok := r.vms[id]
+	if !ok {
+		r.mu.Unlock()
+		return VM{}, ErrNotFound
+	}
+	atts, err := r.attachmentsLocked(vm, disks)
+	if err != nil {
+		r.mu.Unlock()
+		return VM{}, err
+	}
+	if slices.Equal(atts, vm.Attachments) {
+		out := *vm
+		r.mu.Unlock()
+		return out, nil
+	}
+	if vm.Power == proto.PowerRunning && !restartAllowed {
+		r.mu.Unlock()
+		return VM{}, fmt.Errorf("%w: restart required: pass restartAllowed=true", ErrConflict)
+	}
+	kept := attachedIDs(atts)
+	var removed []string
+	for _, a := range vm.Attachments {
+		if !slices.Contains(kept, a.DiskID) {
+			removed = append(removed, a.DiskID)
+		}
+	}
+	if err := r.disks.SetReleasing(removed, vm.NodeID, r.nextSeqLocked(vm.NodeID)); err != nil {
+		r.mu.Unlock()
+		return VM{}, err
+	}
+	out, err := r.bumpLocked(vm, func(vm *VM) { vm.Attachments = atts })
+	if err != nil {
+		if rerr := r.disks.SetReleasing(removed, "", 0); rerr != nil {
+			log.Printf("vm %s: restoring disks: %v", id, rerr)
+		}
+		r.mu.Unlock()
+		return VM{}, err
+	}
+	r.mu.Unlock()
+	r.push(out.NodeID)
+	return out, nil
+}
+
+// attachmentsLocked resolves disks for vm (nil for a new VM); r.mu must be held.
+func (r *Registry) attachmentsLocked(vm *VM, disks []AttachRequest) ([]proto.DiskAttachment, error) {
+	var out []proto.DiskAttachment
+	for _, q := range disks {
+		d, ok := r.disks.Get(q.DiskID)
+		if !ok {
+			return nil, fmt.Errorf("%w: unknown disk %q", ErrInvalid, q.DiskID)
+		}
+		if d.ReleasingOn != "" {
+			return nil, fmt.Errorf("%w: disk %q is still being released by node %q", ErrConflict, d.Name, d.ReleasingOn)
+		}
+		a := proto.DiskAttachment{DiskID: d.ID, MountPath: q.MountPath, SizeGB: d.SizeGB}
+		// The guest must not see more than the file holds; the grow path raises it once the file is reported grown.
+		if f, ok := r.storageFileLocked(d.ID); ok && f.SizeBytes < int64(d.SizeGB)<<30 {
+			a.SizeGB = max(1, int(f.SizeBytes>>30))
+		}
+		owner, i := r.attachmentLocked(d.ID)
+		if owner == nil && r.missingLocked(d) {
+			return nil, fmt.Errorf("%w: disk %q is missing on the storage server", ErrConflict, d.Name)
+		}
+		if owner != nil {
+			if owner != vm {
+				return nil, fmt.Errorf("%w: disk %q is attached to VM %q", ErrConflict, d.Name, owner.Name)
+			}
+			// A grow in progress must keep waiting for the file before the guest sees the new size.
+			a.SizeGB = owner.Attachments[i].SizeGB
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// attachmentLocked finds the VM a disk is attached to and the attachment's index; r.mu must be held.
+func (r *Registry) attachmentLocked(diskID string) (*VM, int) {
+	for _, vm := range r.vms {
+		if i := slices.IndexFunc(vm.Attachments, func(a proto.DiskAttachment) bool { return a.DiskID == diskID }); i >= 0 {
+			return vm, i
+		}
+	}
+	return nil, -1
+}
+
+func attachedIDs(atts []proto.DiskAttachment) []string {
+	var ids []string
+	for _, a := range atts {
+		ids = append(ids, a.DiskID)
+	}
+	return ids
+}
+
+// nextSeqLocked is the seq of the next desired list sent to the node; r.mu must be held.
+func (r *Registry) nextSeqLocked(nodeID string) uint64 {
+	if n := r.nodes[nodeID]; n != nil {
+		return n.seq + 1
+	}
+	return 1
+}
+
+// DisksInUse ends the release of every disk releasing on nodeID that the node no longer uses.
+// appliedSeq guards against a report from before the node saw the detach.
+func (r *Registry) DisksInUse(nodeID string, ids []string, appliedSeq uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disksInUseLocked(nodeID, ids, appliedSeq)
+}
+
+func (r *Registry) disksInUseLocked(nodeID string, ids []string, appliedSeq uint64) {
+	var released []string
+	for _, d := range r.disks.Disks() {
+		if d.ReleasingOn == nodeID && appliedSeq >= d.ReleasingSeq && !slices.Contains(ids, d.ID) {
+			released = append(released, d.ID)
+		}
+	}
+	if err := r.disks.SetReleasing(released, "", 0); err != nil {
+		log.Printf("node %s: releasing disks: %v", nodeID, err)
+	}
+}
+
+// ForceRelease ends a release the node cannot confirm because it is offline; whatever it still writes is lost.
+func (r *Registry) ForceRelease(diskID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d, ok := r.disks.Get(diskID)
+	if !ok {
+		return fmt.Errorf("%w: disk %q", ErrNotFound, diskID)
+	}
+	if d.ReleasingOn == "" {
+		return fmt.Errorf("%w: disk %q is not being released", ErrConflict, d.Name)
+	}
+	if n := r.nodes[d.ReleasingOn]; n != nil && n.State == NodeOnline {
+		return fmt.Errorf("%w: node %q is online and will confirm the release itself", ErrConflict, d.ReleasingOn)
+	}
+	return r.disks.SetReleasing([]string{diskID}, "", 0)
+}
+
 func (r *Registry) SetPower(id string, power proto.Power, mode proto.StopMode) (VM, error) {
 	return r.bump(id, func(vm *VM) {
 		vm.Power, vm.stopMode = power, mode
@@ -500,10 +681,20 @@ func (r *Registry) SetPower(id string, power proto.Power, mode proto.StopMode) (
 // desiredFor lists the node's desired VMs; r.mu must be held.
 func (r *Registry) desiredFor(nodeID string) []proto.DesiredVM {
 	var out []proto.DesiredVM
+	ep := r.disks.Endpoint()
 	for _, vm := range r.vms {
-		if vm.NodeID == nodeID {
-			out = append(out, vm.desired())
+		if vm.NodeID != nodeID {
+			continue
 		}
+		d := vm.desired()
+		d.Spec.Attachments = slices.Clone(d.Spec.Attachments)
+		for i, a := range d.Spec.Attachments {
+			// Without an endpoint or a file the storage has reported, the node gets no URL and reports storage not ready.
+			if sd, ok := r.disks.Get(a.DiskID); ep != "" && ok && sd.Seen {
+				d.Spec.Attachments[i].URL = "nbd://" + ep + "/" + proto.StorageFileName(a.DiskID)
+			}
+		}
+		out = append(out, d)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Spec.ID < out[j].Spec.ID })
 	return out
@@ -526,9 +717,16 @@ func (r *Registry) push(nodeID string) {
 		r.mu.Unlock()
 		return
 	}
-	conn, desired := n.conn, r.desiredFor(nodeID)
+	n.seq++
+	if err := r.store.PutNode(n.stored()); err != nil {
+		n.seq--
+		r.mu.Unlock()
+		log.Printf("node %s: saving desired seq: %v", nodeID, err)
+		return
+	}
+	conn, m := n.conn, proto.Message{Type: "desired", Desired: r.desiredFor(nodeID), Seq: n.seq}
 	r.mu.Unlock()
-	if err := conn.Send(proto.Message{Type: "desired", Desired: desired}); err != nil {
+	if err := conn.Send(m); err != nil {
 		log.Printf("node %s: sending desired state: %v", nodeID, err)
 	}
 }
@@ -607,23 +805,23 @@ func validate(q CreateVMRequest) error {
 	case len(q.SSHPublicKeys) == 0:
 		return fmt.Errorf("%w: at least one SSH key is required", ErrInvalid)
 	}
-	names, paths := map[string]bool{}, map[string]bool{}
-	for _, d := range q.DataDisks {
+	return validateDisks(q.Disks)
+}
+
+func validateDisks(disks []AttachRequest) error {
+	ids, paths := map[string]bool{}, map[string]bool{}
+	for _, d := range disks {
 		switch {
-		case !diskNameRe.MatchString(d.Name):
-			return fmt.Errorf("%w: disk name must match %s", ErrInvalid, diskNameRe)
 		case !mountPathRe.MatchString(d.MountPath) || path.Clean(d.MountPath) != d.MountPath:
-			return fmt.Errorf("%w: disk %q: mountPath must be a clean absolute path other than /", ErrInvalid, d.Name)
+			return fmt.Errorf("%w: disk %q: mountPath must be a clean absolute path other than /", ErrInvalid, d.DiskID)
 		case reservedMount(d.MountPath):
-			return fmt.Errorf("%w: disk %q: mountPath %s is reserved by the system", ErrInvalid, d.Name, d.MountPath)
-		case d.SizeGB < 1:
-			return fmt.Errorf("%w: disk %q must be >= 1 GB", ErrInvalid, d.Name)
-		case names[d.Name]:
-			return fmt.Errorf("%w: disk name %q is used twice", ErrInvalid, d.Name)
+			return fmt.Errorf("%w: disk %q: mountPath %s is reserved by the system", ErrInvalid, d.DiskID, d.MountPath)
+		case ids[d.DiskID]:
+			return fmt.Errorf("%w: disk %q is listed twice", ErrInvalid, d.DiskID)
 		case paths[d.MountPath]:
 			return fmt.Errorf("%w: mountPath %q is used twice", ErrInvalid, d.MountPath)
 		}
-		names[d.Name], paths[d.MountPath] = true, true
+		ids[d.DiskID], paths[d.MountPath] = true, true
 	}
 	return nil
 }

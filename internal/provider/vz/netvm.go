@@ -202,7 +202,7 @@ func (p *Provider) bootNetvm(ctx context.Context) error {
 }
 
 func (p *Provider) startNetvmVM(f node.VMFile, dir string) (*instance, error) {
-	cfg, err := p.vmConfig(f, dir, nil, true)
+	cfg, _, err := p.vmConfig(f, dir, nil, true)
 	if err != nil {
 		return nil, err
 	}

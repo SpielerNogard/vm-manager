@@ -13,8 +13,6 @@ import (
 
 	"github.com/lima-vm/go-qcow2reader"
 	"github.com/lima-vm/go-qcow2reader/convert"
-
-	"vm-manager/internal/proto"
 )
 
 // EnsureBaseImage downloads url once into imagesDir and converts it (qcow2 or raw) to a raw disk.
@@ -118,23 +116,6 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func DataDiskName(i int) string { return fmt.Sprintf("data-%d.img", i) }
-
-func CreateDataDisks(dir string, disks []proto.DataDisk) error {
-	for i, d := range disks {
-		f, err := os.Create(filepath.Join(dir, DataDiskName(i)))
-		if err != nil {
-			return err
-		}
-		err = f.Truncate(int64(d.SizeGB) << 30)
-		f.Close()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func CloudInit(f VMFile) (userData, metaData, networkConfig string) {
 	var keys strings.Builder
 	for _, k := range f.Spec.SSHPublicKeys {
@@ -151,11 +132,13 @@ users:
 %sbootcmd:
   # Kernel and systemd output to the virtio console (console.log); takes effect from the second boot.
   - [sh, -c, 'test -f /etc/default/grub.d/99-vmm-console.cfg || { echo "GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT console=tty1 console=hvc0\"" > /etc/default/grub.d/99-vmm-console.cfg && update-grub; }']
+  # The disk list lives in the seed, not in user-data, so a reseed changes it without a new instance-id.
+  - [sh, -c, 'mkdir -p /run/vmm-seed && mount -o ro LABEL=cidata /run/vmm-seed && { sh /run/vmm-seed/vmm-disks.sh; umount /run/vmm-seed; }']
 # Reapplies network-config every boot so a reseeded NIC list takes effect.
 updates:
   network:
     when: [boot]
-%s`, f.Spec.Name, keys.String(), diskConfig(f.Spec.DataDisks))
+`, f.Spec.Name, keys.String())
 	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
 	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
 	networkConfig = fmt.Sprintf(`version: 2
@@ -190,17 +173,31 @@ ethernets:
 	return userData, metaData, networkConfig
 }
 
-// fs_setup skips a disk that already has a filesystem; data disk i follows the root disk, so it is /dev/vd(b+i).
-func diskConfig(disks []proto.DataDisk) string {
-	if len(disks) == 0 {
-		return ""
+// DiskScript formats (only if blank), mounts and grows each attached disk; the guest runs it every boot from the seed.
+func DiskScript(f VMFile) string {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	for _, at := range f.Spec.Attachments {
+		dev, mnt := shellQuote("/dev/disk/by-id/virtio-"+at.DiskID), shellQuote(at.MountPath)
+		fmt.Fprintf(&b, `dev=%s
+i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
+if [ -b "$dev" ]; then
+  # blkid also exits 2 when it cannot open or read the device, so only a readable, all-zero first MiB counts as blank.
+  new=; blkid -p "$dev" >/dev/null 2>&1; rc=$?
+  if [ $rc -eq 2 ] && dd if="$dev" of=/run/vmm-probe bs=1M count=1 iflag=direct,fullblock 2>/dev/null && [ "$(wc -c </run/vmm-probe)" -eq 1048576 ] && [ "$(tr -d '\000' </run/vmm-probe | wc -c)" -eq 0 ]; then
+    # nodiscard: a discard on NBD punches holes into the backing file, a wipe if this ever misjudges.
+    mkfs.ext4 -q -E nodiscard "$dev" && new=1
+  fi
+  rm -f /run/vmm-probe
+  mkdir -p %[2]s && { mountpoint -q %[2]s || mount "$dev" %[2]s; } && {
+    resize2fs "$dev" >/dev/null 2>&1
+    # bootcmd runs before cloud-init creates ubuntu on first boot; 1000 is its uid/gid in the Ubuntu cloud image.
+    [ -n "$new" ] && chown 1000:1000 %[2]s
+  }
+fi
+`, dev, mnt)
 	}
-	var fs, mounts, chown strings.Builder
-	for i, d := range disks {
-		fmt.Fprintf(&fs, "  - {label: %q, filesystem: ext4, device: /dev/vd%c, partition: none}\n", d.Name, 'b'+i)
-		fmt.Fprintf(&mounts, "  - [%q, %q, ext4, \"defaults,nofail\", \"0\", \"2\"]\n", "LABEL="+d.Name, d.MountPath)
-		fmt.Fprintf(&chown, "  - [chown, \"ubuntu:ubuntu\", %q]\n", d.MountPath)
-	}
-	// runcmd runs once per instance, after mounts, so later ownership changes in the guest are kept.
-	return "fs_setup:\n" + fs.String() + "mounts:\n" + mounts.String() + "runcmd:\n" + chown.String()
+	return b.String()
 }
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

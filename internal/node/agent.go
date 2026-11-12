@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,7 @@ const (
 var (
 	restartBackoff = []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second, 15 * time.Second, 30 * time.Second}
 	quickRun       = 60 * time.Second
+	killWait       = 30 * time.Second
 )
 
 type Agent struct {
@@ -61,6 +63,11 @@ type Agent struct {
 	vms      map[string]*vmEntry
 	send     func(proto.Message) error // nil while disconnected
 	stopping bool
+	// deferred holds restored VMs with disks; they boot only once the hub's first desired list still wants them.
+	deferred   []VMFile
+	appliedSeq uint64
+	// dying holds removed entries whose instance may still run; their disks stay in use until it exits.
+	dying map[*vmEntry]bool
 }
 
 type vmEntry struct {
@@ -98,6 +105,12 @@ func (a *Agent) restoreAll(ctx context.Context) error {
 		return err
 	}
 	for _, f := range files {
+		if len(f.Spec.Attachments) > 0 {
+			a.mu.Lock()
+			a.deferred = append(a.deferred, f)
+			a.mu.Unlock()
+			continue
+		}
 		a.startVM(ctx, f, f.NeedsPrepare)
 	}
 	return nil
@@ -157,7 +170,7 @@ func (a *Agent) connect(ctx context.Context) error {
 		}
 		switch {
 		case m.Type == "desired":
-			a.reconcile(ctx, m.Desired)
+			a.reconcile(ctx, m.Seq, m.Desired)
 		case m.Type == "underlay" && m.Underlay != nil:
 			go a.startChassis(ctx, *m.Underlay)
 		}
@@ -209,7 +222,8 @@ func (a *Agent) startChassis(ctx context.Context, u proto.Underlay) {
 }
 
 func (a *Agent) registerMsg() *proto.Register {
-	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine}
+	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine,
+		DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
 		st := e.status
@@ -217,6 +231,53 @@ func (a *Agent) registerMsg() *proto.Register {
 		reg.VMs = append(reg.VMs, st)
 	}
 	return reg
+}
+
+// disksInUse lists the disk IDs local VMs still use; a.mu must be held.
+func (a *Agent) disksInUse() []string {
+	var ids []string
+	for _, e := range a.vms {
+		for _, at := range e.file.Spec.Attachments {
+			ids = append(ids, at.DiskID)
+		}
+	}
+	for e := range a.dying {
+		for _, at := range e.file.Spec.Attachments {
+			ids = append(ids, at.DiskID)
+		}
+	}
+	for _, f := range a.deferred {
+		for _, at := range f.Spec.Attachments {
+			ids = append(ids, at.DiskID)
+		}
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
+}
+
+// checkStorage dials each NBD server f attaches, so a VM whose disks are unreachable fails instead of booting.
+// Its error is the full status message.
+func checkStorage(f VMFile) error {
+	dialed := map[string]bool{}
+	for _, at := range f.Spec.Attachments {
+		if at.URL == "" {
+			return fmt.Errorf("storage not ready: disk %s has no NBD URL yet", at.DiskID)
+		}
+		u, err := url.Parse(at.URL)
+		if err != nil {
+			return fmt.Errorf("storage unreachable: %w", err)
+		}
+		if dialed[u.Host] {
+			continue
+		}
+		dialed[u.Host] = true
+		c, err := net.DialTimeout("tcp", u.Host, 3*time.Second)
+		if err != nil {
+			return fmt.Errorf("storage unreachable: %w", err)
+		}
+		c.Close()
+	}
+	return nil
 }
 
 func (a *Agent) startVM(ctx context.Context, f VMFile, prepare bool) {
@@ -251,6 +312,11 @@ func (a *Agent) boot(ctx context.Context, e *vmEntry, f VMFile, prepare bool) {
 	if f.Power == proto.PowerStopped {
 		close(e.booted)
 		report(proto.VMStatus{ID: id, State: proto.StateStopped})
+		return
+	}
+	if err := checkStorage(f); err != nil {
+		close(e.booted)
+		report(proto.VMStatus{ID: id, State: proto.StateError, Error: err.Error()})
 		return
 	}
 	inst, err := a.Provider.Start(f, dir)
@@ -366,6 +432,9 @@ func (a *Agent) restart(ctx context.Context, e *vmEntry) (Instance, error) {
 		if err := a.prepare(ctx, e, f); err != nil {
 			return nil, fmt.Errorf("prepare: %w", err)
 		}
+	}
+	if err := checkStorage(f); err != nil {
+		return nil, err
 	}
 	inst, err := a.Provider.Start(f, VMDir(a.VMsDir, f.Spec.ID))
 	if err != nil {

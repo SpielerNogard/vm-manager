@@ -47,14 +47,24 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	r := hub.NewRegistry(netModel, vmStore, cfg)
+	diskStore, err := hub.LoadDiskStore(filepath.Join(dir, "disks.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := hub.MigrateStorageEndpoint(cfg, diskStore); err != nil {
+		log.Fatal(err)
+	}
+	r := hub.NewRegistry(netModel, vmStore, diskStore, cfg)
+	r.SyncStorageEndpoint()
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, func() string { return cfg.Get().Token }))
+	token := func() string { return cfg.Get().Token }
+	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, token))
+	mux.Handle("/api/storage/connect", hub.StorageHandler(r, token))
 	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg))
 	mux.Handle("/", spa(dist))
 

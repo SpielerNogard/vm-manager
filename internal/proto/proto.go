@@ -4,6 +4,8 @@ package proto
 import (
 	"encoding/json"
 	"io"
+	"net"
+	"strconv"
 )
 
 type VMState string
@@ -18,14 +20,21 @@ const (
 )
 
 type VMSpec struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	CPUs          int        `json:"cpus"`
-	MemoryMB      int        `json:"memoryMB"`
-	DiskGB        int        `json:"diskGB"`
-	DataDisks     []DataDisk `json:"dataDisks,omitempty"`
-	SSHPublicKeys []string   `json:"sshPublicKeys"`
-	NICs          []NIC      `json:"nics"`
+	ID            string           `json:"id"`
+	Name          string           `json:"name"`
+	CPUs          int              `json:"cpus"`
+	MemoryMB      int              `json:"memoryMB"`
+	DiskGB        int              `json:"diskGB"`
+	SSHPublicKeys []string         `json:"sshPublicKeys"`
+	NICs          []NIC            `json:"nics"`
+	Attachments   []DiskAttachment `json:"attachments,omitempty"`
+}
+
+type DiskAttachment struct {
+	DiskID    string `json:"diskId"`
+	MountPath string `json:"mountPath"`
+	SizeGB    int    `json:"sizeGB"`        // size the guest should see; a change restarts the VM
+	URL       string `json:"url,omitempty"` // set by the hub in DesiredVM only
 }
 
 // NIC is one virtual network interface; Port is the OVN logical switch port name.
@@ -36,14 +45,7 @@ type NIC struct {
 	Port    string `json:"port"`
 }
 
-// DataDisk is formatted as ext4 labelled Name on first boot and mounted at MountPath.
-type DataDisk struct {
-	Name      string `json:"name"`
-	MountPath string `json:"mountPath"`
-	SizeGB    int    `json:"sizeGB"`
-}
-
-// Disk is a block device the node attached to the VM; Name is "root", the data disk's name, or "seed".
+// Disk is a block device the node attached to the VM; Name is "root" or "seed".
 type Disk struct {
 	Name           string `json:"name"`
 	File           string `json:"file"`
@@ -51,6 +53,7 @@ type Disk struct {
 	ReadOnly       bool   `json:"readOnly"`
 	SizeBytes      int64  `json:"sizeBytes"`
 	AllocatedBytes int64  `json:"allocatedBytes"`
+	Error          string `json:"error,omitempty"`
 }
 
 type VMStatus struct {
@@ -98,6 +101,8 @@ type Register struct {
 	Config     json.RawMessage `json:"config,omitempty"`
 	Machine    *Machine        `json:"machine,omitempty"`
 	ChassisKey string          `json:"chassisKey,omitempty"`
+	DisksInUse []string        `json:"disksInUse,omitempty"`
+	AppliedSeq uint64          `json:"appliedSeq,omitempty"` // seq of the last desired list the node fully reconciled
 }
 
 // Underlay tells a node how to join the hub's WireGuard underlay and reach the OVN southbound DB.
@@ -117,14 +122,51 @@ type Machine struct {
 	MemoryMB  int    `json:"memoryMB,omitempty"`
 }
 
-// Message types: "register" (node→hub), "desired"/"underlay" (hub→node), "status" (node→hub).
+// Message types: "register" (node→hub), "desired"/"underlay" (hub→node), "status" and "disks" (node→hub).
 type Message struct {
 	Type     string    `json:"type"`
 	Register *Register `json:"register,omitempty"`
 	Status   *VMStatus `json:"status,omitempty"`
 	Underlay *Underlay `json:"underlay,omitempty"`
 	// Desired (type "desired") is the full VM list for the node; nil means no VMs.
-	Desired []DesiredVM `json:"desired,omitempty"`
+	Desired    []DesiredVM `json:"desired,omitempty"`
+	DisksInUse []string    `json:"disksInUse,omitempty"` // type "disks": every disk ID a local VM still uses
+	Seq        uint64      `json:"seq,omitempty"`        // type "desired": increases with every list sent to the node
+	AppliedSeq uint64      `json:"appliedSeq,omitempty"` // type "disks": seq of the last desired list the node fully reconciled
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }
+
+func StorageFileName(diskID string) string { return diskID + ".img" }
+
+type StorageFile struct {
+	Name           string `json:"name"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	AllocatedBytes int64  `json:"allocatedBytes"`
+}
+
+type StorageDisk struct {
+	ID        string `json:"id"`
+	SizeBytes int64  `json:"sizeBytes"`
+	CopyFrom  string `json:"copyFrom,omitempty"`
+	// Create is false once the hub has seen the file, so a vanished file is never replaced by a blank one.
+	Create bool `json:"create,omitempty"`
+}
+
+// StorageMessage types: "register" and "report" (agent→hub), "desired" (hub→agent).
+type StorageMessage struct {
+	Type    string        `json:"type"`
+	Files   []StorageFile `json:"files,omitempty"`
+	Disks   []StorageDisk `json:"disks,omitempty"`
+	Deleted []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
+}
+
+// ValidEndpoint reports whether s is host:port with a non-empty host and a port in 1-65535.
+func ValidEndpoint(s string) bool {
+	host, port, err := net.SplitHostPort(s)
+	if err != nil || host == "" {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
+}

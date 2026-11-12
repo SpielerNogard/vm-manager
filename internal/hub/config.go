@@ -27,6 +27,22 @@ type Config struct {
 		Port     int    `json:"port"`
 	} `json:"clients"`
 	GuestMTU int `json:"guestMTU"`
+	Storage  struct {
+		// Endpoint is the host:port nodes use for NBD; empty means clients.endpoint with Port.
+		Endpoint string `json:"endpoint,omitempty"`
+		Port     int    `json:"port"`
+	} `json:"storage"`
+}
+
+// StorageEndpoint is the host:port nodes reach the storage server at, or "" before setup.
+func (c Config) StorageEndpoint() string {
+	if c.Storage.Endpoint != "" {
+		return c.Storage.Endpoint
+	}
+	if c.Clients.Endpoint == "" {
+		return ""
+	}
+	return net.JoinHostPort(c.Clients.Endpoint, strconv.Itoa(c.Storage.Port))
 }
 
 // ConfigStore owns hub.json; readers call Get at use time so edits apply live.
@@ -34,6 +50,8 @@ type ConfigStore struct {
 	mu   sync.Mutex
 	path string
 	cfg  Config
+	// storageAdded is set when hub.json had no storage section, so an older endpoint can be carried over.
+	storageAdded bool
 }
 
 func LoadOrCreateConfig(path string, getenv func(string) string) (*ConfigStore, error) {
@@ -57,6 +75,10 @@ func LoadOrCreateConfig(path string, getenv func(string) string) (*ConfigStore, 
 			return nil, invalidConfigErr(path, errors.New("token is required"))
 		}
 	}
+	storageAdded := c.Storage.Port == 0
+	if storageAdded {
+		c.Storage.Port, changed = 10809, true
+	}
 	if c.Hub.Port == 0 {
 		c.Hub.Port = 8080
 		if _, p, err := net.SplitHostPort(c.Listen); err == nil {
@@ -69,7 +91,7 @@ func LoadOrCreateConfig(path string, getenv func(string) string) (*ConfigStore, 
 	for _, e := range []struct {
 		key string
 		dst *int
-	}{{"HUB_PORT", &c.Hub.Port}, {"UNDERLAY_PORT", &c.Underlay.Port}, {"CLIENTS_PORT", &c.Clients.Port}} {
+	}{{"HUB_PORT", &c.Hub.Port}, {"UNDERLAY_PORT", &c.Underlay.Port}, {"CLIENTS_PORT", &c.Clients.Port}, {"STORAGE_PORT", &c.Storage.Port}} {
 		v := getenv(e.key)
 		if v == "" {
 			continue
@@ -87,7 +109,7 @@ func LoadOrCreateConfig(path string, getenv func(string) string) (*ConfigStore, 
 			return nil, err
 		}
 	}
-	return &ConfigStore{path: path, cfg: c}, nil
+	return &ConfigStore{path: path, cfg: c, storageAdded: storageAdded}, nil
 }
 
 func invalidConfigErr(path string, err error) error {
@@ -121,4 +143,14 @@ func (s *ConfigStore) Update(f func(c *Config) error) (Config, error) {
 	}
 	s.cfg = c
 	return c, nil
+}
+
+// MigrateStorageEndpoint keeps the endpoint a storage agent advertised before it moved into hub.json, so attachment URLs do not change.
+func MigrateStorageEndpoint(cfg *ConfigStore, disks *DiskStore) error {
+	old := disks.Endpoint()
+	if !cfg.storageAdded || old == "" || cfg.Get().StorageEndpoint() == old {
+		return nil
+	}
+	_, err := cfg.Update(func(c *Config) error { c.Storage.Endpoint = old; return nil })
+	return err
 }

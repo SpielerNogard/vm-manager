@@ -8,12 +8,17 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"vm-manager/internal/proto"
 )
 
 type settingsView struct {
 	Config
 	SetupComplete bool `json:"setupComplete"`
 	Devices       int  `json:"devices"`
+	// StorageEndpoint is the effective storage.endpoint; VMsWithDisks restart when it changes.
+	StorageEndpoint string `json:"storageEndpoint"`
+	VMsWithDisks    int    `json:"vmsWithDisks"`
 }
 
 type settingsPatch struct {
@@ -22,6 +27,9 @@ type settingsPatch struct {
 	} `json:"clients"`
 	Token    *string `json:"token"`
 	GuestMTU *int    `json:"guestMTU"`
+	Storage  *struct {
+		Endpoint *string `json:"endpoint"`
+	} `json:"storage"`
 }
 
 var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
@@ -40,9 +48,9 @@ func validToken(s string) error {
 	return nil
 }
 
-func registerSettings(mux *http.ServeMux, cfg *ConfigStore, nm *NetModel) {
+func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *NetModel) {
 	respond := func(w http.ResponseWriter, c Config) {
-		writeJSON(w, http.StatusOK, settingsView{c, c.Clients.Endpoint != "", len(nm.Devices())})
+		writeJSON(w, http.StatusOK, settingsView{c, c.Clients.Endpoint != "", len(nm.Devices()), c.StorageEndpoint(), r.vmsWithDisks()})
 	}
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, _ *http.Request) { respond(w, cfg.Get()) })
 	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, req *http.Request) {
@@ -70,6 +78,12 @@ func registerSettings(mux *http.ServeMux, cfg *ConfigStore, nm *NetModel) {
 				}
 				c.Token = *p.Token
 			}
+			if p.Storage != nil && p.Storage.Endpoint != nil {
+				if e := *p.Storage.Endpoint; e != "" && !proto.ValidEndpoint(e) {
+					return fmt.Errorf("%w: storage.endpoint must be host:port, or empty for the client endpoint", ErrInvalid)
+				}
+				c.Storage.Endpoint = *p.Storage.Endpoint
+			}
 			if p.GuestMTU != nil {
 				if *p.GuestMTU < 576 || *p.GuestMTU > 9000 {
 					return fmt.Errorf("%w: guestMTU must be between 576 and 9000", ErrInvalid)
@@ -82,6 +96,7 @@ func registerSettings(mux *http.ServeMux, cfg *ConfigStore, nm *NetModel) {
 			writeError(w, err)
 			return
 		}
+		r.SyncStorageEndpoint()
 		respond(w, c)
 	})
 	mux.HandleFunc("POST /api/settings/token", func(w http.ResponseWriter, _ *http.Request) {

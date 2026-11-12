@@ -24,6 +24,10 @@ defineProps<{ name: string }>()
       <path d="M12 3 21 7.5v9L12 21 3 16.5v-9L12 3Z" />
       <path d="M3 7.5 12 12l9-4.5M12 12v9" />
     </template>
+    <template v-else-if="name === 'disk'">
+      <ellipse cx="12" cy="6" rx="8" ry="3" />
+      <path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+    </template>
     <template v-else-if="name === 'network'">
       <rect x="9" y="3" width="6" height="5" rx="1" />
       <rect x="3" y="16" width="6" height="5" rx="1" />

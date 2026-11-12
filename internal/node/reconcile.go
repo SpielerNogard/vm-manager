@@ -5,12 +5,14 @@ import (
 	"log"
 	"slices"
 	"sync"
+	"time"
 
 	"vm-manager/internal/proto"
 )
 
 // reconcile converges the node's VMs to desired, the hub's full list for this node.
-func (a *Agent) reconcile(ctx context.Context, desired []proto.DesiredVM) {
+// seq is the list's Message.Seq, echoed to the hub once the list is applied.
+func (a *Agent) reconcile(ctx context.Context, seq uint64, desired []proto.DesiredVM) {
 	a.reconcileMu.Lock()
 	defer a.reconcileMu.Unlock()
 
@@ -24,8 +26,14 @@ func (a *Agent) reconcile(ctx context.Context, desired []proto.DesiredVM) {
 		if !want[id] {
 			gone = append(gone, e)
 			delete(a.vms, id)
+			if a.dying == nil {
+				a.dying = map[*vmEntry]bool{}
+			}
+			a.dying[e] = true
 		}
 	}
+	deferred := a.deferred
+	a.deferred = nil
 	a.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, e := range gone {
@@ -34,6 +42,7 @@ func (a *Agent) reconcile(ctx context.Context, desired []proto.DesiredVM) {
 	}
 	// Removals finish first so their resources are free before anything new is prepared.
 	wg.Wait()
+	a.resumeDeferred(ctx, deferred, desired)
 
 	for _, d := range desired {
 		a.mu.Lock()
@@ -50,17 +59,85 @@ func (a *Agent) reconcile(ctx context.Context, desired []proto.DesiredVM) {
 			a.updateDesired(ctx, e, d)
 		}
 	}
+
+	a.mu.Lock()
+	a.appliedSeq = seq
+	a.mu.Unlock()
+	a.sendDisks()
+}
+
+func (a *Agent) sendDisks() {
+	a.mu.Lock()
+	m, send := proto.Message{Type: "disks", DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq}, a.send
+	a.mu.Unlock()
+	if send != nil {
+		if err := send(m); err != nil {
+			log.Printf("disks in use: %v", err)
+		}
+	}
+}
+
+// resumeDeferred boots the restored VMs with disks that the hub still wants and deletes the rest.
+func (a *Agent) resumeDeferred(ctx context.Context, deferred []VMFile, desired []proto.DesiredVM) {
+	gens := make(map[string]uint64, len(desired))
+	for _, d := range desired {
+		gens[d.Spec.ID] = d.Generation
+	}
+	for _, f := range deferred {
+		gen, ok := gens[f.Spec.ID]
+		switch {
+		case !ok:
+			if err := DeleteVMDir(a.VMsDir, f.Spec.ID); err != nil {
+				log.Printf("vm %s: delete dir: %v", f.Spec.ID, err)
+			}
+		case gen > f.Generation:
+			// The attachments may have changed while the node was down; updateDesired applies them before booting.
+			booted := make(chan struct{})
+			close(booted)
+			a.mu.Lock()
+			a.vms[f.Spec.ID] = &vmEntry{file: f, status: proto.VMStatus{ID: f.Spec.ID, State: proto.StateStopped}, cancel: func() {}, booted: booted}
+			a.mu.Unlock()
+		default:
+			a.startVM(ctx, f, f.NeedsPrepare)
+		}
+	}
 }
 
 func (a *Agent) destroy(e *vmEntry) {
 	id := e.file.Spec.ID
 	e.cancel()
 	<-e.booted
+	gone := func() {
+		a.mu.Lock()
+		delete(a.dying, e)
+		a.mu.Unlock()
+	}
 	if inst := a.instance(e); inst != nil {
 		e.stopRequested.Store(true)
-		if err := inst.Kill(); err != nil {
+		// Disks outlive the VM, so the guest must flush them; Stop powers off hard if the guest does not shut down.
+		if len(e.file.Spec.Attachments) > 0 {
+			if err := inst.Stop(); err != nil {
+				log.Printf("vm %s: stop: %v", id, err)
+				if err := inst.Kill(); err != nil {
+					log.Printf("vm %s: kill: %v", id, err)
+				}
+			}
+		} else if err := inst.Kill(); err != nil {
 			log.Printf("vm %s: kill: %v", id, err)
 		}
+		select {
+		case <-inst.Done():
+			gone()
+		case <-time.After(killWait):
+			log.Printf("vm %s: still running %s after power-off; its disks stay in use until it exits", id, killWait)
+			go func() {
+				<-inst.Done()
+				gone()
+				a.sendDisks()
+			}()
+		}
+	} else {
+		gone()
 	}
 	if err := DeleteVMDir(a.VMsDir, id); err != nil {
 		log.Printf("vm %s: delete dir: %v", id, err)
@@ -109,15 +186,15 @@ func (a *Agent) updateDesired(ctx context.Context, e *vmEntry, d proto.DesiredVM
 	a.mu.Unlock()
 	f.Power, f.StopMode, f.Generation = d.Power, d.StopMode, d.Generation
 	var reseedErr error
-	halted := !slices.Equal(f.Spec.NICs, d.Spec.NICs)
+	halted := !slices.Equal(f.Spec.NICs, d.Spec.NICs) || !slices.Equal(f.Spec.Attachments, d.Spec.Attachments)
 	if halted {
 		e = a.halt(e)
-		oldNICs := f.Spec.NICs
-		f.Spec.NICs = d.Spec.NICs
+		oldNICs, oldAtts := f.Spec.NICs, f.Spec.Attachments
+		f.Spec.NICs, f.Spec.Attachments = d.Spec.NICs, d.Spec.Attachments
 		if !f.NeedsPrepare {
-			// Keeping the old NICs on failure leaves a difference, so the next generation retries the reseed.
+			// Keeping the old values on failure leaves a difference, so the next generation retries the reseed.
 			if reseedErr = a.Provider.Reseed(ctx, f, VMDir(a.VMsDir, f.Spec.ID)); reseedErr != nil {
-				f.Spec.NICs = oldNICs
+				f.Spec.NICs, f.Spec.Attachments = oldNICs, oldAtts
 			}
 		}
 	}

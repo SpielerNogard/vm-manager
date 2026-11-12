@@ -73,8 +73,11 @@ func NodeHandler(r *Registry, token func() string) http.Handler {
 			if err := dec.Decode(&m); err != nil {
 				return
 			}
-			if m.Type == "status" && m.Status != nil {
+			switch {
+			case m.Type == "status" && m.Status != nil:
 				r.UpdateStatus(id, *m.Status)
+			case m.Type == "disks":
+				r.DisksInUse(id, m.DisksInUse, m.AppliedSeq)
 			}
 		}
 	})

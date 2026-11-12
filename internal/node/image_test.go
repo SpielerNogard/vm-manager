@@ -55,19 +55,6 @@ func TestCloneResizeTooSmall(t *testing.T) {
 	}
 }
 
-func TestCreateDataDisks(t *testing.T) {
-	dir := t.TempDir()
-	if err := CreateDataDisks(dir, []proto.DataDisk{{Name: "a", MountPath: "/a", SizeGB: 1}, {Name: "b", MountPath: "/b", SizeGB: 2}}); err != nil {
-		t.Fatal(err)
-	}
-	for i, want := range []int64{1 << 30, 2 << 30} {
-		st, err := os.Stat(filepath.Join(dir, DataDiskName(i)))
-		if err != nil || st.Size() != want {
-			t.Fatalf("disk %d: %v size %d", i, err, st.Size())
-		}
-	}
-}
-
 func TestCloudInit(t *testing.T) {
 	f := VMFile{Spec: proto.VMSpec{ID: "abc123", Name: "dev", SSHPublicKeys: []string{"ssh-ed25519 AAAAkey me@host", "ssh-rsa BBBBkey you@host"}}, MAC: "7e:30:17:4e:4a:00"}
 	ud, md, nc := CloudInit(f)
@@ -84,29 +71,6 @@ func TestCloudInit(t *testing.T) {
 		if !strings.Contains(nc, want) {
 			t.Errorf("network-config missing %q:\n%s", want, nc)
 		}
-	}
-}
-
-func TestCloudInitDataDisks(t *testing.T) {
-	f := VMFile{Spec: proto.VMSpec{Name: "dev", DataDisks: []proto.DataDisk{{Name: "data", MountPath: "/data", SizeGB: 1}, {Name: "cache", MountPath: "/var/cache/x", SizeGB: 2}}}}
-	ud, _, _ := CloudInit(f)
-	for _, want := range []string{
-		"fs_setup:\n",
-		`{label: "data", filesystem: ext4, device: /dev/vdb, partition: none}`,
-		`{label: "cache", filesystem: ext4, device: /dev/vdc, partition: none}`,
-		"mounts:\n",
-		`["LABEL=data", "/data", ext4, "defaults,nofail", "0", "2"]`,
-		`["LABEL=cache", "/var/cache/x", ext4, "defaults,nofail", "0", "2"]`,
-		"runcmd:\n",
-		`[chown, "ubuntu:ubuntu", "/data"]`,
-		`[chown, "ubuntu:ubuntu", "/var/cache/x"]`,
-	} {
-		if !strings.Contains(ud, want) {
-			t.Errorf("user-data missing %q:\n%s", want, ud)
-		}
-	}
-	if ud, _, _ := CloudInit(VMFile{Spec: proto.VMSpec{Name: "dev"}}); strings.Contains(ud, "fs_setup") || strings.Contains(ud, "mounts") {
-		t.Errorf("user-data without disks has disk config:\n%s", ud)
 	}
 }
 
@@ -198,5 +162,33 @@ func TestCloudInitNetworkNICs(t *testing.T) {
 		if strings.Contains(block, "nameservers") {
 			t.Errorf("net block for %s has nameservers:\n%s", mac, nc)
 		}
+	}
+}
+
+func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
+	ud, _, _ := CloudInit(VMFile{Spec: proto.VMSpec{Name: "dev"}})
+	boot := ud[strings.Index(ud, "bootcmd:"):strings.Index(ud, "updates:")]
+	if !strings.Contains(boot, "LABEL=cidata") || !strings.Contains(boot, "sh /run/vmm-seed/vmm-disks.sh") {
+		t.Fatalf("bootcmd does not run vmm-disks.sh:\n%s", ud)
+	}
+}
+
+func TestDiskScript(t *testing.T) {
+	s := DiskScript(VMFile{Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}, {DiskID: "d2", MountPath: "/it's"}}}})
+	for _, want := range []string{"virtio-d1", "virtio-d2", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`,
+		`if [ $rc -eq 2 ] && dd if="$dev" of=/run/vmm-probe bs=1M count=1 iflag=direct,fullblock 2>/dev/null && [ "$(wc -c </run/vmm-probe)" -eq 1048576 ] && [ "$(tr -d '\000' </run/vmm-probe | wc -c)" -eq 0 ]; then`,
+		`mkfs.ext4 -q -E nodiscard "$dev" && new=1`, "mountpoint -q '/data' || mount \"$dev\" '/data'; } && {", "'/data'", `'/it'\''s'`, "resize2fs", "chown 1000:1000 '/data'"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("script missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "chown ubuntu") {
+		t.Errorf("chown by name fails on first boot, before cloud-init creates the user:\n%s", s)
+	}
+	if strings.Contains(s, "|| { mkfs") {
+		t.Errorf("formats on any blkid failure:\n%s", s)
+	}
+	if s := DiskScript(VMFile{}); strings.Contains(s, "mkfs") {
+		t.Fatalf("empty script formats:\n%s", s)
 	}
 }

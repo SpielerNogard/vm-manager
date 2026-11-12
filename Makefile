@@ -1,4 +1,4 @@
-.PHONY: web hub node test stack
+.PHONY: web hub node storage test stack
 
 web:
 	npm --prefix web ci
@@ -7,6 +7,9 @@ web:
 
 hub:
 	go build -o bin/hub ./cmd/hub
+
+storage:
+	go build -o bin/storage ./cmd/storage
 
 node:
 	go build -o bin/node ./cmd/node
