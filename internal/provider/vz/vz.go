@@ -206,30 +206,30 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 
 	var storage []vz.StorageDeviceConfiguration
 	var nbds []nbdAttachment
-	for _, d := range attachOrder(f) {
+	for _, d := range node.AttachOrder(f) {
 		var att vz.StorageDeviceAttachment
 		var err error
-		if d.nbd {
+		if d.NBD {
 			var nbd *vz.NetworkBlockDeviceStorageDeviceAttachment
-			nbd, err = vz.NewNetworkBlockDeviceStorageDeviceAttachment(d.file, 10*time.Second, false, vz.DiskSynchronizationModeFull)
+			nbd, err = vz.NewNetworkBlockDeviceStorageDeviceAttachment(d.File, 10*time.Second, false, vz.DiskSynchronizationModeFull)
 			if err == nil {
-				nbds = append(nbds, nbdAttachment{diskID: d.name, att: nbd})
+				nbds = append(nbds, nbdAttachment{diskID: d.Name, att: nbd})
 			}
 			att = nbd
 		} else {
 			// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
-			att, err = vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.file), d.readOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
+			att, err = vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.File), d.ReadOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("disk %s: %w", d.name, err)
+			return nil, nil, fmt.Errorf("disk %s: %w", d.Name, err)
 		}
 		blk, err := vz.NewVirtioBlockDeviceConfiguration(att)
 		if err != nil {
 			return nil, nil, err
 		}
-		if d.nbd {
-			if err := blk.SetBlockDeviceIdentifier(d.name); err != nil {
-				return nil, nil, fmt.Errorf("disk %s identifier: %w", d.name, err)
+		if d.NBD {
+			if err := blk.SetBlockDeviceIdentifier(d.Name); err != nil {
+				return nil, nil, fmt.Errorf("disk %s identifier: %w", d.Name, err)
 			}
 		}
 		storage = append(storage, blk)

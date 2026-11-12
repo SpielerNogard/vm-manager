@@ -184,8 +184,8 @@ func DiskScript(f VMFile) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	for i, at := range f.Spec.Attachments {
-		// Disks are found by attach position (root is vda); Firecracker's virtio serial is not the disk ID.
-		dev, mnt := shellQuote("/dev/vd"+string(rune('b'+i))), shellQuote(at.MountPath)
+		// Disks are found by attach position (after root); Firecracker's virtio serial is not the disk ID.
+		dev, mnt := shellQuote("/dev/"+DeviceName(i+1)), shellQuote(at.MountPath)
 		fmt.Fprintf(&b, `dev=%s
 i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
 if [ -b "$dev" ]; then
