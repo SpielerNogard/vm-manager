@@ -1,3 +1,9 @@
+## v0.2.0 (2026-11-12)
+
+### Feat
+
+- one-line node install with hypervisor choice in the GUI (#16)
+
 ## v0.1.0 (2026-11-12)
 
 ### BREAKING CHANGE
