@@ -8,13 +8,13 @@ import { NAV, type Section } from '@/nav'
 import AppIcon from './AppIcon.vue'
 
 const { t } = useI18n()
-const { nodes, vms, keys, devices, networks, settings } = useFleet()
+const { nodes, vms, keys, devices, networks, disks, settings } = useFleet()
 
 const locked = (section: Section) => section !== 'settings' && settings.value?.setupComplete === false
 
 const route = useRoute()
 
-const counts: Record<Exclude<Section, 'settings'>, { value: unknown[] }> = { nodes, vms, keys, devices, networks }
+const counts: Record<Exclude<Section, 'settings'>, { value: unknown[] }> = { nodes, vms, keys, devices, networks, disks }
 const count = (section: Exclude<Section, 'settings'>) => counts[section].value.length
 const isActive = (section: Section) => route.name === section || route.meta.section === section
 </script>

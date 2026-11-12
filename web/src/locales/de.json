@@ -10,6 +10,10 @@
       "label": "VMs",
       "blurb": "Jede VM, die Node, auf der sie läuft, und ihr Management-Hostname für SSH."
     },
+    "disks": {
+      "label": "Disks",
+      "blurb": "Eigenständige Disks, die VMs überdauern. Hänge eine Disk an eine VM an, um sie einzuhängen; sie bleibt beim Löschen der VM erhalten."
+    },
     "keys": {
       "label": "SSH-Keys",
       "blurb": "Gespeicherte Public Keys. Keys der Hub-Maschine stehen immer hier und sind beim Anlegen vorausgewählt."
@@ -98,7 +102,7 @@
     "memory": "RAM (MB)",
     "rootDisk": "Root-Disk (GB)",
     "dataDisks": "Daten-Disks",
-    "dataDisksHint": "Werden beim ersten Boot als ext4 formatiert und am Mountpfad eingehängt.",
+    "dataDisksHint": "Hänge vorhandene Disks an oder lege neue an. Sie werden bei der ersten Nutzung als ext4 formatiert und am Mountpfad eingehängt.",
     "mountPath": "Mountpfad",
     "sizeGB": "GB",
     "diskName": "Disk-Name",
@@ -111,7 +115,10 @@
     "networks": "Netzwerke",
     "networksHint": "VMs im selben Netzwerk erreichen sich als NAME.NETZWERK.internal.",
     "network": "Netzwerk",
-    "removeNetwork": "Netzwerk entfernen"
+    "removeNetwork": "Netzwerk entfernen",
+    "diskSource": "Disk-Quelle",
+    "existingDisk": "Vorhanden",
+    "newDisk": "Neu"
   },
   "keys": {
     "add": "Key hinzufügen",
@@ -184,7 +191,16 @@
     "save": "Speichern",
     "restartTitle": "{name} neu starten?",
     "restartBody": "Die VM wird neu gestartet, um die Netzwerkänderung anzuwenden.",
-    "restartConfirm": "Speichern und neu starten"
+    "restartConfirm": "Speichern und neu starten",
+    "attachedDisks": "Angehängte Disks",
+    "attachedDisksHint": "Eigenständige Disks, die in dieser VM eingehängt sind. Sie bleiben beim Löschen der VM erhalten.",
+    "noAttachedDisks": "Keine Disks angehängt.",
+    "attach": "Anhängen",
+    "detach": "Abhängen",
+    "chooseDisk": "Disk wählen",
+    "detachTitle": "{name} abhängen?",
+    "detachBody": "Die Disk wird ausgehängt und bleibt erhalten. Sie kann wieder angehängt werden, sobald die Node sie freigegeben hat.",
+    "restartDisksBody": "Die VM wird neu gestartet, um die Disk-Änderung anzuwenden."
   },
   "chassis": {
     "connected": "verbunden",
@@ -259,5 +275,46 @@
     "tokenChangeConfirm": "Token ändern",
     "guestMTU": "Gast-MTU",
     "guestMTUHint": "wird auf VMs bei der nächsten DHCP-Lease oder beim Neustart angewendet (576–9000)"
+  },
+  "disks": {
+    "add": "Disk hinzufügen",
+    "emptyTitle": "Noch keine Disks",
+    "emptyBody": "Lege eine Disk an und hänge sie an eine VM an. Disks überleben das Löschen der VM.",
+    "size": "Größe",
+    "allocated": "Belegt",
+    "attachedTo": "Angehängt an",
+    "created": "Erstellt",
+    "storageOnline": "Storage online",
+    "storageOffline": "Storage offline",
+    "state": {
+      "creating": "wird erstellt",
+      "ready": "bereit",
+      "releasing": "wird freigegeben"
+    },
+    "releasingOn": "wird von Node {node} freigegeben",
+    "inUse": "an eine VM angehängt",
+    "dialogTitle": "Disk hinzufügen",
+    "nameHint": "Kleinbuchstaben, Ziffern und Bindestriche.",
+    "sizeGB": "Größe (GB)",
+    "sizeHint": "Kann später nur vergrößert, nicht verkleinert werden.",
+    "create": "Disk erstellen",
+    "copy": "Kopieren",
+    "copyTitle": "{name} kopieren",
+    "copyName": "Name der Kopie",
+    "copyWarning": "Die Disk wird möglicherweise noch von einer VM beschrieben. Die Kopie ist dann nur absturzkonsistent.",
+    "grow": "Vergrößern",
+    "growTitle": "{name} vergrößern",
+    "newSizeGB": "Neue Größe (GB)",
+    "growHint": "Aktuell {size} GB. Eine Disk kann nur wachsen.",
+    "growRestartTitle": "{name} neu starten?",
+    "growRestartBody": "Die VM wird neu gestartet, um die größere Disk zu sehen.",
+    "forceRelease": "Freigabe erzwingen",
+    "releaseTitle": "Freigabe von {name} erzwingen?",
+    "releaseBody": "Node {node} hat noch nicht bestätigt, dass sie diese Disk losgelassen hat. Ist sie endgültig weg, gib die Disk jetzt frei. Was sie noch auf die Disk schreibt, geht verloren.",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Die Disk und ihre Daten werden entfernt. Das kann nicht rückgängig gemacht werden.",
+    "deleteConfirm": "Disk löschen",
+    "orphans": "Verwaiste Dateien",
+    "orphansHint": "Dateien auf dem Storage-Host, die zu keiner Disk gehören. Sie werden nicht automatisch gelöscht."
   }
 }

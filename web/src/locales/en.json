@@ -10,6 +10,10 @@
       "label": "VMs",
       "blurb": "Every VM, the node it runs on, and its management hostname for SSH."
     },
+    "disks": {
+      "label": "Disks",
+      "blurb": "Standalone disks that outlive VMs. Attach a disk to a VM to mount it; it is kept when the VM is deleted."
+    },
     "keys": {
       "label": "SSH keys",
       "blurb": "Stored public keys. Keys of the hub machine are always listed and preselected when you create a VM."
@@ -98,7 +102,7 @@
     "memory": "RAM (MB)",
     "rootDisk": "Root disk (GB)",
     "dataDisks": "Data disks",
-    "dataDisksHint": "Formatted as ext4 on first boot and mounted at the mount path.",
+    "dataDisksHint": "Attach existing disks or create new ones. They are formatted as ext4 on first use and mounted at the mount path.",
     "mountPath": "Mount path",
     "sizeGB": "GB",
     "diskName": "Disk name",
@@ -111,7 +115,10 @@
     "networks": "Networks",
     "networksHint": "VMs on the same network reach each other as NAME.NETWORK.internal.",
     "network": "Network",
-    "removeNetwork": "Remove network"
+    "removeNetwork": "Remove network",
+    "diskSource": "Disk source",
+    "existingDisk": "Existing",
+    "newDisk": "New"
   },
   "keys": {
     "add": "Add key",
@@ -184,7 +191,16 @@
     "save": "Save",
     "restartTitle": "Restart {name}?",
     "restartBody": "The VM will restart to apply the network change.",
-    "restartConfirm": "Save and restart"
+    "restartConfirm": "Save and restart",
+    "attachedDisks": "Attached disks",
+    "attachedDisksHint": "Standalone disks mounted in this VM. They stay when the VM is deleted.",
+    "noAttachedDisks": "No disks attached.",
+    "attach": "Attach",
+    "detach": "Detach",
+    "chooseDisk": "Choose a disk",
+    "detachTitle": "Detach {name}?",
+    "detachBody": "The disk is unmounted and kept. It can be attached again once the node has released it.",
+    "restartDisksBody": "The VM will restart to apply the disk change."
   },
   "chassis": {
     "connected": "connected",
@@ -259,5 +275,46 @@
     "tokenChangeConfirm": "Change token",
     "guestMTU": "Guest MTU",
     "guestMTUHint": "applied to VMs on their next DHCP lease or reboot (576–9000)"
+  },
+  "disks": {
+    "add": "Add disk",
+    "emptyTitle": "No disks yet",
+    "emptyBody": "Create a disk and attach it to a VM. Disks survive deleting the VM.",
+    "size": "Size",
+    "allocated": "Allocated",
+    "attachedTo": "Attached to",
+    "created": "Created",
+    "storageOnline": "storage online",
+    "storageOffline": "storage offline",
+    "state": {
+      "creating": "creating",
+      "ready": "ready",
+      "releasing": "releasing"
+    },
+    "releasingOn": "released by node {node}",
+    "inUse": "attached to a VM",
+    "dialogTitle": "Add disk",
+    "nameHint": "Lowercase letters, digits and hyphens.",
+    "sizeGB": "Size (GB)",
+    "sizeHint": "Can only be grown later, not shrunk.",
+    "create": "Create disk",
+    "copy": "Copy",
+    "copyTitle": "Copy {name}",
+    "copyName": "Name of the copy",
+    "copyWarning": "The disk may still be written by a VM. The copy is then only crash-consistent.",
+    "grow": "Grow",
+    "growTitle": "Grow {name}",
+    "newSizeGB": "New size (GB)",
+    "growHint": "Currently {size} GB. A disk can only grow.",
+    "growRestartTitle": "Restart {name}?",
+    "growRestartBody": "The VM will restart to see the larger disk.",
+    "forceRelease": "Force release",
+    "releaseTitle": "Force release {name}?",
+    "releaseBody": "Node {node} has not confirmed that it let go of this disk. If it is gone for good, release it now. Anything it still writes to the disk is lost.",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "The disk and its data are removed. This cannot be undone.",
+    "deleteConfirm": "Delete disk",
+    "orphans": "Orphaned files",
+    "orphansHint": "Files on the storage host that belong to no disk. They are not deleted automatically."
   }
 }

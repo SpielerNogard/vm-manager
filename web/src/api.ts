@@ -33,10 +33,41 @@ export interface Machine {
 
 export type VMState = 'pending' | 'starting' | 'running' | 'stopped' | 'error' | 'unknown'
 
-export interface DataDisk {
-  name: string
+export interface Attachment {
+  diskId: string
   mountPath: string
   sizeGB: number
+}
+
+export interface DiskAttachment {
+  vmId: string
+  vmName: string
+  nodeId: string
+  mountPath: string
+}
+
+export interface StoredDisk {
+  id: string
+  name: string
+  sizeGB: number
+  allocatedBytes: number
+  state: 'creating' | 'ready' | 'releasing'
+  releasingOn?: string
+  copyFrom?: string
+  attachment?: DiskAttachment
+  createdAt: string
+}
+
+export interface StorageFile {
+  name: string
+  sizeBytes: number
+  allocatedBytes: number
+}
+
+export interface Storage {
+  online: boolean
+  endpoint: string
+  orphans: StorageFile[]
 }
 
 export interface Disk {
@@ -46,6 +77,7 @@ export interface Disk {
   readOnly: boolean
   sizeBytes: number
   allocatedBytes: number
+  error?: string
 }
 
 export interface VM {
@@ -54,7 +86,7 @@ export interface VM {
   cpus: number
   memoryMB: number
   diskGB: number
-  dataDisks?: DataDisk[]
+  attachments?: Attachment[]
   disks?: Disk[]
   sshPublicKeys: string[]
   nics?: NIC[]
@@ -118,7 +150,7 @@ export interface CreateVMRequest {
   cpus: number
   memoryMB: number
   diskGB: number
-  dataDisks: DataDisk[]
+  disks: { diskId: string; mountPath: string }[]
   sshKeyIds: string[]
   networkIds?: string[]
 }
@@ -161,6 +193,17 @@ export const api = {
   deleteNetwork: (id: string) => request<void>('DELETE', `/api/networks/${id}`),
   setVMNetworks: (id: string, networkIds: string[], restartAllowed: boolean) =>
     request<VM>('PUT', `/api/vms/${id}/networks?restartAllowed=${restartAllowed}`, { networkIds }),
+  disks: () => request<StoredDisk[]>('GET', '/api/disks'),
+  createDisk: (name: string, sizeGB: number) => request<StoredDisk>('POST', '/api/disks', { name, sizeGB }),
+  copyDisk: (id: string, name: string) =>
+    request<{ disk: StoredDisk; warning?: string }>('POST', `/api/disks/${id}/copy`, { name }),
+  growDisk: (id: string, sizeGB: number, restartAllowed: boolean) =>
+    request<StoredDisk>('PATCH', `/api/disks/${id}?restartAllowed=${restartAllowed}`, { sizeGB }),
+  deleteDisk: (id: string) => request<void>('DELETE', `/api/disks/${id}`),
+  forceRelease: (id: string) => request<void>('POST', `/api/disks/${id}/release?force=true`),
+  storage: () => request<Storage>('GET', '/api/storage'),
+  setVMDisks: (id: string, disks: { diskId: string; mountPath: string }[], restartAllowed: boolean) =>
+    request<VM>('PUT', `/api/vms/${id}/disks?restartAllowed=${restartAllowed}`, { disks }),
   devices: () => request<Device[]>('GET', '/api/devices'),
   addDevice: (name: string, onHub: boolean) =>
     request<{ device: Device; config: string }>('POST', '/api/devices', { name, onHub }),

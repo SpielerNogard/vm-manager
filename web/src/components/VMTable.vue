@@ -95,7 +95,7 @@ async function deleteVM() {
         <td class="text-right text-sm tabular-nums">
           {{ vm.cpus }} vCPU · {{ formatMB(vm.memoryMB) }}<br />
           <span class="text-base-content/55 text-xs">{{ t('vms.root', { size: vm.diskGB }) }}</span>
-          <div v-for="d in vm.dataDisks" :key="d.name" class="text-base-content/55 text-xs">
+          <div v-for="d in vm.attachments" :key="d.diskId" class="text-base-content/55 text-xs">
             <span class="font-token">{{ d.mountPath }}</span> · {{ d.sizeGB }} GB
           </div>
         </td>
