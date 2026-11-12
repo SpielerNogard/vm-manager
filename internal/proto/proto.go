@@ -120,3 +120,26 @@ type Message struct {
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }
+
+func StorageFileName(diskID string) string { return diskID + ".img" }
+
+type StorageFile struct {
+	Name           string `json:"name"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	AllocatedBytes int64  `json:"allocatedBytes"`
+}
+
+type StorageDisk struct {
+	ID        string `json:"id"`
+	SizeBytes int64  `json:"sizeBytes"`
+	CopyFrom  string `json:"copyFrom,omitempty"`
+}
+
+// StorageMessage types: "register" and "report" (agent→hub), "desired" (hub→agent).
+type StorageMessage struct {
+	Type     string        `json:"type"`
+	Endpoint string        `json:"endpoint,omitempty"` // register: host:port nodes use for NBD
+	Files    []StorageFile `json:"files,omitempty"`
+	Disks    []StorageDisk `json:"disks,omitempty"`
+	Deleted  []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
+}
