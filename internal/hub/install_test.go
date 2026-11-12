@@ -75,3 +75,23 @@ func TestInstallScriptRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallScriptHostSafety(t *testing.T) {
+	s, err := os.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(s)
+	// sudo logs its command line to the system log, so the token must reach `node init` on stdin.
+	if strings.Contains(script, `-token "$TOKEN"`) || !strings.Contains(script, "-token-stdin") {
+		t.Error("token is passed on a (sudo) command line")
+	}
+	// An empty bridge never gets a carrier; without this, wait-online delays boot by 2 minutes.
+	if !strings.Contains(script, "RequiredForOnline=no") {
+		t.Error("vmm0 is required for network-online")
+	}
+	// Docker sets the FORWARD policy to DROP; VM traffic must be allowed in DOCKER-USER.
+	if !strings.Contains(script, "DOCKER-USER") {
+		t.Error("no DOCKER-USER rule for vmm0")
+	}
+}

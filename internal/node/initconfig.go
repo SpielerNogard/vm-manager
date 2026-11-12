@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // InitOptions are the node.json fields the installer sets; zero values leave a field as it is.
@@ -113,4 +115,17 @@ func setNested(doc map[string]json.RawMessage, key string, values map[string]any
 		obj[k] = b
 	}
 	return setJSON(doc, key, obj)
+}
+
+// ReadToken reads the hub token from r (the installer pipes it in so it never appears on a command line).
+func ReadToken(r io.Reader) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(r, 4096))
+	if err != nil {
+		return "", err
+	}
+	t := strings.TrimSpace(string(b))
+	if t == "" {
+		return "", errors.New("no token on stdin")
+	}
+	return t, nil
 }

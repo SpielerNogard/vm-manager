@@ -373,7 +373,15 @@ func (r *Registry) InstallCommand(id, host string) (string, error) {
 		return "", fmt.Errorf("%w: node %q has no hypervisor; recreate it", ErrConflict, id)
 	}
 	return fmt.Sprintf("curl -fsSL http://%s/node/install.sh | sh -s -- --hub http://%s --token %s --name %s --provider %s",
-		hub, hub, c.Token, id, provider), nil
+		hub, hub, shellWord(c.Token), id, provider), nil
+}
+
+// shellWord quotes s for a POSIX shell unless it is plainly safe; tokens set in Settings may contain any non-space character.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (r *Registry) NodeConfig(id, host string) ([]byte, error) {

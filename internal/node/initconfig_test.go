@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +79,15 @@ func TestInitConfigRejectsBadHub(t *testing.T) {
 		if err := InitConfig(o, "a", "b"); err == nil {
 			t.Errorf("%q accepted", hub)
 		}
+	}
+}
+
+func TestInitTokenFromStdin(t *testing.T) {
+	token, err := ReadToken(strings.NewReader("secret-token\n"))
+	if err != nil || token != "secret-token" {
+		t.Fatalf("got %q, %v", token, err)
+	}
+	if _, err := ReadToken(strings.NewReader("")); err == nil {
+		t.Fatal("empty stdin accepted")
 	}
 }

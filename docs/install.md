@@ -115,6 +115,8 @@ EOT
 cat > /etc/systemd/network/vmm0.network <<'EOT'
 [Match]
 Name=vmm0
+[Link]
+RequiredForOnline=no
 [Network]
 Address=192.168.64.1/24
 ConfigureWithoutCarrier=yes

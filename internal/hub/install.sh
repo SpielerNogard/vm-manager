@@ -76,13 +76,13 @@ for f in $FILES; do
 done
 (cd "$TMP" && sha256_check sums >/dev/null) || die "checksum mismatch in the downloaded files"
 
-# node_init runs the given `node init` command with the installer's options appended.
+# node_init runs the given `node init` command with the installer's options; the token goes in on stdin, as sudo logs command lines.
 node_init() {
-	set -- "$@" -hub "$HUB" -token "$TOKEN" -name "$NAME" -provider "$PROVIDER"
+	set -- "$@" -hub "$HUB" -token-stdin -name "$NAME" -provider "$PROVIDER"
 	[ -z "$UNDERLAY_ENDPOINT" ] || set -- "$@" -underlay-endpoint "$UNDERLAY_ENDPOINT"
 	[ -z "$UNDERLAY_MTU" ] || set -- "$@" -underlay-mtu "$UNDERLAY_MTU"
 	[ -z "$MEMORY_MB" ] || set -- "$@" -memory-mb "$MEMORY_MB"
-	"$@"
+	printf '%s\n' "$TOKEN" | "$@"
 }
 
 # wait_connected waits until the node logs a hub connection after byte offset $2 of log $1.
@@ -121,7 +121,7 @@ install_linux() {
 	$SUDO modprobe nbd
 	echo nbd | $SUDO tee /etc/modules-load.d/vm-manager.conf >/dev/null
 	printf '[NetDev]\nName=vmm0\nKind=bridge\n' | $SUDO tee /etc/systemd/network/vmm0.netdev >/dev/null
-	printf '[Match]\nName=vmm0\n[Network]\nAddress=192.168.64.1/24\nConfigureWithoutCarrier=yes\n' |
+	printf '[Match]\nName=vmm0\n[Link]\nRequiredForOnline=no\n[Network]\nAddress=192.168.64.1/24\nConfigureWithoutCarrier=yes\n' |
 		$SUDO tee /etc/systemd/network/vmm0.network >/dev/null
 	$SUDO systemctl enable --now systemd-networkd >/dev/null 2>&1
 	$SUDO networkctl reload
@@ -151,9 +151,10 @@ EOF
 [Unit]
 Description=vm-manager node
 Wants=network-online.target
-After=network-online.target openvswitch-switch.service ovn-controller.service
+After=network-online.target openvswitch-switch.service ovn-controller.service docker.service
 
 [Service]
+ExecStartPre=-/bin/sh -c 'iptables -L DOCKER-USER -n >/dev/null 2>&1 || exit 0; iptables -C DOCKER-USER -i vmm0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i vmm0 -j ACCEPT; iptables -C DOCKER-USER -o vmm0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -o vmm0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
 ExecStart=/usr/local/bin/vm-manager-node -config /etc/vm-manager/node.json
 Restart=always
 RestartSec=5

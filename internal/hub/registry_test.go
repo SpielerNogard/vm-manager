@@ -1028,3 +1028,15 @@ func TestNodeConfigFirecrackerPaths(t *testing.T) {
 		t.Fatalf("config = %s", b)
 	}
 }
+
+func TestInstallCommandQuotesToken(t *testing.T) {
+	var c Config
+	c.Token, c.Hub.Port, c.Clients.Endpoint = "abc&def'0123456789", 8080, "vmm.lan"
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, c))
+	r.CreateNode("n2", "firecracker")
+	got, err := r.InstallCommand("n2", "")
+	// Settings accept any token without whitespace, so it must survive being pasted into a shell.
+	if err != nil || !strings.Contains(got, `--token 'abc&def'\''0123456789' --name n2`) {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}

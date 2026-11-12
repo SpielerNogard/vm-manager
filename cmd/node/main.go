@@ -67,12 +67,20 @@ func runInit(args []string, home string) error {
 	fs.StringVar(&o.Path, "config", filepath.Join(home, ".vm-manager", "node.json"), "path to node config")
 	fs.StringVar(&o.HubURL, "hub", "", "hub address, http://host:port")
 	fs.StringVar(&o.Token, "token", "", "hub token")
+	tokenStdin := fs.Bool("token-stdin", false, "read the hub token from stdin")
 	fs.StringVar(&o.Name, "name", "", "node name")
 	fs.StringVar(&o.Provider, "provider", "", "hypervisor")
 	fs.StringVar(&o.UnderlayEndpoint, "underlay-endpoint", "", "hub WireGuard endpoint host:port")
 	fs.IntVar(&o.UnderlayMTU, "underlay-mtu", 0, "WireGuard MTU")
 	fs.IntVar(&o.MemoryMB, "memory-mb", 0, "memory offered to VMs")
 	fs.Parse(args)
+	if *tokenStdin {
+		t, err := node.ReadToken(os.Stdin)
+		if err != nil {
+			return err
+		}
+		o.Token = t
+	}
 	dir := dataDir(home)
 	return node.InitConfig(o, filepath.Join(dir, "vms"), filepath.Join(dir, "images"))
 }
