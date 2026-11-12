@@ -162,6 +162,7 @@ ethernets:
     match:
       macaddress: %q
     dhcp4: true
+    optional: true
     link-local: []
     accept-ra: false
     dhcp4-overrides:
@@ -177,8 +178,9 @@ ethernets:
 func DiskScript(f VMFile) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	for _, at := range f.Spec.Attachments {
-		dev, mnt := shellQuote("/dev/disk/by-id/virtio-"+at.DiskID), shellQuote(at.MountPath)
+	for i, at := range f.Spec.Attachments {
+		// Disks are found by attach position (root is vda); Firecracker's virtio serial is not the disk ID.
+		dev, mnt := shellQuote("/dev/vd"+string(rune('b'+i))), shellQuote(at.MountPath)
 		fmt.Fprintf(&b, `dev=%s
 i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
 if [ -b "$dev" ]; then
@@ -197,6 +199,14 @@ if [ -b "$dev" ]; then
 fi
 `, dev, mnt)
 	}
+	fmt.Fprintf(&b, `systemd-run --no-block --collect --expand-environment=no --description='vmm ready probe' sh -c '
+for i in $(seq 300); do
+  for n in /sys/class/net/*; do
+    [ "$(cat $n/address)" = %s ] && ip -4 -o addr show dev "${n##*/}" | grep -q inet && {
+      for t in /dev/hvc0 /dev/ttyS0; do [ -c $t ] && echo %s > $t; done; exit 0; }
+  done; sleep 1
+done'
+`, strings.ToLower(f.MAC), ReadyMarker)
 	return b.String()
 }
 

@@ -101,6 +101,14 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		nics = append(nics, gn)
 		nicCfgs = append(nicCfgs, gn.cfg)
 	}
+	if err := node.WriteSeedISO(dir, node.GuestSeedFiles(f)); err != nil {
+		return nil, fmt.Errorf("seed: %w", err)
+	}
+	console := filepath.Join(dir, node.ConsoleLog)
+	offset, err := node.ConsoleOffset(console)
+	if err != nil {
+		return nil, err
+	}
 	cfg, nbds, err := p.vmConfig(f, dir, nicCfgs, false)
 	if err != nil {
 		return nil, err
@@ -109,15 +117,11 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, prevLease, _, err := LookupLease(p.LeasesPath, f.MAC)
-	if err != nil {
-		return nil, err
-	}
 	if err := vm.Start(); err != nil {
 		return nil, err
 	}
 	started = true
-	inst := &instance{vm: vm, mac: f.MAC, leasesPath: p.LeasesPath, prevLease: prevLease, done: make(chan struct{})}
+	inst := &instance{vm: vm, console: console, offset: offset, ip: node.MgmtIP(f), done: make(chan struct{})}
 	go inst.watch()
 	for _, n := range nbds {
 		go p.trackNBD(f.Spec.ID, n.diskID, n.att, inst.done)
@@ -259,7 +263,7 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 		cfg.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{dev})
 	}
 
-	serialAtt, err := vz.NewFileSerialPortAttachment(filepath.Join(dir, "console.log"), true)
+	serialAtt, err := vz.NewFileSerialPortAttachment(filepath.Join(dir, node.ConsoleLog), true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -282,11 +286,11 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 }
 
 type instance struct {
-	vm         *vz.VirtualMachine
-	mac        string
-	leasesPath string
-	prevLease  uint64
-	done       chan struct{}
+	vm      *vz.VirtualMachine
+	console string
+	offset  int64
+	ip      string
+	done    chan struct{}
 }
 
 func (i *instance) watch() {
@@ -301,7 +305,10 @@ func (i *instance) watch() {
 func (i *instance) Done() <-chan struct{} { return i.done }
 
 func (i *instance) WaitIP(ctx context.Context) (string, error) {
-	return waitForLease(ctx, i.leasesPath, i.mac, i.prevLease, 2*time.Second)
+	if err := node.WaitReady(ctx, i.console, i.offset, time.Second); err != nil {
+		return "", err
+	}
+	return i.ip, nil
 }
 
 // Stop asks the guest to shut down and forces it off after 10s.

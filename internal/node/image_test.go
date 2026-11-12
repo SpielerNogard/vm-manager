@@ -175,7 +175,7 @@ func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
 
 func TestDiskScript(t *testing.T) {
 	s := DiskScript(VMFile{Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}, {DiskID: "d2", MountPath: "/it's"}}}})
-	for _, want := range []string{"virtio-d1", "virtio-d2", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`,
+	for _, want := range []string{"dev='/dev/vdb'", "dev='/dev/vdc'", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`,
 		`if [ $rc -eq 2 ] && dd if="$dev" of=/run/vmm-probe bs=1M count=1 iflag=direct,fullblock 2>/dev/null && [ "$(wc -c </run/vmm-probe)" -eq 1048576 ] && [ "$(tr -d '\000' </run/vmm-probe | wc -c)" -eq 0 ]; then`,
 		`mkfs.ext4 -q -E nodiscard "$dev" && new=1`, "mountpoint -q '/data' || mount \"$dev\" '/data'; } && {", "'/data'", `'/it'\''s'`, "resize2fs", "chown 1000:1000 '/data'"} {
 		if !strings.Contains(s, want) {
@@ -190,5 +190,40 @@ func TestDiskScript(t *testing.T) {
 	}
 	if s := DiskScript(VMFile{}); strings.Contains(s, "mkfs") {
 		t.Fatalf("empty script formats:\n%s", s)
+	}
+}
+
+func TestDiskScriptEmitsReadyMarker(t *testing.T) {
+	for _, f := range []VMFile{
+		{MAC: "52:54:00:12:34:56"},
+		{MAC: "52:54:00:12:34:56", Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}}}},
+	} {
+		s := DiskScript(f)
+		for _, want := range []string{"systemd-run", "--description=", "52:54:00:12:34:56", "/dev/ttyS0", "/dev/hvc0"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("script missing %q:\n%s", want, s)
+			}
+		}
+		// systemd expands $VAR and %-specifiers in ExecStart, which would blank the probe's shell variables.
+		probe := s[strings.Index(s, "systemd-run"):]
+		if !strings.Contains(probe, "--expand-environment=no") || strings.Contains(probe, "%") {
+			t.Errorf("probe is subject to systemd expansion:\n%s", probe)
+		}
+		if n := strings.Count(s, ReadyMarker); n != 1 {
+			t.Errorf("marker appears %d times, want 1:\n%s", n, s)
+		}
+	}
+}
+
+func TestCloudInitOVNNICsAreOptional(t *testing.T) {
+	f := VMFile{MAC: "52:54:00:00:00:01", Spec: proto.VMSpec{NICs: []proto.NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:0a"}, {Network: "net1", MAC: "02:0a:d2:00:00:0a"}}}}
+	_, _, nc := CloudInit(f)
+	// Without it, wait-online holds cloud-init (and the ready probe) for 2 minutes whenever OVN is down.
+	if n := strings.Count(nc, "optional: true"); n != 2 {
+		t.Errorf("optional count = %d, want 2 (OVN NICs only):\n%s", n, nc)
+	}
+	primary := nc[:strings.Index(nc, "mgmt0:")]
+	if strings.Contains(primary, "optional") {
+		t.Errorf("primary NIC must stay required:\n%s", nc)
 	}
 }
