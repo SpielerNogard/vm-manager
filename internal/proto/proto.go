@@ -51,6 +51,7 @@ type Disk struct {
 	ReadOnly       bool   `json:"readOnly"`
 	SizeBytes      int64  `json:"sizeBytes"`
 	AllocatedBytes int64  `json:"allocatedBytes"`
+	Error          string `json:"error,omitempty"`
 }
 
 type VMStatus struct {

@@ -32,6 +32,13 @@ type Provider struct {
 	netStop chan struct{} // closed by StopChassis; nil until the netvm was first booted
 	netDone chan struct{} // closed when the supervisor exits
 	netMAC  string
+
+	nbdErrs sync.Map // nbdKey -> last NBD error string
+}
+
+type nbdAttachment struct {
+	diskID string
+	att    *vz.NetworkBlockDeviceStorageDeviceAttachment
 }
 
 func New(c node.Config) (*Provider, error) {
@@ -94,7 +101,7 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		nics = append(nics, gn)
 		nicCfgs = append(nicCfgs, gn.cfg)
 	}
-	cfg, err := p.vmConfig(f, dir, nicCfgs, false)
+	cfg, nbds, err := p.vmConfig(f, dir, nicCfgs, false)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +119,9 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	started = true
 	inst := &instance{vm: vm, mac: f.MAC, leasesPath: p.LeasesPath, prevLease: prevLease, done: make(chan struct{})}
 	go inst.watch()
+	for _, n := range nbds {
+		go p.trackNBD(f.Spec.ID, n.diskID, n.att, inst.done)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var relays sync.WaitGroup
@@ -166,7 +176,7 @@ func newGuestNIC(n proto.NIC) (guestNIC, error) {
 	return guestNIC{}, err
 }
 
-func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNetworkDeviceConfiguration, vsock bool) (*vz.VirtualMachineConfiguration, error) {
+func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNetworkDeviceConfiguration, vsock bool) (*vz.VirtualMachineConfiguration, []nbdAttachment, error) {
 	varsPath := filepath.Join(dir, "efi.vars")
 	var opts []vz.NewEFIVariableStoreOption
 	if _, err := os.Stat(varsPath); errors.Is(err, os.ErrNotExist) {
@@ -174,32 +184,49 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 	}
 	store, err := vz.NewEFIVariableStore(varsPath, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("efi vars: %w", err)
+		return nil, nil, fmt.Errorf("efi vars: %w", err)
 	}
 	boot, err := vz.NewEFIBootLoader(vz.WithEFIVariableStore(store))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg, err := vz.NewVirtualMachineConfiguration(boot, uint(f.Spec.CPUs), uint64(f.Spec.MemoryMB)<<20)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	platform, err := vz.NewGenericPlatformConfiguration()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg.SetPlatformVirtualMachineConfiguration(platform)
 
 	var storage []vz.StorageDeviceConfiguration
+	var nbds []nbdAttachment
 	for _, d := range attachOrder(f) {
-		// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
-		att, err := vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.file), d.readOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
+		var att vz.StorageDeviceAttachment
+		var err error
+		if d.nbd {
+			var nbd *vz.NetworkBlockDeviceStorageDeviceAttachment
+			nbd, err = vz.NewNetworkBlockDeviceStorageDeviceAttachment(d.file, 10*time.Second, false, vz.DiskSynchronizationModeFull)
+			if err == nil {
+				nbds = append(nbds, nbdAttachment{diskID: d.name, att: nbd})
+			}
+			att = nbd
+		} else {
+			// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
+			att, err = vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.file), d.readOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("disk %s: %w", d.file, err)
+			return nil, nil, fmt.Errorf("disk %s: %w", d.name, err)
 		}
 		blk, err := vz.NewVirtioBlockDeviceConfiguration(att)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		if d.nbd {
+			if err := blk.SetBlockDeviceIdentifier(d.name); err != nil {
+				return nil, nil, fmt.Errorf("disk %s identifier: %w", d.name, err)
+			}
 		}
 		storage = append(storage, blk)
 	}
@@ -207,19 +234,19 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 
 	hw, err := net.ParseMAC(f.MAC)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	mac, err := vz.NewMACAddress(hw)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nat, err := vz.NewNATNetworkDeviceAttachment()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nic, err := vz.NewVirtioNetworkDeviceConfiguration(nat)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nic.SetMACAddress(mac)
 	cfg.SetNetworkDevicesVirtualMachineConfiguration(append([]*vz.VirtioNetworkDeviceConfiguration{nic}, extraNICs...))
@@ -227,31 +254,31 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 	if vsock {
 		dev, err := vz.NewVirtioSocketDeviceConfiguration()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		cfg.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{dev})
 	}
 
 	serialAtt, err := vz.NewFileSerialPortAttachment(filepath.Join(dir, "console.log"), true)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	serial, err := vz.NewVirtioConsoleDeviceSerialPortConfiguration(serialAtt)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{serial})
 
 	entropy, err := vz.NewVirtioEntropyDeviceConfiguration()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg.SetEntropyDevicesVirtualMachineConfiguration([]*vz.VirtioEntropyDeviceConfiguration{entropy})
 
 	if ok, err := cfg.Validate(); !ok || err != nil {
-		return nil, fmt.Errorf("invalid vm config: %v", err)
+		return nil, nil, fmt.Errorf("invalid vm config: %v", err)
 	}
-	return cfg, nil
+	return cfg, nbds, nil
 }
 
 type instance struct {

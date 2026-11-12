@@ -25,8 +25,13 @@ func TestDisksFollowAttachOrder(t *testing.T) {
 	}
 	os.Truncate(filepath.Join(dir, "root.img"), sizes["root.img"])
 
-	f := node.VMFile{Spec: proto.VMSpec{}}
-	got, err := (&Provider{}).Disks(f, dir)
+	f := node.VMFile{Spec: proto.VMSpec{ID: "vm1", Attachments: []proto.DiskAttachment{
+		{DiskID: "aaaaaaaaaaaaaaaa", URL: "nbd://h:1/aaaaaaaaaaaaaaaa.img"},
+		{DiskID: "bbbbbbbbbbbbbbbb", URL: "nbd://h:1/bbbbbbbbbbbbbbbb.img"},
+	}}}
+	p := &Provider{}
+	p.nbdErrs.Store("vm1/bbbbbbbbbbbbbbbb", "connection refused")
+	got, err := p.Disks(f, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,14 +40,20 @@ func TestDisksFollowAttachOrder(t *testing.T) {
 		ro                 bool
 	}{
 		{"root", "root.img", "vda", false},
-		{"seed", "seed.iso", "vdb", true},
+		{"aaaaaaaaaaaaaaaa", "nbd://h:1/aaaaaaaaaaaaaaaa.img", "vdb", false},
+		{"bbbbbbbbbbbbbbbb", "nbd://h:1/bbbbbbbbbbbbbbbb.img", "vdc", false},
+		{"seed", "seed.iso", "vdd", true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("disks = %+v", got)
 	}
 	for i, w := range want {
 		d := got[i]
-		if d.Name != w.name || d.File != w.file || d.Device != w.device || d.ReadOnly != w.ro || d.SizeBytes != sizes[w.file] {
+		wantErr := ""
+		if w.name == "bbbbbbbbbbbbbbbb" {
+			wantErr = "connection refused"
+		}
+		if d.Name != w.name || d.File != w.file || d.Device != w.device || d.ReadOnly != w.ro || d.SizeBytes != sizes[w.file] || d.Error != wantErr {
 			t.Errorf("disk %d = %+v, want %+v", i, d, w)
 		}
 	}
