@@ -24,7 +24,7 @@ func attachOrder(f node.VMFile) []attachedDisk {
 	for _, a := range f.Spec.Attachments {
 		disks = append(disks, attachedDisk{name: a.DiskID, file: a.URL, nbd: true})
 	}
-	return append(disks, attachedDisk{name: "seed", file: seedISO, readOnly: true})
+	return append(disks, attachedDisk{name: "seed", file: node.SeedISO, readOnly: true})
 }
 
 func (p *Provider) Disks(f node.VMFile, dir string) ([]proto.Disk, error) {

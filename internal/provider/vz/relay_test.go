@@ -124,34 +124,23 @@ func TestNetvmSeedContainsAgentAndUnit(t *testing.T) {
 	if err := os.WriteFile(agent, []byte("agent-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src := filepath.Join(dir, "seed")
-	if err := os.Mkdir(src, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeNetvmSeed(src, agent, "02:00:00:00:00:01"); err != nil {
-		t.Fatal(err)
-	}
-	ud, err := os.ReadFile(filepath.Join(src, "user-data"))
+	files, err := netvmSeedFiles(agent, "02:00:00:00:00:01")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"netagent.service", "LABEL=cidata", "openvswitch-switch", "ovn-host", "wireguard-tools", "/usr/local/bin/netagent"} {
-		if !strings.Contains(string(ud), want) {
+		if !strings.Contains(string(files["user-data"]), want) {
 			t.Errorf("user-data lacks %q", want)
 		}
 	}
-	nc, err := os.ReadFile(filepath.Join(src, "network-config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(nc), "dhcp-identifier: mac") || !strings.Contains(string(nc), "02:00:00:00:00:01") {
+	nc := string(files["network-config"])
+	if !strings.Contains(nc, "dhcp-identifier: mac") || !strings.Contains(nc, "02:00:00:00:00:01") {
 		t.Errorf("network-config = %q", nc)
 	}
-	if _, err := os.Stat(filepath.Join(src, "meta-data")); err != nil {
-		t.Error(err)
+	if _, ok := files["meta-data"]; !ok {
+		t.Error("meta-data missing")
 	}
-	b, err := os.ReadFile(filepath.Join(src, "netagent"))
-	if err != nil || string(b) != "agent-binary" {
-		t.Fatalf("agent copy = %q, %v", b, err)
+	if b := files["netagent"]; string(b) != "agent-binary" {
+		t.Fatalf("agent copy = %q", b)
 	}
 }

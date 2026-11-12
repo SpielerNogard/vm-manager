@@ -71,11 +71,11 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CloneResize(base, filepath.Join(dir, "root.img"), f.Spec.DiskGB); err != nil {
 		return err
 	}
-	return makeSeedISO(ctx, dir, writeGuestSeed(f))
+	return node.WriteSeedISO(dir, node.GuestSeedFiles(f))
 }
 
 func (p *Provider) Reseed(ctx context.Context, f node.VMFile, dir string) error {
-	return makeSeedISO(ctx, dir, writeGuestSeed(f))
+	return node.WriteSeedISO(dir, node.GuestSeedFiles(f))
 }
 
 func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {

@@ -2,9 +2,7 @@ package vz
 
 import (
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 )
 
 const netvmUserData = `#cloud-config
@@ -33,8 +31,12 @@ runcmd:
   - [systemctl, enable, --now, netagent.service]
 `
 
-// writeNetvmSeed fills the cloud-init seed directory src for the netvm, including the netagent binary.
-func writeNetvmSeed(src, agentPath, mac string) error {
+// netvmSeedFiles is the netvm's cloud-init seed, including the netagent binary.
+func netvmSeedFiles(agentPath, mac string) (map[string][]byte, error) {
+	agent, err := os.ReadFile(agentPath)
+	if err != nil {
+		return nil, err
+	}
 	networkConfig := fmt.Sprintf(`version: 2
 ethernets:
   primary:
@@ -43,28 +45,10 @@ ethernets:
     dhcp4: true
     dhcp-identifier: mac
 `, mac)
-	files := map[string]string{
-		"user-data":      netvmUserData,
-		"meta-data":      "instance-id: vmm-netvm\nlocal-hostname: netvm\n",
-		"network-config": networkConfig,
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(src, name), []byte(content), 0o644); err != nil {
-			return err
-		}
-	}
-	in, err := os.Open(agentPath)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(filepath.Join(src, "netagent"))
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return map[string][]byte{
+		"user-data":      []byte(netvmUserData),
+		"meta-data":      []byte("instance-id: vmm-netvm\nlocal-hostname: netvm\n"),
+		"network-config": []byte(networkConfig),
+		"netagent":       agent,
+	}, nil
 }
