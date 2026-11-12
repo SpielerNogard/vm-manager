@@ -182,7 +182,11 @@ func (p *Provider) bootNetvm(ctx context.Context) error {
 	if err := p.ensureNetvmDisk(dir); err != nil {
 		return err
 	}
-	if err := makeSeedISO(ctx, dir, func(src string) error { return writeNetvmSeed(src, agent, mac) }); err != nil {
+	seed, err := netvmSeedFiles(agent, mac)
+	if err != nil {
+		return err
+	}
+	if err := node.WriteSeedISO(dir, seed); err != nil {
 		return err
 	}
 	f := node.VMFile{Spec: proto.VMSpec{ID: "_netvm", Name: "netvm", CPUs: 1, MemoryMB: 1024, DiskGB: netvmDiskGB}, MAC: mac}

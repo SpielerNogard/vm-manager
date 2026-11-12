@@ -71,11 +71,11 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CloneResize(base, filepath.Join(dir, "root.img"), f.Spec.DiskGB); err != nil {
 		return err
 	}
-	return makeSeedISO(ctx, dir, writeGuestSeed(f))
+	return node.WriteSeedISO(dir, node.GuestSeedFiles(f, node.PrimaryNet{}))
 }
 
 func (p *Provider) Reseed(ctx context.Context, f node.VMFile, dir string) error {
-	return makeSeedISO(ctx, dir, writeGuestSeed(f))
+	return node.WriteSeedISO(dir, node.GuestSeedFiles(f, node.PrimaryNet{}))
 }
 
 func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
@@ -101,6 +101,14 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		nics = append(nics, gn)
 		nicCfgs = append(nicCfgs, gn.cfg)
 	}
+	if err := node.WriteSeedISO(dir, node.GuestSeedFiles(f, node.PrimaryNet{})); err != nil {
+		return nil, fmt.Errorf("seed: %w", err)
+	}
+	console := filepath.Join(dir, node.ConsoleLog)
+	offset, err := node.ConsoleOffset(console)
+	if err != nil {
+		return nil, err
+	}
 	cfg, nbds, err := p.vmConfig(f, dir, nicCfgs, false)
 	if err != nil {
 		return nil, err
@@ -109,15 +117,11 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, prevLease, _, err := LookupLease(p.LeasesPath, f.MAC)
-	if err != nil {
-		return nil, err
-	}
 	if err := vm.Start(); err != nil {
 		return nil, err
 	}
 	started = true
-	inst := &instance{vm: vm, mac: f.MAC, leasesPath: p.LeasesPath, prevLease: prevLease, done: make(chan struct{})}
+	inst := &instance{vm: vm, console: console, offset: offset, ip: node.MgmtIP(f), done: make(chan struct{})}
 	go inst.watch()
 	for _, n := range nbds {
 		go p.trackNBD(f.Spec.ID, n.diskID, n.att, inst.done)
@@ -202,30 +206,30 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 
 	var storage []vz.StorageDeviceConfiguration
 	var nbds []nbdAttachment
-	for _, d := range attachOrder(f) {
+	for _, d := range node.AttachOrder(f) {
 		var att vz.StorageDeviceAttachment
 		var err error
-		if d.nbd {
+		if d.NBD {
 			var nbd *vz.NetworkBlockDeviceStorageDeviceAttachment
-			nbd, err = vz.NewNetworkBlockDeviceStorageDeviceAttachment(d.file, 10*time.Second, false, vz.DiskSynchronizationModeFull)
+			nbd, err = vz.NewNetworkBlockDeviceStorageDeviceAttachment(d.File, 10*time.Second, false, vz.DiskSynchronizationModeFull)
 			if err == nil {
-				nbds = append(nbds, nbdAttachment{diskID: d.name, att: nbd})
+				nbds = append(nbds, nbdAttachment{diskID: d.Name, att: nbd})
 			}
 			att = nbd
 		} else {
 			// The default caching mode corrupts ext4 in Linux guests (seen as inode checksum errors); Lima uses the same setting.
-			att, err = vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.file), d.readOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
+			att, err = vz.NewDiskImageStorageDeviceAttachmentWithCacheAndSync(filepath.Join(dir, d.File), d.ReadOnly, vz.DiskImageCachingModeCached, vz.DiskImageSynchronizationModeFsync)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("disk %s: %w", d.name, err)
+			return nil, nil, fmt.Errorf("disk %s: %w", d.Name, err)
 		}
 		blk, err := vz.NewVirtioBlockDeviceConfiguration(att)
 		if err != nil {
 			return nil, nil, err
 		}
-		if d.nbd {
-			if err := blk.SetBlockDeviceIdentifier(d.name); err != nil {
-				return nil, nil, fmt.Errorf("disk %s identifier: %w", d.name, err)
+		if d.NBD {
+			if err := blk.SetBlockDeviceIdentifier(d.Name); err != nil {
+				return nil, nil, fmt.Errorf("disk %s identifier: %w", d.Name, err)
 			}
 		}
 		storage = append(storage, blk)
@@ -259,7 +263,7 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 		cfg.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{dev})
 	}
 
-	serialAtt, err := vz.NewFileSerialPortAttachment(filepath.Join(dir, "console.log"), true)
+	serialAtt, err := vz.NewFileSerialPortAttachment(filepath.Join(dir, node.ConsoleLog), true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -282,11 +286,11 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 }
 
 type instance struct {
-	vm         *vz.VirtualMachine
-	mac        string
-	leasesPath string
-	prevLease  uint64
-	done       chan struct{}
+	vm      *vz.VirtualMachine
+	console string
+	offset  int64
+	ip      string
+	done    chan struct{}
 }
 
 func (i *instance) watch() {
@@ -301,7 +305,10 @@ func (i *instance) watch() {
 func (i *instance) Done() <-chan struct{} { return i.done }
 
 func (i *instance) WaitIP(ctx context.Context) (string, error) {
-	return waitForLease(ctx, i.leasesPath, i.mac, i.prevLease, 2*time.Second)
+	if err := node.WaitReady(ctx, i.console, i.offset, time.Second); err != nil {
+		return "", err
+	}
+	return i.ip, nil
 }
 
 // Stop asks the guest to shut down and forces it off after 10s.

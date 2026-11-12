@@ -1,4 +1,4 @@
-.PHONY: web hub node storage test stack
+.PHONY: web hub node node-linux storage test stack
 
 web:
 	npm --prefix web ci
@@ -15,6 +15,9 @@ node:
 	go build -o bin/node ./cmd/node
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/netagent-linux-arm64 ./cmd/netagent
 	codesign --force --entitlements node.entitlements -s - bin/node
+
+node-linux:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/node-linux-amd64 ./cmd/node
 
 test:
 	go test ./...

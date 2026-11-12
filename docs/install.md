@@ -7,6 +7,8 @@ make web hub node   # node binary is ad-hoc signed with the virtualization entit
 make test
 ```
 
+`make node-linux` builds `bin/node-linux-amd64` for Linux nodes (Firecracker).
+
 `make node` also builds `bin/netagent-linux-arm64`, which must stay next to the `node` binary: the node boots a small helper VM (`<paths.vms>/_netvm`) that runs it.
 
 ## Run
@@ -16,6 +18,8 @@ Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub
 ```sh
 make stack   # docker compose -f deploy/compose.yaml up -d --build
 ```
+
+On a Linux Docker host, load the kernel modules the gateway needs first: `modprobe -a openvswitch wireguard` (persist them in `/etc/modules-load.d/`); Docker Desktop on the Mac has them.
 
 No config is needed. On first start the hub creates `/data/hub.json` in the `data` volume with a random node token and an empty client endpoint. Open `http://<hub>:8080`: every page except **Settings** redirects there until the client endpoint is set (the API answers POST/PUT/DELETE with 409 meanwhile, except settings, node transport and gateway routes).
 
@@ -63,6 +67,47 @@ curl -X POST http://<hub>:8080/api/vms -d '{
   "diskGB": 20, "sshKeyIds": ["<key-id>"]
 }'
 ```
+
+## Linux node (Firecracker)
+
+Linux nodes are amd64 hosts with KVM (Debian 13 or Ubuntu 24.04) using the `firecracker` provider. OVS and OVN run on the host itself, there is no helper VM. Until the one-line installer exists, set the host up by hand, as root:
+
+```sh
+apt-get install -y openvswitch-switch ovn-host wireguard-tools nbd-client nftables
+curl -fsSL https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-x86_64.tgz | tar -xz -C /tmp
+install /tmp/release-v1.18.0-x86_64/firecracker-v1.18.0-x86_64 /usr/local/bin/firecracker
+modprobe nbd && echo nbd > /etc/modules-load.d/nbd.conf
+
+# NAT bridge for the VMs' eth0 (internet); the node assigns 192.168.64.2-254 statically
+cat > /etc/systemd/network/vmm0.netdev <<'EOT'
+[NetDev]
+Name=vmm0
+Kind=bridge
+EOT
+cat > /etc/systemd/network/vmm0.network <<'EOT'
+[Match]
+Name=vmm0
+[Network]
+Address=192.168.64.1/24
+ConfigureWithoutCarrier=yes
+EOT
+systemctl enable --now systemd-networkd && networkctl reload
+echo net.ipv4.ip_forward=1 > /etc/sysctl.d/90-vmm.conf && sysctl --system
+mkdir -p /etc/nftables.d
+cat > /etc/nftables.d/vmm.nft <<'EOT'
+table ip vmm {
+  chain post {
+    type nat hook postrouting priority 100;
+    ip saddr 192.168.64.0/24 ip daddr != 192.168.64.0/24 masquerade
+  }
+}
+EOT
+echo 'include "/etc/nftables.d/*.nft"' >> /etc/nftables.conf && systemctl enable --now nftables
+```
+
+Copy `bin/node-linux-amd64` to `/usr/local/bin/node` and use a `node.json` with `"provider": "firecracker"` (see `node.firecracker.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if Firecracker, `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
+
+Differences to vz nodes: a VM's `eth0` gets a static address on `vmm0` instead of DHCP, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, ..., and a VM halted from inside the guest (`poweroff`) is stopped by the node because Firecracker has no ACPI power-off.
 
 ## First start
 

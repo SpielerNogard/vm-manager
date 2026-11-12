@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 
 	"golang.org/x/sys/unix"
 
+	"vm-manager/internal/chassisconf"
 	"vm-manager/internal/netframe"
 )
 
@@ -49,7 +49,7 @@ func serve(conn *os.File) {
 	defer func() {
 		if tap != nil {
 			tap.Close()
-			if err := run("ovs-vsctl", "--if-exists", "del-port", "br-int", name); err != nil {
+			if err := chassisconf.Run("ovs-vsctl", "--if-exists", "del-port", "br-int", name); err != nil {
 				log.Print(err)
 			}
 			log.Printf("removed %s", name)
@@ -71,11 +71,11 @@ func serve(conn *os.File) {
 				log.Printf("tap %s: %v", name, err)
 				return
 			}
-			if err := run("ip", "link", "set", name, "mtu", "1500", "up"); err != nil {
+			if err := chassisconf.Run("ip", "link", "set", name, "mtu", "1500", "up"); err != nil {
 				log.Print(err)
 				return
 			}
-			if err := run("ovs-vsctl", "--may-exist", "add-port", "br-int", name, "--", "set", "interface", name, "external_ids:iface-id="+string(payload)); err != nil {
+			if err := chassisconf.Run("ovs-vsctl", "--may-exist", "add-port", "br-int", name, "--", "set", "interface", name, "external_ids:iface-id="+string(payload)); err != nil {
 				log.Print(err)
 				return
 			}
@@ -91,7 +91,7 @@ func serve(conn *os.File) {
 			return
 		case netframe.ConfigureFrame:
 			handleConfigure(conn, payload, func(c netframe.Configure) error {
-				changed, err := applyConfigure(c, "/", run)
+				changed, err := chassisconf.Apply(c, "/", chassisconf.Run)
 				log.Printf("configure %s: changed=%v err=%v", c.Name, changed, err)
 				return err
 			})
@@ -133,11 +133,4 @@ func openTap(name string) (*os.File, error) {
 	}
 	// Non-blocking so the runtime poller owns the fd and Close unblocks a pending Read.
 	return os.NewFile(uintptr(fd), name), nil
-}
-
-func run(name string, args ...string) error {
-	if out, err := exec.Command(name, args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("%s %v: %w: %s", name, args, err, out)
-	}
-	return nil
 }

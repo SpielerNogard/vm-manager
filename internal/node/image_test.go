@@ -57,7 +57,7 @@ func TestCloneResizeTooSmall(t *testing.T) {
 
 func TestCloudInit(t *testing.T) {
 	f := VMFile{Spec: proto.VMSpec{ID: "abc123", Name: "dev", SSHPublicKeys: []string{"ssh-ed25519 AAAAkey me@host", "ssh-rsa BBBBkey you@host"}}, MAC: "7e:30:17:4e:4a:00"}
-	ud, md, nc := CloudInit(f)
+	ud, md, nc := CloudInit(f, PrimaryNet{})
 	for _, want := range []string{"#cloud-config\n", "hostname: dev", "name: ubuntu", "NOPASSWD:ALL", "      - \"ssh-ed25519 AAAAkey me@host\"\n      - \"ssh-rsa BBBBkey you@host\"\n", "console=hvc0", "update-grub"} {
 		if !strings.Contains(ud, want) {
 			t.Errorf("user-data missing %q:\n%s", want, ud)
@@ -112,7 +112,7 @@ func TestEnsureBaseImageHTTPError(t *testing.T) {
 
 func TestCloudInitMgmtNIC(t *testing.T) {
 	f := VMFile{Spec: proto.VMSpec{Name: "dev", NICs: []proto.NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:14", IP: "10.200.0.20", Port: "x-mgmt"}}}, MAC: "7e:30:17:4e:4a:00"}
-	_, _, nc := CloudInit(f)
+	_, _, nc := CloudInit(f, PrimaryNet{})
 	for _, want := range []string{"mgmt0:", `macaddress: "02:0a:c8:00:00:14"`, "dhcp4: true", "use-dns: false", "use-hostname: false", "use-domains: false"} {
 		if !strings.Contains(nc, want) {
 			t.Errorf("network-config missing %q:\n%s", want, nc)
@@ -139,7 +139,7 @@ func TestCloudInitNetworkNICs(t *testing.T) {
 		{Network: "n1", MAC: "02:00:00:00:01:01"},
 		{Network: "n2", MAC: "02:00:00:00:02:01"},
 	}}, MAC: "7e:30:17:4e:4a:00"}
-	ud, _, nc := CloudInit(f)
+	ud, _, nc := CloudInit(f, PrimaryNet{})
 	if !strings.Contains(ud, "when: [boot]") {
 		t.Errorf("user-data missing network update on boot:\n%s", ud)
 	}
@@ -166,7 +166,7 @@ func TestCloudInitNetworkNICs(t *testing.T) {
 }
 
 func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
-	ud, _, _ := CloudInit(VMFile{Spec: proto.VMSpec{Name: "dev"}})
+	ud, _, _ := CloudInit(VMFile{Spec: proto.VMSpec{Name: "dev"}}, PrimaryNet{})
 	boot := ud[strings.Index(ud, "bootcmd:"):strings.Index(ud, "updates:")]
 	if !strings.Contains(boot, "LABEL=cidata") || !strings.Contains(boot, "sh /run/vmm-seed/vmm-disks.sh") {
 		t.Fatalf("bootcmd does not run vmm-disks.sh:\n%s", ud)
@@ -175,7 +175,7 @@ func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
 
 func TestDiskScript(t *testing.T) {
 	s := DiskScript(VMFile{Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}, {DiskID: "d2", MountPath: "/it's"}}}})
-	for _, want := range []string{"virtio-d1", "virtio-d2", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`,
+	for _, want := range []string{"dev='/dev/vdb'", "dev='/dev/vdc'", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`,
 		`if [ $rc -eq 2 ] && dd if="$dev" of=/run/vmm-probe bs=1M count=1 iflag=direct,fullblock 2>/dev/null && [ "$(wc -c </run/vmm-probe)" -eq 1048576 ] && [ "$(tr -d '\000' </run/vmm-probe | wc -c)" -eq 0 ]; then`,
 		`mkfs.ext4 -q -E nodiscard "$dev" && new=1`, "mountpoint -q '/data' || mount \"$dev\" '/data'; } && {", "'/data'", `'/it'\''s'`, "resize2fs", "chown 1000:1000 '/data'"} {
 		if !strings.Contains(s, want) {
@@ -190,5 +190,58 @@ func TestDiskScript(t *testing.T) {
 	}
 	if s := DiskScript(VMFile{}); strings.Contains(s, "mkfs") {
 		t.Fatalf("empty script formats:\n%s", s)
+	}
+}
+
+func TestDiskScriptEmitsReadyMarker(t *testing.T) {
+	for _, f := range []VMFile{
+		{MAC: "52:54:00:12:34:56"},
+		{MAC: "52:54:00:12:34:56", Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}}}},
+	} {
+		s := DiskScript(f)
+		for _, want := range []string{"systemd-run", "--description=", "52:54:00:12:34:56", "/dev/ttyS0", "/dev/hvc0"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("script missing %q:\n%s", want, s)
+			}
+		}
+		// systemd expands $VAR and %-specifiers in ExecStart, which would blank the probe's shell variables.
+		probe := s[strings.Index(s, "systemd-run"):]
+		// systemd < 254 has no --expand-environment, so the probe runs from a script file systemd never expands.
+		if strings.Contains(probe, "--expand-environment") || !strings.Contains(probe, "sh /run/vmm-ready.sh") || !strings.Contains(s, "<<'VMM_READY'") {
+			t.Errorf("probe depends on systemd expansion rules:\n%s", s)
+		}
+		if n := strings.Count(s, ReadyMarker); n != 1 {
+			t.Errorf("marker appears %d times, want 1:\n%s", n, s)
+		}
+	}
+}
+
+func TestCloudInitOVNNICsAreOptional(t *testing.T) {
+	f := VMFile{MAC: "52:54:00:00:00:01", Spec: proto.VMSpec{NICs: []proto.NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:0a"}, {Network: "net1", MAC: "02:0a:d2:00:00:0a"}}}}
+	_, _, nc := CloudInit(f, PrimaryNet{})
+	// Without it, wait-online holds cloud-init (and the ready probe) for 2 minutes whenever OVN is down.
+	if n := strings.Count(nc, "optional: true"); n != 2 {
+		t.Errorf("optional count = %d, want 2 (OVN NICs only):\n%s", n, nc)
+	}
+	primary := nc[:strings.Index(nc, "mgmt0:")]
+	if strings.Contains(primary, "optional") {
+		t.Errorf("primary NIC must stay required:\n%s", nc)
+	}
+}
+
+func TestCloudInitStaticPrimary(t *testing.T) {
+	f := VMFile{MAC: "06:00:c0:a8:40:05"}
+	_, _, nc := CloudInit(f, PrimaryNet{Address: "192.168.64.5/24", Gateway: "192.168.64.1"})
+	for _, want := range []string{`macaddress: "06:00:c0:a8:40:05"`, `addresses: ["192.168.64.5/24"]`, "to: default", "via: 192.168.64.1", "addresses: [1.1.1.1, 9.9.9.9]"} {
+		if !strings.Contains(nc, want) {
+			t.Errorf("network-config lacks %q:\n%s", want, nc)
+		}
+	}
+	if strings.Contains(nc, "dhcp4: true") || strings.Contains(nc, "dhcp-identifier") {
+		t.Errorf("static primary must not use DHCP:\n%s", nc)
+	}
+	_, _, dhcp := CloudInit(f, PrimaryNet{})
+	if !strings.Contains(dhcp, "dhcp4: true") || !strings.Contains(dhcp, "dhcp-identifier: mac") {
+		t.Errorf("zero PrimaryNet must keep DHCP:\n%s", dhcp)
 	}
 }

@@ -116,7 +116,10 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func CloudInit(f VMFile) (userData, metaData, networkConfig string) {
+// PrimaryNet is a static address for the primary NIC (CIDR); the zero value means DHCP.
+type PrimaryNet struct{ Address, Gateway string }
+
+func CloudInit(f VMFile, primary PrimaryNet) (userData, metaData, networkConfig string) {
 	var keys strings.Builder
 	for _, k := range f.Spec.SSHPublicKeys {
 		j, _ := json.Marshal(k) // JSON string is valid YAML and escapes anything odd in the key
@@ -141,14 +144,16 @@ updates:
 `, f.Spec.Name, keys.String())
 	metaData = fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", f.Spec.ID, f.Spec.Name)
 	// dhcp-identifier: mac makes the guest's DHCP lease findable by MAC (Ubuntu defaults to a DUID).
+	addressing := "    dhcp4: true\n    dhcp-identifier: mac\n"
+	if primary.Address != "" {
+		addressing = fmt.Sprintf("    addresses: [%q]\n    routes: [{to: default, via: %s}]\n    nameservers: {addresses: [1.1.1.1, 9.9.9.9]}\n", primary.Address, primary.Gateway)
+	}
 	networkConfig = fmt.Sprintf(`version: 2
 ethernets:
   primary:
     match:
       macaddress: %q
-    dhcp4: true
-    dhcp-identifier: mac
-`, f.MAC)
+%s`, f.MAC, addressing)
 	netIdx := 0
 	for _, n := range f.Spec.NICs {
 		name, dns := "mgmt0", "    nameservers:\n      addresses: [10.201.0.1]\n      search: [\"~internal\"]\n"
@@ -162,6 +167,7 @@ ethernets:
     match:
       macaddress: %q
     dhcp4: true
+    optional: true
     link-local: []
     accept-ra: false
     dhcp4-overrides:
@@ -177,8 +183,9 @@ ethernets:
 func DiskScript(f VMFile) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	for _, at := range f.Spec.Attachments {
-		dev, mnt := shellQuote("/dev/disk/by-id/virtio-"+at.DiskID), shellQuote(at.MountPath)
+	for i, at := range f.Spec.Attachments {
+		// Disks are found by attach position (after root); Firecracker's virtio serial is not the disk ID.
+		dev, mnt := shellQuote("/dev/"+DeviceName(i+1)), shellQuote(at.MountPath)
 		fmt.Fprintf(&b, `dev=%s
 i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
 if [ -b "$dev" ]; then
@@ -197,6 +204,16 @@ if [ -b "$dev" ]; then
 fi
 `, dev, mnt)
 	}
+	fmt.Fprintf(&b, `cat > /run/vmm-ready.sh <<'VMM_READY'
+for i in $(seq 300); do
+  for n in /sys/class/net/*; do
+    [ "$(cat $n/address)" = %s ] && ip -4 -o addr show dev "${n##*/}" | grep -q inet && {
+      for t in /dev/hvc0 /dev/ttyS0; do [ -c $t ] && echo %s > $t; done; exit 0; }
+  done; sleep 1
+done
+VMM_READY
+systemd-run --no-block --collect --description='vmm ready probe' sh /run/vmm-ready.sh
+`, strings.ToLower(f.MAC), ReadyMarker)
 	return b.String()
 }
 
