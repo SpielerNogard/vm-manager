@@ -1,0 +1,73 @@
+# Install
+
+## Build
+
+```sh
+make web hub node   # node binary is ad-hoc signed with the virtualization entitlement
+make test
+```
+
+`make node` also builds `bin/netagent-linux-arm64`, which must stay next to the `node` binary: the node boots a small helper VM (`<paths.vms>/_netvm`) that runs it.
+
+## Run
+
+Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub):
+
+```sh
+make stack   # docker compose -f deploy/compose.yaml up -d --build
+```
+
+No config is needed. On first start the hub creates `/data/hub.json` in the `data` volume with a random node token and an empty client endpoint. Open `http://<hub>:8080`: every page except **Settings** redirects there until the client endpoint is set (the API answers POST/PUT/DELETE with 409 meanwhile, except settings, node transport and gateway routes).
+
+Settings page:
+
+| Tab | |
+|---|---|
+| Networking | Client endpoint (host name or IP, no scheme or port) that devices connect to. Storage endpoint (`host:port`) nodes use for disks; empty means the client endpoint with the storage port. Ports and listen address are shown read-only |
+| Security | Node token: show, copy, regenerate or set (at least 16 characters) |
+| Guests | Guest mgmt MTU (576-9000), delivered by OVN DHCP |
+
+Changes apply without a restart; the gateway re-reads the token automatically.
+
+`deploy/.env` is optional and only sets the published ports (and the SSH dir); the hub writes the ports into `hub.json` on start:
+
+| Variable | Default | |
+|---|---|---|
+| `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
+| `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
+| `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
+| `HUB_SSH_DIR` | `~/.ssh` | Directory with the default SSH public keys offered as hub keys |
+| `STORAGE_PORT` | `10809` | Published NBD port of the storage server (tcp); also the port of the default storage endpoint |
+
+To change a port, set it in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
+
+Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint; nodes need tcp `STORAGE_PORT` if you run the storage server. To run the hub without the stack, start `./bin/hub`; it creates `~/.vm-manager/hub.json` on first start (random token, empty client endpoint) and you finish setup in the GUI. Without the gateway container, VMs get no network.
+
+Add a node: on the **Nodes** page click **Add node** (name: lowercase letters, digits, hyphens). The node appears as `pending` and its detail page shows its `node.json` with copy and download. The hub address in it is editable and defaults to the client endpoint; use `localhost` on the hub's own Mac, or a LAN IP if nodes reach the hub differently. Save it as `~/.vm-manager/node.json` on the node and start it:
+
+```sh
+./bin/node   # config defaults to ~/.vm-manager/node.json
+```
+
+Node states are `pending` (added, never connected), `online` and `offline`. Nodes without VMs can be deleted in any state; a deleted node that keeps running reconnects and appears again. Unknown nodes can also register themselves with the token. For a manual config copy `node.example.json` and set `hub.url` (`ws://<hub>:<HUB_PORT>/api/nodes/connect`), the same token and paths.
+
+A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to `<host>:<UNDERLAY_PORT>`, using the published host port. By default the node uses the host of `hub.url` and the hub's `underlay.port`. Behind Tailscale also add `"underlay": {"mtu": 1200}` to `node.json` and set the guest MTU to 1140 or less in Settings. Guest mgmt NICs are IPv4-only (IPv6 is disabled on them), so the DHCP MTU is not raised to 1280.
+
+Open `http://<hub>:8080`, add your SSH public key under **SSH-Keys** (the hub's own default keys are already there), then pick a node and create a VM. You can also use the API:
+
+```sh
+curl -X POST http://<hub>:8080/api/keys -d '{"name": "laptop", "publicKey": "'"$(cat ~/.ssh/id_ed25519.pub)"'"}'
+# → {"id": "<key-id>", ...}
+curl -X POST http://<hub>:8080/api/vms -d '{
+  "nodeId": "mac-mini-1", "name": "dev", "cpus": 2, "memoryMB": 2048,
+  "diskGB": 20, "sshKeyIds": ["<key-id>"]
+}'
+```
+
+## First start
+
+On first use, the node downloads the Ubuntu cloud image into `paths.images`, which takes a few minutes. VMs created before this version used per-VM SSH ports and must be recreated. `sshPort` and `sshPorts` are gone.
+
+## Upgrading
+
+Upgrade the hub and all nodes together; old and new versions don't work with each other. Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
