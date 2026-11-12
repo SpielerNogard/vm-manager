@@ -67,6 +67,7 @@ func markReady(r *Registry, ids ...string) {
 func TestCreateVMWithDisks(t *testing.T) {
 	r, n, _ := newAttachRegistry(t)
 	d := mustDisk(t, r, "data", 3)
+	markReady(r, d.ID)
 	vm := createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
 	m := n.last()
 	if len(m.Desired) != 1 {
@@ -327,6 +328,7 @@ func TestGrowAttachedBumpsAfterReport(t *testing.T) {
 func TestEndpointChangeBumpsVMs(t *testing.T) {
 	r, n, fs := newAttachRegistry(t)
 	d := mustDisk(t, r, "data", 1)
+	markReady(r, d.ID)
 	createWithDisks(t, r, "with", AttachRequest{DiskID: d.ID, MountPath: "/data"})
 	createWithDisks(t, r, "without")
 	if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "st:10809"}, fs); err != nil {
@@ -457,5 +459,90 @@ func TestAttachSizeFollowsReportedFile(t *testing.T) {
 	got := r.VMs()[0]
 	if got.ID != vm.ID || got.Attachments[0].SizeGB != 3 || got.generation != 2 || n.last().Desired[0].Spec.Attachments[0].SizeGB != 3 {
 		t.Fatalf("after report: gen %d %+v", got.generation, got.Attachments)
+	}
+}
+
+func TestDiskSeenStopsCreate(t *testing.T) {
+	r, _, fs := newAttachRegistry(t)
+	d := mustDisk(t, r, "data", 2)
+	if m := fs.last(); len(m.Disks) != 1 || !m.Disks[0].Create {
+		t.Fatalf("new disk: desired = %+v", m)
+	}
+	r.StorageReport([]proto.StorageFile{{Name: proto.StorageFileName(d.ID), SizeBytes: 1 << 30}})
+	if st, _ := r.disks.Get(d.ID); st.Seen {
+		t.Fatal("seen below full size")
+	}
+	markReady(r, d.ID)
+	disks, err := LoadDiskStore(r.disks.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := disks.Get(d.ID); !st.Seen {
+		t.Fatal("seen not persisted")
+	}
+	r.pushStorage()
+	if m := fs.last(); len(m.Disks) != 1 || m.Disks[0].Create {
+		t.Fatalf("seen disk: desired = %+v", m)
+	}
+}
+
+func TestSeenDiskMissing(t *testing.T) {
+	r, _, fs := newAttachRegistry(t)
+	d := mustDisk(t, r, "data", 1)
+	r.StorageReport(nil)
+	if v := diskOf(t, r, d.ID); v.State != "creating" {
+		t.Fatalf("never seen: state = %q", v.State)
+	}
+	markReady(r, d.ID)
+	r.StorageReport(nil)
+	if v := diskOf(t, r, d.ID); v.State != "missing" {
+		t.Fatalf("state = %q", v.State)
+	}
+	q := validReq()
+	q.Name, q.CPUs, q.MemoryMB, q.Disks = "dev", 1, 1024, []AttachRequest{{DiskID: d.ID, MountPath: "/data"}}
+	if _, err := r.CreateVM(q); !errors.Is(err, ErrConflict) {
+		t.Fatalf("attach missing: err = %v", err)
+	}
+	r.StorageDisconnected(fs)
+	if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "st:10809"}, fs); err != nil {
+		t.Fatal(err)
+	}
+	if v := diskOf(t, r, d.ID); v.State == "missing" {
+		t.Fatal("missing before the reconnected storage reported")
+	}
+}
+
+func TestAttachURLWaitsForSeen(t *testing.T) {
+	r, n, _ := newAttachRegistry(t)
+	d := mustDisk(t, r, "data", 1)
+	createWithDisks(t, r, "dev", AttachRequest{DiskID: d.ID, MountPath: "/data"})
+	if a := n.last().Desired[0].Spec.Attachments[0]; a.URL != "" {
+		t.Fatalf("url before seen = %q", a.URL)
+	}
+	sent := n.count()
+	markReady(r, d.ID)
+	want := "nbd://st:10809/" + d.ID + ".img"
+	if got := r.VMs()[0]; got.generation != 2 || n.count() != sent+1 || n.last().Desired[0].Spec.Attachments[0].URL != want {
+		t.Fatalf("after seen: gen %d, desired %+v", got.generation, n.last().Desired)
+	}
+	markReady(r, d.ID)
+	if r.VMs()[0].generation != 2 {
+		t.Fatal("bumped again")
+	}
+	disks, err := LoadDiskStore(r.disks.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(newTestNet(t), store, disks, Config{})
+	n2 := &fakeNode{}
+	if err := r2.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n2); err != nil {
+		t.Fatal(err)
+	}
+	if a := n2.last().Desired[0].Spec.Attachments[0]; a.URL != want {
+		t.Fatalf("url after hub restart = %q", a.URL)
 	}
 }

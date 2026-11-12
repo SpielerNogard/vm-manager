@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -257,15 +256,16 @@ func (a *Agent) disksInUse() []string {
 }
 
 // checkStorage dials each NBD server f attaches, so a VM whose disks are unreachable fails instead of booting.
+// Its error is the full status message.
 func checkStorage(f VMFile) error {
 	dialed := map[string]bool{}
 	for _, at := range f.Spec.Attachments {
 		if at.URL == "" {
-			return errors.New("no storage endpoint")
+			return fmt.Errorf("storage not ready: disk %s has no NBD URL yet", at.DiskID)
 		}
 		u, err := url.Parse(at.URL)
 		if err != nil {
-			return err
+			return fmt.Errorf("storage unreachable: %w", err)
 		}
 		if dialed[u.Host] {
 			continue
@@ -273,7 +273,7 @@ func checkStorage(f VMFile) error {
 		dialed[u.Host] = true
 		c, err := net.DialTimeout("tcp", u.Host, 3*time.Second)
 		if err != nil {
-			return err
+			return fmt.Errorf("storage unreachable: %w", err)
 		}
 		c.Close()
 	}
@@ -315,7 +315,8 @@ func (a *Agent) boot(ctx context.Context, e *vmEntry, f VMFile, prepare bool) {
 		return
 	}
 	if err := checkStorage(f); err != nil {
-		fail("storage unreachable", err)
+		close(e.booted)
+		report(proto.VMStatus{ID: id, State: proto.StateError, Error: err.Error()})
 		return
 	}
 	inst, err := a.Provider.Start(f, dir)
@@ -433,7 +434,7 @@ func (a *Agent) restart(ctx context.Context, e *vmEntry) (Instance, error) {
 		}
 	}
 	if err := checkStorage(f); err != nil {
-		return nil, fmt.Errorf("storage unreachable: %w", err)
+		return nil, err
 	}
 	inst, err := a.Provider.Start(f, VMDir(a.VMsDir, f.Spec.ID))
 	if err != nil {

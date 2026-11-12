@@ -289,7 +289,8 @@
     "state": {
       "creating": "creating",
       "ready": "ready",
-      "releasing": "releasing"
+      "releasing": "releasing",
+      "missing": "missing"
     },
     "releasingOn": "released by node {node}",
     "inUse": "attached to a VM",

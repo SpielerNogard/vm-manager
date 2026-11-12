@@ -18,6 +18,8 @@ type StoredDisk struct {
 	SizeGB    int       `json:"sizeGB"`
 	CopyFrom  string    `json:"copyFrom,omitempty"` // cleared once the storage agent reports the file
 	CreatedAt time.Time `json:"createdAt"`
+	// Seen is set once the storage agent reported the file at full size; from then on it is never created anew.
+	Seen bool `json:"seen,omitempty"`
 	// ReleasingOn is the node that must confirm it stopped using the disk before it can be attached again.
 	ReleasingOn  string `json:"releasingOn,omitempty"`
 	ReleasingSeq uint64 `json:"releasingSeq,omitempty"` // first desired seq that no longer uses the disk

@@ -618,7 +618,7 @@ func TestStartFailsWhenStorageUnreachable(t *testing.T) {
 	if st, _ := a.vmStatus("a"); !strings.Contains(st.Error, "storage unreachable") {
 		t.Fatalf("a error = %q", st.Error)
 	}
-	if st, _ := a.vmStatus("b"); st.Error != "storage unreachable: no storage endpoint" {
+	if st, _ := a.vmStatus("b"); st.Error != "storage not ready: disk d2 has no NBD URL yet" {
 		t.Fatalf("b error = %q", st.Error)
 	}
 	if p.instance("a") != nil || p.instance("b") != nil {

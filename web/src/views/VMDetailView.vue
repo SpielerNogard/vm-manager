@@ -43,7 +43,7 @@ const attachmentRows = computed(() =>
     }
   }),
 )
-const attachableDisks = computed(() => storedDisks.value.filter((d) => !d.attachment && d.state !== 'releasing'))
+const attachableDisks = computed(() => storedDisks.value.filter((d) => !d.attachment && d.state !== 'releasing' && d.state !== 'missing'))
 const networkName = (id: string) => networks.value.find((n) => n.id === id)?.name ?? id
 const attachable = computed(() => networks.value.filter((n) => !n.builtin))
 const vmNics = computed(() => (vm.value?.nics ?? []).filter((nic) => nic.network !== 'mgmt'))

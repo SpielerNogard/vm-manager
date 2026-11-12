@@ -43,7 +43,7 @@ watch(open, (isOpen) => {
 
 const userNetworks = computed(() => networks.value.filter((n) => !n.builtin))
 
-const freeDisks = computed(() => disks.value.filter((d) => !d.attachment && d.state !== 'releasing'))
+const freeDisks = computed(() => disks.value.filter((d) => !d.attachment && d.state !== 'releasing' && d.state !== 'missing'))
 
 function addDisk() {
   const n = rows.value.length

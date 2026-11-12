@@ -27,7 +27,7 @@ func apply(t *testing.T, d Dir, disks []proto.StorageDisk, deleted []string) {
 
 func TestApplyCreatesSparse(t *testing.T) {
 	d := Dir{t.TempDir()}
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30, Create: true}}, nil)
 	size, alloc := stat(t, filepath.Join(d.Path, "a.img"))
 	if size != 1<<30 || alloc >= 1<<20 {
 		t.Fatalf("size %d alloc %d", size, alloc)
@@ -36,7 +36,7 @@ func TestApplyCreatesSparse(t *testing.T) {
 
 func TestApplyGrowsKeepsData(t *testing.T) {
 	d := Dir{t.TempDir()}
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30, Create: true}}, nil)
 	p := filepath.Join(d.Path, "a.img")
 	f, _ := os.OpenFile(p, os.O_WRONLY, 0)
 	f.WriteAt([]byte("hello"), 0)
@@ -54,8 +54,8 @@ func TestApplyGrowsKeepsData(t *testing.T) {
 
 func TestApplyNeverShrinks(t *testing.T) {
 	d := Dir{t.TempDir()}
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 2 << 30}}, nil)
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 2 << 30, Create: true}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30, Create: true}}, nil)
 	if size, _ := stat(t, filepath.Join(d.Path, "a.img")); size != 2<<30 {
 		t.Fatalf("size %d", size)
 	}
@@ -63,12 +63,12 @@ func TestApplyNeverShrinks(t *testing.T) {
 
 func TestApplyCopies(t *testing.T) {
 	d := Dir{t.TempDir()}
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30, Create: true}}, nil)
 	f, _ := os.OpenFile(filepath.Join(d.Path, "a.img"), os.O_WRONLY, 0)
 	f.WriteAt([]byte("start"), 0)
 	f.WriteAt([]byte("middle"), 512<<20)
 	f.Close()
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30}, {ID: "b", SizeBytes: 1 << 30, CopyFrom: "a"}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 30, Create: true}, {ID: "b", SizeBytes: 1 << 30, CopyFrom: "a", Create: true}}, nil)
 	p := filepath.Join(d.Path, "b.img")
 	f, _ = os.Open(p)
 	defer f.Close()
@@ -83,12 +83,12 @@ func TestApplyCopies(t *testing.T) {
 
 func TestApplyCopyMissingSourceSkips(t *testing.T) {
 	d := Dir{t.TempDir()}
-	b := proto.StorageDisk{ID: "b", SizeBytes: 1 << 20, CopyFrom: "a"}
+	b := proto.StorageDisk{ID: "b", SizeBytes: 1 << 20, CopyFrom: "a", Create: true}
 	apply(t, d, []proto.StorageDisk{b}, nil)
 	if _, err := os.Stat(filepath.Join(d.Path, "b.img")); !os.IsNotExist(err) {
 		t.Fatalf("b.img exists: %v", err)
 	}
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 20}}, nil)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 20, Create: true}}, nil)
 	apply(t, d, []proto.StorageDisk{b}, nil)
 	if _, err := os.Stat(filepath.Join(d.Path, "b.img")); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestApplyDeletesOnlyTombstones(t *testing.T) {
 	for _, n := range []string{"a.img", "b.img", "x.img"} {
 		os.WriteFile(filepath.Join(d.Path, n), nil, 0o644)
 	}
-	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 0}}, []string{"b"})
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 0, Create: true}}, []string{"b"})
 	files, _ := d.Scan()
 	if len(files) != 2 || files[0].Name != "a.img" || files[1].Name != "x.img" {
 		t.Fatalf("%+v", files)
@@ -125,9 +125,9 @@ func TestApplyRejectsPathIDs(t *testing.T) {
 	bad := []string{"", ".", "..", "../victim", "sub/x", `sub\x`}
 	var disks []proto.StorageDisk
 	for _, id := range bad {
-		disks = append(disks, proto.StorageDisk{ID: id, SizeBytes: 1 << 20})
+		disks = append(disks, proto.StorageDisk{ID: id, SizeBytes: 1 << 20, Create: true})
 	}
-	disks = append(disks, proto.StorageDisk{ID: "copy", SizeBytes: 1 << 20, CopyFrom: "../victim"}, proto.StorageDisk{ID: "good", SizeBytes: 1 << 20})
+	disks = append(disks, proto.StorageDisk{ID: "copy", SizeBytes: 1 << 20, CopyFrom: "../victim", Create: true}, proto.StorageDisk{ID: "good", SizeBytes: 1 << 20, Create: true})
 	if err := d.Apply(disks, append(bad, "ok/../../victim")); err == nil {
 		t.Fatal("no error")
 	}
@@ -137,5 +137,16 @@ func TestApplyRejectsPathIDs(t *testing.T) {
 	files, _ := d.Scan()
 	if len(files) != 2 || files[0].Name != "good.img" || files[1].Name != "ok.img" {
 		t.Fatalf("%+v", files)
+	}
+}
+
+func TestApplyCreatesOnlyWhenAsked(t *testing.T) {
+	d := Dir{t.TempDir()}
+	os.WriteFile(filepath.Join(d.Path, "src.img"), []byte("data"), 0o644)
+	apply(t, d, []proto.StorageDisk{{ID: "a", SizeBytes: 1 << 20}, {ID: "b", SizeBytes: 1 << 20, CopyFrom: "src"}}, nil)
+	for _, n := range []string{"a.img", "b.img"} {
+		if _, err := os.Stat(filepath.Join(d.Path, n)); !os.IsNotExist(err) {
+			t.Fatalf("%s created without Create: %v", n, err)
+		}
 	}
 }

@@ -146,9 +146,11 @@ type Registry struct {
 	// sendMu (per node, kept across reconnects and node deletion so ordering survives re-registration) orders desired lists so a node never receives an older one after a newer one.
 	sendMu map[string]*sync.Mutex
 
-	storage       StorageConn
-	storageFiles  []proto.StorageFile
-	storageSendMu sync.Mutex
+	storage      StorageConn
+	storageFiles []proto.StorageFile
+	// storageReported is whether storageFiles came from the current connection, so an absent file means missing.
+	storageReported bool
+	storageSendMu   sync.Mutex
 }
 
 func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigStore) *Registry {
@@ -587,7 +589,11 @@ func (r *Registry) attachmentsLocked(vm *VM, disks []AttachRequest) ([]proto.Dis
 		if f, ok := r.storageFileLocked(d.ID); ok && f.SizeBytes < int64(d.SizeGB)<<30 {
 			a.SizeGB = max(1, int(f.SizeBytes>>30))
 		}
-		if owner, i := r.attachmentLocked(d.ID); owner != nil {
+		owner, i := r.attachmentLocked(d.ID)
+		if owner == nil && r.missingLocked(d) {
+			return nil, fmt.Errorf("%w: disk %q is missing on the storage server", ErrConflict, d.Name)
+		}
+		if owner != nil {
 			if owner != vm {
 				return nil, fmt.Errorf("%w: disk %q is attached to VM %q", ErrConflict, d.Name, owner.Name)
 			}
@@ -683,8 +689,8 @@ func (r *Registry) desiredFor(nodeID string) []proto.DesiredVM {
 		d := vm.desired()
 		d.Spec.Attachments = slices.Clone(d.Spec.Attachments)
 		for i, a := range d.Spec.Attachments {
-			// Without a known endpoint the node gets no URL and can report that instead of a malformed one.
-			if ep != "" {
+			// Without an endpoint or a file the storage has reported, the node gets no URL and reports storage not ready.
+			if sd, ok := r.disks.Get(a.DiskID); ep != "" && ok && sd.Seen {
 				d.Spec.Attachments[i].URL = "nbd://" + ep + "/" + proto.StorageFileName(a.DiskID)
 			}
 		}

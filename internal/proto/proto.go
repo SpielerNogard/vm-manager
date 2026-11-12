@@ -147,6 +147,8 @@ type StorageDisk struct {
 	ID        string `json:"id"`
 	SizeBytes int64  `json:"sizeBytes"`
 	CopyFrom  string `json:"copyFrom,omitempty"`
+	// Create is false once the hub has seen the file, so a vanished file is never replaced by a blank one.
+	Create bool `json:"create,omitempty"`
 }
 
 // StorageMessage types: "register" and "report" (agent→hub), "desired" (hub→agent).

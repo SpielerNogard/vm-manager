@@ -16,7 +16,7 @@ import { formatBytes, type Tone } from '@/lib/format'
 const { t } = useI18n()
 const { disks, vms, storage, loaded, refresh } = useFleet()
 
-const DISK_TONE: Record<StoredDisk['state'], Tone> = { creating: 'quiet', ready: 'good', releasing: 'warning' }
+const DISK_TONE: Record<StoredDisk['state'], Tone> = { creating: 'quiet', ready: 'good', releasing: 'warning', missing: 'danger' }
 
 const addOpen = ref(false)
 const error = ref('')

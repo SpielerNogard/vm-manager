@@ -21,7 +21,7 @@ const (
 
 type Dir struct{ Path string }
 
-// Apply creates missing disks (sparse, or copied from CopyFrom), grows smaller ones, removes Deleted; never shrinks or removes anything else.
+// Apply creates missing disks marked Create (sparse, or copied from CopyFrom), grows smaller ones, removes Deleted; never shrinks or removes anything else.
 func (d Dir) Apply(disks []proto.StorageDisk, deleted []string) error {
 	if err := os.MkdirAll(filepath.Join(d.Path, partialDir), 0o755); err != nil {
 		return err
@@ -64,6 +64,9 @@ func (d Dir) ensure(disk proto.StorageDisk) error {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
+	}
+	if !disk.Create {
+		return nil // the hub shows the disk as missing
 	}
 
 	var src *os.File

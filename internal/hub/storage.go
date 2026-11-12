@@ -83,7 +83,7 @@ func (r *Registry) StorageConnected(m proto.StorageMessage, c StorageConn) error
 		return fmt.Errorf("%w: register without endpoint", ErrInvalid)
 	}
 	r.mu.Lock()
-	r.storage = c
+	r.storage, r.storageReported = c, false
 	nodes := map[string]bool{}
 	if r.disks.Endpoint() != m.Endpoint {
 		if err := r.disks.SetEndpoint(m.Endpoint); err != nil {
@@ -114,15 +114,27 @@ func (r *Registry) StorageDisconnected(c StorageConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.storage == c {
-		r.storage = nil
+		r.storage, r.storageReported = nil, false
 	}
 }
 
 // StorageReport records the agent's files, ends finished copies and drops tombstones whose file is gone.
+// VMs using a disk seen for the first time get a new generation, as only now their attachment gets a URL.
 func (r *Registry) StorageReport(files []proto.StorageFile) {
 	r.mu.Lock()
-	repush := r.storageReportLocked(files)
+	repush, seen := r.storageReportLocked(files)
 	nodes := r.growAttachedLocked(files)
+	for _, id := range seen {
+		vm, _ := r.attachmentLocked(id)
+		if vm == nil {
+			continue
+		}
+		if _, err := r.bumpLocked(vm, func(*VM) {}); err != nil {
+			log.Printf("vm %s: saving: %v", vm.ID, err)
+			continue
+		}
+		nodes[vm.NodeID] = true
+	}
 	r.mu.Unlock()
 	if repush {
 		r.pushStorage()
@@ -160,34 +172,43 @@ func (r *Registry) growAttachedLocked(files []proto.StorageFile) map[string]bool
 	return nodes
 }
 
-// storageReportLocked reports whether a copy's source has appeared, which the agent skipped earlier.
-func (r *Registry) storageReportLocked(files []proto.StorageFile) bool {
-	r.storageFiles = files
-	present := map[string]bool{}
+// storageReportLocked reports whether a copy's source has appeared, which the agent skipped earlier, and the disks seen for the first time.
+func (r *Registry) storageReportLocked(files []proto.StorageFile) (repush bool, seen []string) {
+	r.storageFiles, r.storageReported = files, true
+	sizes := map[string]int64{}
 	for _, f := range files {
-		present[f.Name] = true
+		sizes[f.Name] = f.SizeBytes
 	}
-	repush := false
+	present := func(id string) bool { _, ok := sizes[proto.StorageFileName(id)]; return ok }
 	for _, d := range r.disks.Disks() {
+		changed, first := false, false
 		switch {
 		case d.CopyFrom == "":
-		case present[proto.StorageFileName(d.ID)]:
-			d.CopyFrom = ""
-			if err := r.disks.Put(d); err != nil {
-				log.Printf("disk %s: clearing copy source: %v", d.ID, err)
-			}
-		case present[proto.StorageFileName(d.CopyFrom)]:
+		case present(d.ID):
+			d.CopyFrom, changed = "", true
+		case present(d.CopyFrom):
 			repush = true
+		}
+		if !d.Seen && sizes[proto.StorageFileName(d.ID)] >= int64(d.SizeGB)<<30 {
+			d.Seen, changed, first = true, true, true
+		}
+		if !changed {
+			continue
+		}
+		if err := r.disks.Put(d); err != nil {
+			log.Printf("disk %s: saving reported state: %v", d.ID, err)
+		} else if first {
+			seen = append(seen, d.ID)
 		}
 	}
 	for _, id := range r.disks.Tombstones() {
-		if !present[proto.StorageFileName(id)] {
+		if !present(id) {
 			if err := r.disks.ClearTombstone(id); err != nil {
 				log.Printf("disk %s: clearing tombstone: %v", id, err)
 			}
 		}
 	}
-	return repush
+	return repush, seen
 }
 
 // pushStorage sends the agent every disk and tombstone if it is online.
@@ -198,7 +219,7 @@ func (r *Registry) pushStorage() {
 	conn := r.storage
 	m := proto.StorageMessage{Type: "desired", Deleted: r.disks.Tombstones()}
 	for _, d := range r.disks.Disks() {
-		m.Disks = append(m.Disks, proto.StorageDisk{ID: d.ID, SizeBytes: int64(d.SizeGB) << 30, CopyFrom: d.CopyFrom})
+		m.Disks = append(m.Disks, proto.StorageDisk{ID: d.ID, SizeBytes: int64(d.SizeGB) << 30, CopyFrom: d.CopyFrom, Create: !d.Seen})
 	}
 	r.mu.Unlock()
 	if conn == nil {

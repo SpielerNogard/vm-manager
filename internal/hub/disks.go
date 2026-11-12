@@ -20,7 +20,7 @@ type DiskView struct {
 	Name           string          `json:"name"`
 	SizeGB         int             `json:"sizeGB"`
 	AllocatedBytes int64           `json:"allocatedBytes"`
-	State          string          `json:"state"` // "creating" (no file at full size reported yet), "ready", "releasing"
+	State          string          `json:"state"` // "creating" (no file at full size reported yet), "ready", "releasing", "missing"
 	ReleasingOn    string          `json:"releasingOn,omitempty"`
 	CopyFrom       string          `json:"copyFrom,omitempty"`
 	Attachment     *AttachmentView `json:"attachment,omitempty"`
@@ -39,10 +39,19 @@ func (r *Registry) diskViewLocked(d StoredDisk) DiskView {
 	if d.ReleasingOn != "" {
 		v.State = "releasing"
 	}
+	if r.missingLocked(d) {
+		v.State = "missing"
+	}
 	if vm, i := r.attachmentLocked(d.ID); vm != nil {
 		v.Attachment = &AttachmentView{VMID: vm.ID, VMName: vm.Name, NodeID: vm.NodeID, MountPath: vm.Attachments[i].MountPath}
 	}
 	return v
+}
+
+// missingLocked reports a disk whose file the connected storage agent no longer has; r.mu must be held.
+func (r *Registry) missingLocked(d StoredDisk) bool {
+	_, ok := r.storageFileLocked(d.ID)
+	return d.Seen && r.storageReported && !ok
 }
 
 // storageFileLocked returns the agent's last report of the disk's file; r.mu must be held.

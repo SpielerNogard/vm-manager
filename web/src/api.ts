@@ -51,7 +51,7 @@ export interface StoredDisk {
   name: string
   sizeGB: number
   allocatedBytes: number
-  state: 'creating' | 'ready' | 'releasing'
+  state: 'creating' | 'ready' | 'releasing' | 'missing'
   releasingOn?: string
   copyFrom?: string
   attachment?: DiskAttachment

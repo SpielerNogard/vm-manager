@@ -93,7 +93,7 @@ func TestCopyDiskSetsCopyFrom(t *testing.T) {
 	if err != nil || warn != "" || cp.CopyFrom != src.ID || cp.SizeGB != 2 {
 		t.Fatalf("copy = %+v %q %v", cp, warn, err)
 	}
-	if m := fs.last(); !slices.Contains(m.Disks, proto.StorageDisk{ID: cp.ID, SizeBytes: 2 << 30, CopyFrom: src.ID}) {
+	if m := fs.last(); !slices.Contains(m.Disks, proto.StorageDisk{ID: cp.ID, SizeBytes: 2 << 30, CopyFrom: src.ID, Create: true}) {
 		t.Fatalf("desired = %+v", m)
 	}
 	if _, _, err := r.CopyDisk("nope", "x"); !errors.Is(err, ErrNotFound) {
