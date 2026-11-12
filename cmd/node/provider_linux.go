@@ -15,3 +15,5 @@ func newProvider(cfg node.Config) (node.Provider, error) {
 		return nil, fmt.Errorf("unknown provider %q for this OS", cfg.Provider)
 	}
 }
+
+func dataDir(string) string { return "/var/lib/vm-manager" }

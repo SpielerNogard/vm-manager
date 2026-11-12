@@ -3,9 +3,12 @@
 | Method | Path | |
 |---|---|---|
 | GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, and their config file without the hub token |
-| POST | `/api/nodes` | Add a node (`{"id"}`), state `pending` |
+| POST | `/api/nodes` | Add a node (`{"id", "provider"}`, provider `vz` or `firecracker`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
+| GET | `/api/nodes/{id}/install-command?host=` | The one-line install command for the node (text); `host` as above |
+| GET | `/api/version` | The hub's version (`{"version"}`), no token needed |
+| GET | `/node/install.sh` | The node installer script, no token needed |
 | GET | `/api/settings` | Client endpoint, storage endpoint, ports, listen address, guest MTU, node token, plus `setupComplete`, `devices` (device count), `storageEndpoint` (effective) and `vmsWithDisks` |
 | PUT | `/api/settings` | Partial update of `clients.endpoint`, `storage.endpoint` (`host:port` or empty), `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |

@@ -59,9 +59,11 @@ const (
 )
 
 type Node struct {
-	ID           string `json:"id"`
-	Hostname     string `json:"hostname"`
-	Provider     string `json:"provider"`
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	Provider string `json:"provider"`
+	// Error explains a node that registered with another hypervisor than it was created for.
+	Error        string `json:"error,omitempty"`
 	CPUs         int    `json:"cpus"`
 	MemoryMB     int    `json:"memoryMB"`
 	FreeCPUs     int    `json:"freeCpus"`
@@ -230,6 +232,9 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	}
 	if prev != nil {
 		n.seq = prev.seq
+		if prev.State == NodePending && prev.Provider != "" && prev.Provider != reg.Provider {
+			n.Error = fmt.Sprintf("created for %s, registered with %s", prev.Provider, reg.Provider)
+		}
 	}
 	if err := r.store.PutNode(n.stored()); err != nil {
 		// A pending node must not go online while the store still says pending; the node retries on reconnect.
@@ -278,7 +283,12 @@ func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 	}
 }
 
-func (r *Registry) CreateNode(id string) (Node, error) {
+var providers = []string{"vz", "firecracker"}
+
+func (r *Registry) CreateNode(id, provider string) (Node, error) {
+	if !slices.Contains(providers, provider) {
+		return Node{}, fmt.Errorf("%w: provider must be one of %s", ErrInvalid, strings.Join(providers, ", "))
+	}
 	if !nameRe.MatchString(id) {
 		return Node{}, fmt.Errorf("%w: id must match %s", ErrInvalid, nameRe)
 	}
@@ -290,10 +300,10 @@ func (r *Registry) CreateNode(id string) (Node, error) {
 	if _, ok := r.nodes[id]; ok {
 		return Node{}, fmt.Errorf("%w: node %q already exists", ErrConflict, id)
 	}
-	if err := r.store.PutNode(StoredNode{ID: id, Pending: true}); err != nil {
+	if err := r.store.PutNode(StoredNode{ID: id, Provider: provider, Pending: true}); err != nil {
 		return Node{}, err
 	}
-	n := &nodeEntry{Node: Node{ID: id, State: NodePending}}
+	n := &nodeEntry{Node: Node{ID: id, Provider: provider, State: NodePending}}
 	r.nodes[id] = n
 	return n.Node, nil
 }
@@ -328,23 +338,62 @@ func (r *Registry) DeleteNode(id string) error {
 	return releaseErr
 }
 
-// NodeConfig renders a node.json for the node; host is how the node reaches the hub and defaults to clients.endpoint.
-func (r *Registry) NodeConfig(id, host string) ([]byte, error) {
+// nodeHub resolves the node's provider and the hub address it should use; host defaults to the client endpoint.
+func (r *Registry) nodeHub(id, host string) (provider, hubAddr string, c Config, err error) {
 	r.mu.Lock()
-	_, ok := r.nodes[id]
+	n, ok := r.nodes[id]
+	if ok {
+		provider = n.Provider
+	}
 	r.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("%w: node %q", ErrNotFound, id)
+		return "", "", c, fmt.Errorf("%w: node %q", ErrNotFound, id)
 	}
-	c := r.cfg.Get()
+	c = r.cfg.Get()
 	if host == "" {
 		host = c.Clients.Endpoint
 	}
 	if host == "" {
-		return nil, fmt.Errorf("%w: setup incomplete: set the client endpoint in settings", ErrConflict)
+		return "", "", c, fmt.Errorf("%w: setup incomplete: set the client endpoint in settings", ErrConflict)
 	}
 	if validEndpoint(host) != nil {
-		return nil, fmt.Errorf("%w: host must be a host name or IP without scheme or port", ErrInvalid)
+		return "", "", c, fmt.Errorf("%w: host must be a host name or IP without scheme or port", ErrInvalid)
+	}
+	return provider, net.JoinHostPort(host, strconv.Itoa(c.Hub.Port)), c, nil
+}
+
+// InstallCommand is the one-line installer for the node, as shown in the GUI.
+func (r *Registry) InstallCommand(id, host string) (string, error) {
+	provider, hub, c, err := r.nodeHub(id, host)
+	if err != nil {
+		return "", err
+	}
+	if provider == "" {
+		return "", fmt.Errorf("%w: node %q has no hypervisor; recreate it", ErrConflict, id)
+	}
+	return fmt.Sprintf("curl -fsSL http://%s/node/install.sh | sh -s -- --hub http://%s --token %s --name %s --provider %s",
+		hub, hub, shellWord(c.Token), id, provider), nil
+}
+
+// shellWord quotes s for a POSIX shell unless it is plainly safe; tokens set in Settings may contain any non-space character.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// NodeConfig renders a node.json for the node; host is how the node reaches the hub and defaults to clients.endpoint.
+func (r *Registry) NodeConfig(id, host string) ([]byte, error) {
+	provider, hub, c, err := r.nodeHub(id, host)
+	if err != nil {
+		return nil, err
+	}
+	paths := "~/.vm-manager"
+	if provider == "firecracker" {
+		paths = "/var/lib/vm-manager"
+	} else if provider == "" {
+		provider = "vz"
 	}
 	type hubConf struct {
 		URL   string `json:"url"`
@@ -361,9 +410,9 @@ func (r *Registry) NodeConfig(id, host string) ([]byte, error) {
 		Paths    pathsConf `json:"paths"`
 	}{
 		NodeID:   id,
-		Hub:      hubConf{URL: "ws://" + net.JoinHostPort(host, strconv.Itoa(c.Hub.Port)) + "/api/nodes/connect", Token: c.Token},
-		Provider: "vz",
-		Paths:    pathsConf{VMs: "~/.vm-manager/vms", Images: "~/.vm-manager/images"},
+		Hub:      hubConf{URL: "ws://" + hub + "/api/nodes/connect", Token: c.Token},
+		Provider: provider,
+		Paths:    pathsConf{VMs: paths + "/vms", Images: paths + "/images"},
 	}, "", "  ")
 }
 

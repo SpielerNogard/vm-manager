@@ -31,9 +31,10 @@ const formatCPUs = (n: number) => `${n} vCPU`
 const DEBOUNCE_MS = 300
 const host = ref('')
 const nodeJson = ref('')
+const installCmd = ref('')
 const configError = ref('')
 const copyError = ref('')
-const copied = ref(false)
+const copied = ref<'' | 'install' | 'config'>('')
 const confirmDelete = ref(false)
 const deleteError = ref('')
 
@@ -54,16 +55,16 @@ async function loadConfig() {
   const h = host.value
   fetchedHost = h
   const current = () => id === route.params.id && h === host.value
-  try {
-    const json = await api.nodeConfig(id, h.trim() || undefined)
-    if (!current()) return
-    nodeJson.value = json
-    configError.value = ''
-  } catch (e) {
-    if (!current()) return
-    nodeJson.value = ''
-    configError.value = (e as Error).message
-  }
+  // Settled separately: a node without a hypervisor has no install command but still has a node.json.
+  const [json, cmd] = await Promise.allSettled([
+    api.nodeConfig(id, h.trim() || undefined),
+    api.installCommand(id, h.trim() || undefined),
+  ])
+  if (!current()) return
+  nodeJson.value = json.status === 'fulfilled' ? json.value : ''
+  installCmd.value = cmd.status === 'fulfilled' ? cmd.value : ''
+  const failed = [cmd, json].find((r) => r.status === 'rejected')
+  configError.value = failed ? (failed.reason as Error).message : ''
 }
 
 watch(
@@ -81,12 +82,12 @@ watch(host, (h) => {
   if (h !== fetchedHost) fetchTimer = setTimeout(loadConfig, DEBOUNCE_MS)
 })
 
-async function copyConfig() {
+async function copyText(which: 'install' | 'config') {
   try {
-    await navigator.clipboard.writeText(nodeJson.value)
-    copied.value = true
+    await navigator.clipboard.writeText(which === 'install' ? installCmd.value : nodeJson.value)
+    copied.value = which
     copyError.value = ''
-    setTimeout(() => (copied.value = false), 1500)
+    setTimeout(() => (copied.value = ''), 1500)
   } catch {
     copyError.value = t('node.copyFailed')
   }
@@ -119,6 +120,7 @@ async function deleteNode() {
     </div>
 
     <template v-else>
+      <div v-if="node.error" role="alert" class="alert alert-warning alert-soft mb-4 text-sm">{{ t('node.providerMismatch', { error: node.error }) }}</div>
       <header class="mb-6">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold tracking-tight">{{ node.id }}</h1>
@@ -170,7 +172,8 @@ async function deleteNode() {
       </div>
 
       <section class="border-base-300 rounded-box mb-6 space-y-3 border p-4">
-        <h2 class="font-semibold">{{ t('node.nodeConfig') }}</h2>
+        <h2 class="font-semibold">{{ t('node.install') }}</h2>
+        <p class="text-base-content/60 text-xs">{{ t('node.installHint') }}</p>
         <label class="block">
           <span class="mb-1 block text-sm font-medium">{{ t('node.hubAddress') }}</span>
           <input v-model="host" class="input font-token w-full max-w-md" />
@@ -178,17 +181,27 @@ async function deleteNode() {
         </label>
         <div v-if="configError" role="alert" class="alert alert-error alert-soft text-sm">{{ configError }}</div>
         <div v-if="copyError" role="alert" class="alert alert-error alert-soft text-sm">{{ copyError }}</div>
-        <pre class="bg-base-200 rounded-box font-token overflow-x-auto p-3 text-xs">{{ nodeJson }}</pre>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="copyConfig">
-            <AppIcon :name="copied ? 'check' : 'copy'" />
-            {{ copied ? t('vms.copied') : t('vms.copy') }}
-          </button>
-          <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="downloadText('node.json', nodeJson)">
-            {{ t('node.download') }}
-          </button>
-        </div>
-        <p class="text-base-content/60 text-xs">{{ t('node.saveHint') }}</p>
+        <pre class="bg-base-200 rounded-box font-token p-3 text-xs break-all whitespace-pre-wrap">{{ installCmd }}</pre>
+        <button type="button" class="btn btn-sm" :disabled="!installCmd" @click="copyText('install')">
+          <AppIcon :name="copied === 'install' ? 'check' : 'copy'" />
+          {{ copied === 'install' ? t('vms.copied') : t('vms.copy') }}
+        </button>
+        <details>
+          <summary class="cursor-pointer text-sm font-medium">{{ t('node.manualConfig') }}</summary>
+          <div class="mt-3 space-y-3">
+            <pre class="bg-base-200 rounded-box font-token overflow-x-auto p-3 text-xs">{{ nodeJson }}</pre>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="copyText('config')">
+                <AppIcon :name="copied === 'config' ? 'check' : 'copy'" />
+                {{ copied === 'config' ? t('vms.copied') : t('vms.copy') }}
+              </button>
+              <button type="button" class="btn btn-sm" :disabled="!nodeJson" @click="downloadText('node.json', nodeJson)">
+                {{ t('node.download') }}
+              </button>
+            </div>
+            <p class="text-base-content/60 text-xs">{{ t('node.saveHint') }}</p>
+          </div>
+        </details>
       </section>
 
       <section class="border-base-300 rounded-box mb-6 border p-4">

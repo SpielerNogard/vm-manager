@@ -741,19 +741,19 @@ func nodeByID(r *Registry, id string) (Node, bool) {
 
 func TestCreateNodePending(t *testing.T) {
 	r, _ := newTestRegistry(t)
-	if _, err := r.CreateNode("mac-x"); err != nil {
+	if _, err := r.CreateNode("mac-x", "vz"); err != nil {
 		t.Fatal(err)
 	}
 	if n, ok := nodeByID(r, "mac-x"); !ok || n.State != "pending" {
 		t.Fatalf("node = %+v ok = %v", n, ok)
 	}
-	if _, err := r.CreateNode("connect"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "reserved") {
+	if _, err := r.CreateNode("connect", "vz"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("connect err = %v", err)
 	}
-	if _, err := r.CreateNode("Mac X"); !errors.Is(err, ErrInvalid) {
+	if _, err := r.CreateNode("Mac X", "vz"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := r.CreateNode("mac-x"); !errors.Is(err, ErrConflict) {
+	if _, err := r.CreateNode("mac-x", "vz"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v", err)
 	}
 	store, err := LoadVMStore(r.store.path)
@@ -771,7 +771,7 @@ func TestCreateNodePending(t *testing.T) {
 
 func TestPendingNodeGoesOnline(t *testing.T) {
 	r, _ := newTestRegistry(t)
-	r.CreateNode("mac-x")
+	r.CreateNode("mac-x", "vz")
 	c := &fakeNode{}
 	r.NodeConnected(proto.Register{NodeID: "mac-x", Provider: "vz", CPUs: 4, MemoryMB: 8192}, c)
 	if len(r.Nodes()) != 2 {
@@ -842,7 +842,7 @@ func TestDeleteNode(t *testing.T) {
 
 func TestCreateVMOnPendingNode(t *testing.T) {
 	r, _ := newTestRegistry(t)
-	r.CreateNode("mac-x")
+	r.CreateNode("mac-x", "vz")
 	q := validReq()
 	q.NodeID = "mac-x"
 	if _, err := r.CreateVM(q); !errors.Is(err, ErrConflict) {
@@ -855,7 +855,7 @@ func TestNodeConfig(t *testing.T) {
 	c.Token, c.Hub.Port, c.Clients.Endpoint = "tok-1234567890abcdef", 8080, "100.114.108.108"
 	cfg := newTestConfig(t, c)
 	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), cfg)
-	r.CreateNode("mac-x")
+	r.CreateNode("mac-x", "vz")
 	parse := func(host string) map[string]any {
 		t.Helper()
 		b, err := r.NodeConfig("mac-x", host)
@@ -893,7 +893,7 @@ func TestNodeConfig(t *testing.T) {
 
 func TestNodeConfigWithoutEndpointConflicts(t *testing.T) {
 	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, Config{Token: "t"}))
-	r.CreateNode("mac-x")
+	r.CreateNode("mac-x", "vz")
 	if _, err := r.NodeConfig("mac-x", ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v", err)
 	}
@@ -915,7 +915,7 @@ func TestDeleteNodeStoreFailureKeepsNodeAndChassis(t *testing.T) {
 
 func TestPendingNodeStoreFailureRefusesRegistration(t *testing.T) {
 	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, Config{}))
-	r.CreateNode("mac-x")
+	r.CreateNode("mac-x", "vz")
 	good := r.store.path
 	r.store.path = brokenStorePath(t)
 	if err := r.NodeConnected(proto.Register{NodeID: "mac-x"}, &fakeNode{}); err == nil {
@@ -956,5 +956,87 @@ func TestNewRegistryReleasesOrphanChassis(t *testing.T) {
 	NewRegistry(nm, store, newTestDisks(t), newTestConfig(t, Config{}))
 	if ch := nm.Chassis(); len(ch) != 1 || ch[0].NodeID != "kept" {
 		t.Errorf("chassis = %+v", ch)
+	}
+}
+
+func TestCreateNodeRequiresProvider(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	for _, p := range []string{"", "qemu"} {
+		if _, err := r.CreateNode("fc-x", p); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "firecracker") {
+			t.Fatalf("provider %q: err = %v", p, err)
+		}
+	}
+	n, err := r.CreateNode("fc-x", "firecracker")
+	if err != nil || n.Provider != "firecracker" {
+		t.Fatalf("node = %+v, %v", n, err)
+	}
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, Config{}))
+	if n, _ := nodeByID(r2, "fc-x"); n.Provider != "firecracker" {
+		t.Fatalf("after restart: %+v", n)
+	}
+}
+
+func TestNodeRegistersWithOtherProvider(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.CreateNode("n2", "vz")
+	if err := r.NodeConnected(proto.Register{NodeID: "n2", Provider: "firecracker", CPUs: 2, MemoryMB: 2048}, &fakeNode{}); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := nodeByID(r, "n2")
+	if n.State != NodeOnline || n.Provider != "firecracker" || n.Error != "created for vz, registered with firecracker" {
+		t.Fatalf("node = %+v", n)
+	}
+}
+
+func TestInstallCommand(t *testing.T) {
+	var c Config
+	c.Token, c.Hub.Port, c.Clients.Endpoint = "tok", 8080, "vmm.lan"
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, c))
+	r.CreateNode("n2", "firecracker")
+	got, err := r.InstallCommand("n2", "")
+	want := "curl -fsSL http://vmm.lan:8080/node/install.sh | sh -s -- --hub http://vmm.lan:8080 --token tok --name n2 --provider firecracker"
+	if err != nil || got != want {
+		t.Fatalf("got %q, %v\nwant %q", got, err, want)
+	}
+	if _, err := r.InstallCommand("nope", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := r.InstallCommand("n2", "http://x:1"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNodeConfigFirecrackerPaths(t *testing.T) {
+	var c Config
+	c.Token, c.Hub.Port, c.Clients.Endpoint = "tok", 8080, "vmm.lan"
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, c))
+	r.CreateNode("n2", "firecracker")
+	b, err := r.NodeConfig("n2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Provider string
+		Paths    struct{ VMs, Images string }
+	}
+	json.Unmarshal(b, &got)
+	if got.Provider != "firecracker" || got.Paths.VMs != "/var/lib/vm-manager/vms" || got.Paths.Images != "/var/lib/vm-manager/images" {
+		t.Fatalf("config = %s", b)
+	}
+}
+
+func TestInstallCommandQuotesToken(t *testing.T) {
+	var c Config
+	c.Token, c.Hub.Port, c.Clients.Endpoint = "abc&def'0123456789", 8080, "vmm.lan"
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, c))
+	r.CreateNode("n2", "firecracker")
+	got, err := r.InstallCommand("n2", "")
+	// Settings accept any token without whitespace, so it must survive being pasted into a shell.
+	if err != nil || !strings.Contains(got, `--token 'abc&def'\''0123456789' --name n2`) {
+		t.Fatalf("got %q, %v", got, err)
 	}
 }

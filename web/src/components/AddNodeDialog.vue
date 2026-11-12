@@ -14,12 +14,14 @@ const router = useRouter()
 const { refresh } = useFleet()
 
 const name = ref('')
+const provider = ref('')
 const error = ref('')
 const busy = ref(false)
 
 watch(open, (isOpen) => {
   if (!isOpen) return
   name.value = ''
+  provider.value = ''
   error.value = ''
 })
 
@@ -27,7 +29,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    const node = await api.createNode(name.value)
+    const node = await api.createNode(name.value, provider.value)
     open.value = false
     await refresh()
     await router.push({ name: 'node', params: { id: node.id } })
@@ -55,6 +57,15 @@ async function submit() {
             placeholder="mac-mini"
           />
           <span class="text-base-content/60 mt-1 block text-xs">{{ t('nodes.nameHint') }}</span>
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium">{{ t('nodes.provider') }}</span>
+          <select v-model="provider" class="select w-full" required>
+            <option value="" disabled>{{ t('nodes.providerPlaceholder') }}</option>
+            <option value="vz">vz</option>
+            <option value="firecracker">firecracker</option>
+          </select>
+          <span class="text-base-content/60 mt-1 block text-xs">{{ t('nodes.providerHint') }}</span>
         </label>
         <div v-if="error" role="alert" class="alert alert-error alert-soft text-sm">{{ error }}</div>
         <div class="modal-action">

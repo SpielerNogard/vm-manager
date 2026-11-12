@@ -70,7 +70,9 @@
     "dialogTitle": "Node hinzufügen",
     "nameHint": "Kleinbuchstaben, Ziffern, Bindestriche",
     "create": "Node anlegen",
-    "pendingLabel": "wartet auf erste Verbindung"
+    "pendingLabel": "wartet auf erste Verbindung",
+    "providerPlaceholder": "Hypervisor wählen",
+    "providerHint": "vz für einen Mac (Apple Silicon), firecracker für einen Linux-Rechner (amd64 mit KVM)."
   },
   "vms": {
     "new": "Neue VM",
@@ -167,7 +169,11 @@
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Die Node wird vom Hub entfernt.",
     "deleteBodyOnline": "Die Node wird vom Hub entfernt und getrennt; läuft sie weiter, verbindet sie sich neu und taucht wieder auf.",
-    "deleteConfirm": "Node löschen"
+    "deleteConfirm": "Node löschen",
+    "install": "Installation",
+    "installHint": "Auf der Maschine ausführen (unter Linux als Benutzer mit sudo). Erneutes Ausführen aktualisiert den Node und behält seine VMs; sie starten mit dem Node neu.",
+    "manualConfig": "Manuelle Einrichtung (node.json)",
+    "providerMismatch": "Hypervisor weicht von dem beim Anlegen gewählten ab: {error}."
   },
   "vm": {
     "notFound": "Keine VM mit der ID {id}.",
