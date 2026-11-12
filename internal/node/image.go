@@ -132,6 +132,8 @@ users:
 %sbootcmd:
   # Kernel and systemd output to the virtio console (console.log); takes effect from the second boot.
   - [sh, -c, 'test -f /etc/default/grub.d/99-vmm-console.cfg || { echo "GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT console=tty1 console=hvc0\"" > /etc/default/grub.d/99-vmm-console.cfg && update-grub; }']
+  # The disk list lives in the seed, not in user-data, so a reseed changes it without a new instance-id.
+  - [sh, -c, 'mkdir -p /run/vmm-seed && mount -o ro LABEL=cidata /run/vmm-seed && { sh /run/vmm-seed/vmm-disks.sh; umount /run/vmm-seed; }']
 # Reapplies network-config every boot so a reseeded NIC list takes effect.
 updates:
   network:
@@ -170,3 +172,24 @@ ethernets:
 	}
 	return userData, metaData, networkConfig
 }
+
+// DiskScript formats (only if blank), mounts and grows each attached disk; the guest runs it every boot from the seed.
+func DiskScript(f VMFile) string {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	for _, at := range f.Spec.Attachments {
+		dev, mnt := shellQuote("/dev/disk/by-id/virtio-"+at.DiskID), shellQuote(at.MountPath)
+		fmt.Fprintf(&b, `dev=%s
+i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
+if [ -b "$dev" ]; then
+  new=; blkid "$dev" >/dev/null 2>&1 || { mkfs.ext4 -q "$dev" && new=1; }
+  mkdir -p %[2]s; mountpoint -q %[2]s || mount "$dev" %[2]s
+  resize2fs "$dev" >/dev/null 2>&1
+  [ -n "$new" ] && chown ubuntu:ubuntu %[2]s
+fi
+`, dev, mnt)
+	}
+	return b.String()
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

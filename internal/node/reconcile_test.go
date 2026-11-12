@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -74,7 +75,7 @@ func waitState(t *testing.T, a *Agent, id string, state proto.VMState, gen uint6
 
 func TestReconcileCreatesMissing(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	if p.instance("a") == nil {
 		t.Fatal("not started")
@@ -86,7 +87,7 @@ func TestReconcileCreatesMissing(t *testing.T) {
 
 func TestReconcileCreatesStoppedWithoutStarting(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerStopped, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerStopped, 1)})
 	eventually(t, "prepared", func() bool { return slices.Contains(p.gotPrepared(), "a") })
 	waitState(t, a, "a", proto.StateStopped, 1)
 	if p.instance("a") != nil {
@@ -96,9 +97,9 @@ func TestReconcileCreatesStoppedWithoutStarting(t *testing.T) {
 
 func TestReconcileDeletesUnknownBeforeCreate(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("old", "old", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("old", "old", proto.PowerRunning, 1)})
 	waitState(t, a, "old", proto.StateRunning, 1)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("new", "new", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("new", "new", proto.PowerRunning, 1)})
 	if !p.instance("old").killed.Load() {
 		t.Fatal("old not killed")
 	}
@@ -119,7 +120,7 @@ func TestReconcileProvisionedMissingDirReportsError(t *testing.T) {
 	a, p := newReconcileAgent(t)
 	d := dv("a", "a", proto.PowerRunning, 1)
 	d.Provisioned = true
-	a.reconcile(context.Background(), []proto.DesiredVM{d})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{d})
 	st, ok := a.vmStatus("a")
 	if !ok || st.State != proto.StateError || st.Error != proto.ErrVMDirMissing || st.Generation != 1 {
 		t.Fatalf("status = %+v", st)
@@ -133,8 +134,8 @@ func TestReconcileRebuildsPlaceholder(t *testing.T) {
 	a, p := newReconcileAgent(t)
 	d := dv("a", "a", proto.PowerRunning, 1)
 	d.Provisioned = true
-	a.reconcile(context.Background(), []proto.DesiredVM{d})
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{d})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
 	waitState(t, a, "a", proto.StateRunning, 2)
 	if !slices.Contains(p.gotPrepared(), "a") {
 		t.Fatal("placeholder started without Prepare")
@@ -146,11 +147,11 @@ func TestReconcileRebuildsPlaceholder(t *testing.T) {
 
 func testReconcileStop(t *testing.T, mode proto.StopMode) *fakeInstance {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	d := dv("a", "a", proto.PowerStopped, 2)
 	d.StopMode = mode
-	a.reconcile(context.Background(), []proto.DesiredVM{d})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{d})
 	waitState(t, a, "a", proto.StateStopped, 2)
 	a.mu.Lock()
 	intentional := a.vms["a"].stopRequested.Load()
@@ -178,9 +179,9 @@ func TestReconcileStopHard(t *testing.T) {
 
 func TestReconcileStartsStopped(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerStopped, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerStopped, 1)})
 	waitState(t, a, "a", proto.StateStopped, 1)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
 	waitState(t, a, "a", proto.StateRunning, 2)
 	if got := p.gotPrepared(); len(got) != 1 {
 		t.Fatalf("prepared = %v, want once", got)
@@ -192,7 +193,7 @@ func TestReconcileRetriesFailedPrepare(t *testing.T) {
 	p.mu.Lock()
 	p.failPrepare["a"] = true
 	p.mu.Unlock()
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateError, 1)
 	if f := loadVM(t, a, "a"); !f.NeedsPrepare {
 		t.Fatalf("vm.json = %+v, want NeedsPrepare after failed Prepare", f)
@@ -200,7 +201,7 @@ func TestReconcileRetriesFailedPrepare(t *testing.T) {
 	p.mu.Lock()
 	p.failPrepare["a"] = false
 	p.mu.Unlock()
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
 	waitState(t, a, "a", proto.StateRunning, 2)
 	if got := p.gotPrepared(); len(got) != 2 {
 		t.Fatalf("prepared = %v, want twice", got)
@@ -212,10 +213,10 @@ func TestReconcileRetriesFailedPrepare(t *testing.T) {
 
 func TestReconcileSameGenerationNoop(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	inst := p.instance("a")
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerStopped, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerStopped, 1)})
 	if p.instance("a") != inst {
 		t.Fatal("instance replaced")
 	}
@@ -231,14 +232,14 @@ func TestReconcileSameGenerationNoop(t *testing.T) {
 
 func TestReconcileBackToBack(t *testing.T) {
 	a, _ := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	graceful, hard := dv("a", "a", proto.PowerStopped, 2), dv("a", "a", proto.PowerStopped, 3)
 	graceful.StopMode, hard.StopMode = proto.StopGraceful, proto.StopHard
 	var wg sync.WaitGroup
 	for _, d := range []proto.DesiredVM{graceful, hard} {
 		wg.Add(1)
-		go func() { defer wg.Done(); a.reconcile(context.Background(), []proto.DesiredVM{d}) }()
+		go func() { defer wg.Done(); a.reconcile(context.Background(), 0, []proto.DesiredVM{d}) }()
 	}
 	wg.Wait()
 	waitState(t, a, "a", proto.StateStopped, 3)
@@ -273,7 +274,7 @@ func fastRestarts(t *testing.T, backoff ...time.Duration) {
 func TestRestartAfterGuestPoweroff(t *testing.T) {
 	fastRestarts(t, 10*time.Millisecond, 10*time.Millisecond, 10*time.Millisecond)
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	first := p.instance("a")
 	first.guestShutdown()
@@ -286,7 +287,7 @@ func TestRestartAfterGuestPoweroff(t *testing.T) {
 func TestRestartGivesUpAfterQuickFailures(t *testing.T) {
 	fastRestarts(t, 10*time.Millisecond, 10*time.Millisecond, 10*time.Millisecond)
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	p.mu.Lock()
 	p.failStart["a"] = true
@@ -299,21 +300,21 @@ func TestRestartGivesUpAfterQuickFailures(t *testing.T) {
 	p.mu.Lock()
 	p.failStart["a"] = false
 	p.mu.Unlock()
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 2)})
 	waitState(t, a, "a", proto.StateRunning, 2)
 }
 
 func TestShutdownCancelsBackoff(t *testing.T) {
 	fastRestarts(t, time.Hour)
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dv("a", "a", proto.PowerRunning, 1)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	first := p.instance("a")
 	first.guestShutdown()
 	waitState(t, a, "a", proto.StateStopped, 1)
 	d := dv("a", "a", proto.PowerStopped, 2)
 	d.StopMode = proto.StopGraceful
-	a.reconcile(context.Background(), []proto.DesiredVM{d})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{d})
 	waitState(t, a, "a", proto.StateStopped, 2)
 	time.Sleep(50 * time.Millisecond)
 	if p.instance("a") != first {
@@ -358,10 +359,10 @@ func dvNICs(power proto.Power, gen uint64, nics ...proto.NIC) proto.DesiredVM {
 
 func TestReconcileNICChangeRestartsWithReseed(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	first := p.instance("a")
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 2, mgmtNIC, netNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 2, mgmtNIC, netNIC)})
 	eventually(t, "restarted", func() bool {
 		st, _ := a.vmStatus("a")
 		return p.instance("a") != first && st.State == proto.StateRunning && st.Generation == 2
@@ -387,9 +388,9 @@ func TestReconcileNICChangeRestartsWithReseed(t *testing.T) {
 
 func TestReconcileNICChangeWhileStopped(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 1, mgmtNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerStopped, 1, mgmtNIC)})
 	waitState(t, a, "a", proto.StateStopped, 1)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
 	waitState(t, a, "a", proto.StateStopped, 2)
 	if !p.hasEvent("reseed:a") || p.instance("a") != nil {
 		t.Fatalf("events = %v started = %v", p.gotEvents(), p.instance("a") != nil)
@@ -401,13 +402,13 @@ func TestReconcileNICChangeWhileStopped(t *testing.T) {
 
 func TestReconcileReseedFailure(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	first := p.instance("a")
 	p.mu.Lock()
 	p.failReseed = true
 	p.mu.Unlock()
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 2, mgmtNIC, netNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 2, mgmtNIC, netNIC)})
 	waitState(t, a, "a", proto.StateError, 2)
 	time.Sleep(50 * time.Millisecond)
 	st, _ := a.vmStatus("a")
@@ -418,13 +419,13 @@ func TestReconcileReseedFailure(t *testing.T) {
 
 func TestReconcileReseedRetriedAfterFailure(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
 	waitState(t, a, "a", proto.StateRunning, 1)
 	first := p.instance("a")
 	p.mu.Lock()
 	p.failReseed = true
 	p.mu.Unlock()
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC, netNIC)})
 	waitState(t, a, "a", proto.StateError, 2)
 	if f := loadVM(t, a, "a"); len(f.Spec.NICs) != 1 {
 		t.Fatalf("vm.json after failed reseed = %+v, want old NICs", f)
@@ -433,7 +434,7 @@ func TestReconcileReseedRetriedAfterFailure(t *testing.T) {
 	p.failReseed = false
 	p.events = nil
 	p.mu.Unlock()
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 3, mgmtNIC, netNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 3, mgmtNIC, netNIC)})
 	eventually(t, "restarted", func() bool {
 		st, _ := a.vmStatus("a")
 		return p.instance("a") != first && st.State == proto.StateRunning && st.Generation == 3
@@ -448,11 +449,179 @@ func TestReconcileReseedRetriedAfterFailure(t *testing.T) {
 
 func TestReconcilePowerOnlyNoReseed(t *testing.T) {
 	a, p := newReconcileAgent(t)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerRunning, 1, mgmtNIC)})
 	waitState(t, a, "a", proto.StateRunning, 1)
-	a.reconcile(context.Background(), []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC)})
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvNICs(proto.PowerStopped, 2, mgmtNIC)})
 	waitState(t, a, "a", proto.StateStopped, 2)
 	if p.hasEvent("reseed:a") {
 		t.Fatalf("events = %v", p.gotEvents())
+	}
+}
+
+// storageAddr is a listening host:port standing in for the NBD server.
+func storageAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	return ln.Addr().String()
+}
+
+func att(id, path, addr string) proto.DiskAttachment {
+	return proto.DiskAttachment{DiskID: id, MountPath: path, SizeGB: 1, URL: "nbd://" + addr + "/" + proto.StorageFileName(id)}
+}
+
+func dvAtts(id string, power proto.Power, gen uint64, atts ...proto.DiskAttachment) proto.DesiredVM {
+	d := dv(id, id, power, gen)
+	d.Spec.Attachments = atts
+	return d
+}
+
+func TestReconcileAttachmentChangeRestartsWithReseed(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	addr := storageAddr(t)
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvAtts("a", proto.PowerRunning, 1, att("d1", "/data", addr))})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	first := p.instance("a")
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{dvAtts("a", proto.PowerRunning, 2, att("d1", "/data", addr), att("d2", "/logs", addr))})
+	eventually(t, "restarted", func() bool {
+		st, _ := a.vmStatus("a")
+		return p.instance("a") != first && st.State == proto.StateRunning && st.Generation == 2
+	})
+	ev := strings.Join(p.gotEvents(), ",")
+	if s, r := strings.Index(ev, "stop-guest"), strings.Index(ev, "reseed:a"); s < 0 || r < s {
+		t.Fatalf("events = %s", ev)
+	}
+	if got := p.gotPrepared(); len(got) != 1 {
+		t.Fatalf("prepared = %v, want once", got)
+	}
+	if f := loadVM(t, a, "a"); len(f.Spec.Attachments) != 2 || f.Generation != 2 {
+		t.Fatalf("vm.json = %+v", f)
+	}
+}
+
+func captureDisks(a *Agent) func() proto.Message {
+	var mu sync.Mutex
+	var sent []proto.Message
+	a.mu.Lock()
+	a.send = func(m proto.Message) error {
+		mu.Lock()
+		defer mu.Unlock()
+		sent = append(sent, m)
+		return nil
+	}
+	a.mu.Unlock()
+	// Boot goroutines keep sending status updates, so this returns the newest "disks" message.
+	return func() proto.Message {
+		mu.Lock()
+		defer mu.Unlock()
+		for i := len(sent) - 1; i >= 0; i-- {
+			if sent[i].Type == "disks" {
+				return sent[i]
+			}
+		}
+		return proto.Message{}
+	}
+}
+
+func TestReconcileSendsDisksInUse(t *testing.T) {
+	a, _ := newReconcileAgent(t)
+	lastDisks := captureDisks(a)
+	addr := storageAddr(t)
+	a.reconcile(context.Background(), 3, []proto.DesiredVM{
+		dvAtts("a", proto.PowerRunning, 1, att("da", "/data", addr)),
+		dvAtts("b", proto.PowerRunning, 1, att("db", "/data", addr)),
+	})
+	if m := lastDisks(); m.Type != "disks" || !slices.Equal(m.DisksInUse, []string{"da", "db"}) || m.AppliedSeq != 3 {
+		t.Fatalf("last message = %+v", m)
+	}
+	a.reconcile(context.Background(), 7, []proto.DesiredVM{dvAtts("b", proto.PowerRunning, 1, att("db", "/data", addr))})
+	if m := lastDisks(); m.Type != "disks" || !slices.Equal(m.DisksInUse, []string{"db"}) || m.AppliedSeq != 7 {
+		t.Fatalf("last message = %+v", m)
+	}
+	a.mu.Lock()
+	reg := a.registerMsg()
+	a.mu.Unlock()
+	if reg.AppliedSeq != 7 || !slices.Equal(reg.DisksInUse, []string{"db"}) {
+		t.Fatalf("register = %+v", reg)
+	}
+}
+
+func TestRestoreDefersVMsWithDisks(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	addr := storageAddr(t)
+	keep, drop, newer := cachedVM("k", "keep"), cachedVM("d", "drop"), cachedVM("n", "newer")
+	keep.Spec.Attachments = []proto.DiskAttachment{att("dk", "/data", addr)}
+	drop.Spec.Attachments = []proto.DiskAttachment{att("dd", "/data", addr)}
+	newer.Spec.Attachments = []proto.DiskAttachment{att("dn", "/data", addr)}
+	for _, f := range []VMFile{keep, drop, newer, cachedVM("p", "plain")} {
+		if err := SaveVM(a.VMsDir, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.restoreAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "plain started", func() bool { return p.instance("plain") != nil })
+	time.Sleep(50 * time.Millisecond)
+	for _, n := range []string{"keep", "drop", "newer"} {
+		if p.instance(n) != nil {
+			t.Fatalf("%s started before the hub confirmed it", n)
+		}
+	}
+	a.mu.Lock()
+	reg := a.registerMsg()
+	a.mu.Unlock()
+	if !slices.Equal(reg.DisksInUse, []string{"dd", "dk", "dn"}) {
+		t.Fatalf("register disks = %v", reg.DisksInUse)
+	}
+	// The hub detached newer's disk while the node was down; it must boot without it.
+	nd := proto.DesiredVM{Spec: newer.Spec, Power: proto.PowerRunning, Generation: 2}
+	nd.Spec.Attachments = nil
+	kd := proto.DesiredVM{Spec: keep.Spec, Power: proto.PowerRunning, Generation: 1}
+	pd := proto.DesiredVM{Spec: cachedVM("p", "plain").Spec, Power: proto.PowerRunning, Generation: 1}
+	a.reconcile(context.Background(), 1, []proto.DesiredVM{kd, nd, pd})
+	waitState(t, a, "k", proto.StateRunning, 1)
+	waitState(t, a, "n", proto.StateRunning, 2)
+	if _, err := os.Stat(VMDir(a.VMsDir, "d")); !os.IsNotExist(err) {
+		t.Fatalf("drop dir still there: %v", err)
+	}
+	if p.instance("drop") != nil {
+		t.Fatal("drop started")
+	}
+	p.mu.Lock()
+	starts := p.starts["newer"]
+	p.mu.Unlock()
+	if starts != 1 || len(loadVM(t, a, "n").Spec.Attachments) != 0 || !p.hasEvent("reseed:newer") {
+		t.Fatalf("newer starts = %d, vm.json = %+v, events = %v", starts, loadVM(t, a, "n"), p.gotEvents())
+	}
+}
+
+func TestStartFailsWhenStorageUnreachable(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	ln.Close()
+	noEndpoint := att("d2", "/data", "")
+	noEndpoint.URL = ""
+	a.reconcile(context.Background(), 0, []proto.DesiredVM{
+		dvAtts("a", proto.PowerRunning, 1, att("d1", "/data", closed)),
+		dvAtts("b", proto.PowerRunning, 1, noEndpoint),
+	})
+	waitState(t, a, "a", proto.StateError, 1)
+	waitState(t, a, "b", proto.StateError, 1)
+	if st, _ := a.vmStatus("a"); !strings.Contains(st.Error, "storage unreachable") {
+		t.Fatalf("a error = %q", st.Error)
+	}
+	if st, _ := a.vmStatus("b"); st.Error != "storage unreachable: no storage endpoint" {
+		t.Fatalf("b error = %q", st.Error)
+	}
+	if p.instance("a") != nil || p.instance("b") != nil {
+		t.Fatal("started without storage")
 	}
 }

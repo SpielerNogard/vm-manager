@@ -15,7 +15,7 @@ const seedISO = "seed.iso"
 func writeGuestSeed(f node.VMFile) func(src string) error {
 	return func(src string) error {
 		userData, metaData, networkConfig := node.CloudInit(f)
-		for name, content := range map[string]string{"user-data": userData, "meta-data": metaData, "network-config": networkConfig} {
+		for name, content := range map[string]string{"user-data": userData, "meta-data": metaData, "network-config": networkConfig, "vmm-disks.sh": node.DiskScript(f)} {
 			if err := os.WriteFile(filepath.Join(src, name), []byte(content), 0o644); err != nil {
 				return err
 			}

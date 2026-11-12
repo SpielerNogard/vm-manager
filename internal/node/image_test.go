@@ -164,3 +164,23 @@ func TestCloudInitNetworkNICs(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
+	ud, _, _ := CloudInit(VMFile{Spec: proto.VMSpec{Name: "dev"}})
+	boot := ud[strings.Index(ud, "bootcmd:"):strings.Index(ud, "updates:")]
+	if !strings.Contains(boot, "LABEL=cidata") || !strings.Contains(boot, "sh /run/vmm-seed/vmm-disks.sh") {
+		t.Fatalf("bootcmd does not run vmm-disks.sh:\n%s", ud)
+	}
+}
+
+func TestDiskScript(t *testing.T) {
+	s := DiskScript(VMFile{Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}, {DiskID: "d2", MountPath: "/it's"}}}})
+	for _, want := range []string{"virtio-d1", "virtio-d2", "mkfs.ext4", "'/data'", `'/it'\''s'`, "resize2fs", "chown ubuntu:ubuntu '/data'"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("script missing %q:\n%s", want, s)
+		}
+	}
+	if s := DiskScript(VMFile{}); strings.Contains(s, "mkfs") {
+		t.Fatalf("empty script formats:\n%s", s)
+	}
+}
