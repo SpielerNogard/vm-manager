@@ -45,4 +45,4 @@ test:
 	go test ./...
 
 stack:
-	docker compose -f deploy/compose.yaml up -d --build
+	VMM_BIN=source VMM_VERSION=dev docker compose -f deploy/compose.yaml up -d --build

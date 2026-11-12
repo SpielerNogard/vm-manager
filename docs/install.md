@@ -1,11 +1,18 @@
 # Install
 
+## Releases
+
+Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`hub`, `gateway`, `storage`, `node`, `netagent` per OS/arch, plus `SHA256SUMS`) on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version.
+
 ## Build
 
 ```sh
 make web hub node   # node binary is ad-hoc signed with the virtualization entitlement
 make test
+make web dist dist-darwin checksums VERSION=v0.0.0   # all release binaries into dist/, as CI does
 ```
+
+Builds outside a release report version `dev`; `GET /api/version` shows the hub's.
 
 `make node-linux` builds `bin/node-linux-amd64` for Linux nodes (Firecracker).
 
@@ -13,11 +20,14 @@ make test
 
 ## Run
 
-Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub):
+Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub). The images are built from the binaries of the release named in `deploy/.env`:
 
 ```sh
-make stack   # docker compose -f deploy/compose.yaml up -d --build
+cp deploy/.env.example deploy/.env   # set VMM_VERSION, e.g. v0.1.0
+docker compose -f deploy/compose.yaml up -d --build
 ```
+
+For development, `make stack` builds the same images from the working tree instead (`VMM_BIN=source`, version `dev`). The image build needs BuildKit (default since Docker 23).
 
 On a Linux Docker host, load the kernel modules the gateway needs first: `modprobe -a openvswitch wireguard` (persist them in `/etc/modules-load.d/`); Docker Desktop on the Mac has them.
 
@@ -33,7 +43,7 @@ Settings page:
 
 Changes apply without a restart; the gateway re-reads the token automatically.
 
-`deploy/.env` is optional and only sets the published ports (and the SSH dir); the hub writes the ports into `hub.json` on start:
+Besides `VMM_VERSION`, `deploy/.env` only sets the published ports (and the SSH dir); the hub writes the ports into `hub.json` on start:
 
 | Variable | Default | |
 |---|---|---|
@@ -115,4 +125,4 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 ## Upgrading
 
-Upgrade the hub and all nodes together; old and new versions don't work with each other. Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
+Upgrade the hub and all nodes together; old and new versions don't work with each other. For the stack, set the new `VMM_VERSION` in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d --build`. Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
