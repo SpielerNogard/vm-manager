@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -28,7 +29,8 @@ const DefaultImageURL = "https://cloud-images.ubuntu.com/releases/noble/release/
 type Provider struct {
 	VMsDir, ImagesDir, ImageURL string
 
-	mu sync.Mutex // serializes base image downloads and NAT address allocation
+	mu      sync.Mutex // serializes base image downloads and NAT address allocation
+	nbdErrs sync.Map   // vmID/diskID -> error of a lost NBD connection
 }
 
 func New(c node.Config) (*Provider, error) {
@@ -74,10 +76,27 @@ func (p *Provider) Reseed(_ context.Context, f node.VMFile, dir string) error {
 }
 
 func (p *Provider) Disks(f node.VMFile, dir string) ([]proto.Disk, error) {
-	return node.ListDisks(f, dir, func(string) string { return "" })
+	return node.ListDisks(f, dir, func(diskID string) string {
+		e, _ := p.nbdErrs.Load(f.Spec.ID + "/" + diskID)
+		msg, _ := e.(string)
+		return msg
+	})
 }
 
-func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
+func (p *Provider) Start(f node.VMFile, dir string) (_ node.Instance, err error) {
+	var nbds []string
+	detach := func() {
+		for _, id := range nbds {
+			if err := detachNBD(dir, id); err != nil {
+				log.Printf("vm %s: detach %s: %v", f.Spec.ID, id, err)
+			}
+		}
+	}
+	defer func() {
+		if err != nil {
+			detach()
+		}
+	}()
 	if err := p.Reseed(context.Background(), f, dir); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
 	}
@@ -87,10 +106,16 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	}
 	var drives []string
 	for _, d := range node.AttachOrder(f) {
-		if d.NBD {
-			return nil, errors.New("NBD disks are not supported on firecracker yet")
+		if !d.NBD {
+			drives = append(drives, filepath.Join(dir, d.File))
+			continue
 		}
-		drives = append(drives, filepath.Join(dir, d.File))
+		dev, err := attachNBD(dir, d.Name, d.File)
+		if err != nil {
+			return nil, err
+		}
+		nbds = append(nbds, d.Name)
+		drives = append(drives, dev)
 	}
 	cfg, err := vmConfig(f, kernel, initrd, drives)
 	if err != nil {
@@ -132,13 +157,38 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		}
 		out.Close()
 		removeTaps(f)
+		detach()
 		close(inst.done)
 	}()
 	if err := <-started; err != nil {
 		return nil, err
 	}
 	go inst.killOnHalt()
+	for _, id := range nbds {
+		go p.watchNBD(f.Spec.ID, dir, id, inst.done)
+	}
 	return inst, nil
+}
+
+// watchNBD mirrors a lost NBD connection into Disks() until done closes.
+func (p *Provider) watchNBD(vmID, dir, diskID string, done <-chan struct{}) {
+	key := vmID + "/" + diskID
+	defer p.nbdErrs.Delete(key)
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		b, _ := os.ReadFile(nbdRecord(dir, diskID))
+		if nbdConnected(strings.TrimSpace(string(b))) {
+			p.nbdErrs.Delete(key)
+		} else {
+			p.nbdErrs.Store(key, "NBD connection lost")
+		}
+		select {
+		case <-done:
+			return
+		case <-t.C:
+		}
+	}
 }
 
 func (p *Provider) StartChassis(_ context.Context, c node.Chassis) error {
