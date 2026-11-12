@@ -51,7 +51,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := hub.MigrateStorageEndpoint(cfg, diskStore); err != nil {
+		log.Fatal(err)
+	}
 	r := hub.NewRegistry(netModel, vmStore, diskStore, cfg)
+	r.SyncStorageEndpoint()
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {

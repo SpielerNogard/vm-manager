@@ -42,7 +42,8 @@ func newDiskRegistry(t *testing.T) (*Registry, *fakeStorage) {
 	t.Helper()
 	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, Config{}))
 	fs := &fakeStorage{}
-	r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "s:1"}, fs)
+	setStorageEndpoint(t, r, "s:1")
+	r.StorageConnected(fs)
 	return r, fs
 }
 
@@ -221,7 +222,8 @@ func TestAPIDisksLifecycle(t *testing.T) {
 
 func TestAPIStorageStatus(t *testing.T) {
 	srv, r, _ := apiServerWith(t, testAPIConfig())
-	r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "s:1"}, &fakeStorage{})
+	setStorageEndpoint(t, r, "s:1")
+	r.StorageConnected(&fakeStorage{})
 	r.StorageReport([]proto.StorageFile{{Name: "zzz.img", SizeBytes: 1}})
 	s, body := doJSON(t, "GET", srv.URL+"/api/storage", "")
 	var v StorageView

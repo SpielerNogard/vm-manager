@@ -3,7 +3,6 @@ package hub
 import (
 	"context"
 	"crypto/subtle"
-	"fmt"
 	"log"
 	"net/http"
 	"slices"
@@ -55,11 +54,8 @@ func StorageHandler(r *Registry, token func() string) http.Handler {
 			return
 		}
 		conn := &wsStorage{ctx: ctx, c: c}
-		if err := r.StorageConnected(m, conn); err != nil {
-			log.Printf("storage %s refused: %v", req.RemoteAddr, err)
-			return
-		}
-		log.Printf("storage connected, endpoint %s", m.Endpoint)
+		r.StorageConnected(conn)
+		log.Printf("storage connected")
 		defer func() {
 			r.StorageDisconnected(conn)
 			log.Printf("storage disconnected")
@@ -76,17 +72,21 @@ func StorageHandler(r *Registry, token func() string) http.Handler {
 	})
 }
 
-// StorageConnected makes c the storage connection (newest wins), saves its endpoint and sends it the desired disks.
-// A new endpoint changes every attachment URL, so VMs with disks get a new generation.
-func (r *Registry) StorageConnected(m proto.StorageMessage, c StorageConn) error {
-	if !proto.ValidEndpoint(m.Endpoint) {
-		return fmt.Errorf("%w: register endpoint %q is not host:port", ErrInvalid, m.Endpoint)
-	}
+// StorageConnected makes c the storage connection (newest wins) and sends it the desired disks.
+func (r *Registry) StorageConnected(c StorageConn) {
 	r.mu.Lock()
 	r.storage, r.storageReported = c, false
+	r.mu.Unlock()
+	r.pushStorage()
+}
+
+// SyncStorageEndpoint applies the configured storage endpoint; a new one changes every attachment URL, so VMs with disks get a new generation.
+func (r *Registry) SyncStorageEndpoint() {
+	ep := r.cfg.Get().StorageEndpoint()
+	r.mu.Lock()
 	nodes := map[string]bool{}
-	if r.disks.Endpoint() != m.Endpoint {
-		if err := r.disks.SetEndpoint(m.Endpoint); err != nil {
+	if r.disks.Endpoint() != ep {
+		if err := r.disks.SetEndpoint(ep); err != nil {
 			log.Printf("storage: saving endpoint: %v", err)
 		} else {
 			for _, vm := range r.vms {
@@ -102,11 +102,22 @@ func (r *Registry) StorageConnected(m proto.StorageMessage, c StorageConn) error
 		}
 	}
 	r.mu.Unlock()
-	r.pushStorage()
 	for n := range nodes {
 		r.push(n)
 	}
-	return nil
+}
+
+// vmsWithDisks counts the VMs that restart when the storage endpoint changes.
+func (r *Registry) vmsWithDisks() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, vm := range r.vms {
+		if len(vm.Attachments) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // StorageDisconnected ignores c if the agent has already reconnected with a newer connection.

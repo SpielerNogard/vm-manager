@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"vm-manager/internal/proto"
 )
 
 func settingsServer(t *testing.T, c Config) (*httptest.Server, *ConfigStore, *Registry) {
@@ -156,5 +158,40 @@ func TestSettingsIPv6EndpointInDeviceConfig(t *testing.T) {
 	_, created := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"laptop"}`)
 	if !strings.Contains(string(created), "Endpoint = [fd00::1]:51821") {
 		t.Fatalf("device = %s", created)
+	}
+}
+
+func TestSettingsStorageEndpoint(t *testing.T) {
+	srv, cfg, r := settingsServer(t, testAPIConfig())
+	n := &fakeNode{}
+	if err := r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, n); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Update(func(c *Config) error { c.Storage.Port = 10809; return nil })
+	r.SyncStorageEndpoint()
+	d := mustDisk(t, r, "data", 1)
+	markReady(r, d.ID)
+	createWithDisks(t, r, "with", AttachRequest{DiskID: d.ID, MountPath: "/data"})
+	url := func() string { return n.last().Desired[0].Spec.Attachments[0].URL }
+	if url() != "nbd://vmm.lan:10809/"+d.ID+".img" {
+		t.Fatalf("derived url = %q", url())
+	}
+	for _, b := range []string{`{"storage":{"endpoint":"st"}}`, `{"storage":{"endpoint":"st:0"}}`, `{"storage":{"endpoint":"nbd://st:1"}}`} {
+		if s, body := doJSON(t, "PUT", srv.URL+"/api/settings", b); s != 400 {
+			t.Errorf("%s: status = %d body = %s", b, s, body)
+		}
+	}
+	s, body := doJSON(t, "PUT", srv.URL+"/api/settings", `{"storage":{"endpoint":"st:1"}}`)
+	var out struct {
+		StorageEndpoint string `json:"storageEndpoint"`
+		VMsWithDisks    int    `json:"vmsWithDisks"`
+	}
+	json.Unmarshal(body, &out)
+	if s != 200 || out.StorageEndpoint != "st:1" || out.VMsWithDisks != 1 || url() != "nbd://st:1/"+d.ID+".img" {
+		t.Fatalf("status = %d body = %s url = %q", s, body, url())
+	}
+	doJSON(t, "PUT", srv.URL+"/api/settings", `{"storage":{"endpoint":""},"clients":{"endpoint":"other.lan"}}`)
+	if url() != "nbd://other.lan:10809/"+d.ID+".img" {
+		t.Fatalf("after clients change url = %q", url())
 	}
 }

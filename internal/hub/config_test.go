@@ -189,3 +189,53 @@ func TestLiveTokenCheck(t *testing.T) {
 	}
 	waitFor(t, "node online", func() bool { ns := r.Nodes(); return len(ns) == 1 && ns[0].State == "online" })
 }
+
+func TestStorageEndpointDefaultsToClientsEndpoint(t *testing.T) {
+	p := writeFile(t, `{"token":"abcdef0123456789abcd","clients":{"endpoint":"fd00::1"}}`)
+	s, err := LoadOrCreateConfig(p, envOf(map[string]string{"STORAGE_PORT": "10900"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Get().StorageEndpoint(); got != "[fd00::1]:10900" {
+		t.Fatalf("derived = %q", got)
+	}
+	c := s.Get()
+	c.Storage.Endpoint = "st:1"
+	if got := c.StorageEndpoint(); got != "st:1" {
+		t.Fatalf("explicit = %q", got)
+	}
+	c.Storage.Endpoint, c.Clients.Endpoint = "", ""
+	if got := c.StorageEndpoint(); got != "" {
+		t.Fatalf("before setup = %q", got)
+	}
+	if _, err := LoadOrCreateConfig(p, envOf(map[string]string{"STORAGE_PORT": "0"})); err == nil {
+		t.Fatal("invalid STORAGE_PORT accepted")
+	}
+}
+
+func TestMigrateStorageEndpointKeepsAdvertisedOne(t *testing.T) {
+	cases := []struct {
+		name, file, old, want string
+	}{
+		{"carried over", `{"token":"abcdef0123456789abcd","clients":{"endpoint":"hub.lan"}}`, "100.1.2.3:10809", "100.1.2.3:10809"},
+		{"same as derived", `{"token":"abcdef0123456789abcd","clients":{"endpoint":"hub.lan"}}`, "hub.lan:10809", ""},
+		{"already migrated", `{"token":"abcdef0123456789abcd","clients":{"endpoint":"hub.lan"},"storage":{"port":10809}}`, "100.1.2.3:10809", ""},
+		{"no old endpoint", `{"token":"abcdef0123456789abcd","clients":{"endpoint":"hub.lan"}}`, "", ""},
+	}
+	for _, tc := range cases {
+		s, err := LoadOrCreateConfig(writeFile(t, tc.file), envOf(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		disks := newTestDisks(t)
+		if err := disks.SetEndpoint(tc.old); err != nil {
+			t.Fatal(err)
+		}
+		if err := MigrateStorageEndpoint(s, disks); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.Get().Storage.Endpoint; got != tc.want {
+			t.Errorf("%s: storage.endpoint = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

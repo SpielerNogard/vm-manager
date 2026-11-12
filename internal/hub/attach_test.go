@@ -11,10 +11,17 @@ func newAttachRegistry(t *testing.T) (*Registry, *fakeNode, *fakeStorage) {
 	t.Helper()
 	r, n := newTestRegistry(t)
 	fs := &fakeStorage{}
-	if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "st:10809"}, fs); err != nil {
+	setStorageEndpoint(t, r, "st:10809")
+	r.StorageConnected(fs)
+	return r, n, fs
+}
+
+func setStorageEndpoint(t *testing.T, r *Registry, ep string) {
+	t.Helper()
+	if _, err := r.cfg.Update(func(c *Config) error { c.Storage.Endpoint = ep; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	return r, n, fs
+	r.SyncStorageEndpoint()
 }
 
 func mustDisk(t *testing.T, r *Registry, name string, sizeGB int) DiskView {
@@ -326,14 +333,12 @@ func TestGrowAttachedBumpsAfterReport(t *testing.T) {
 }
 
 func TestEndpointChangeBumpsVMs(t *testing.T) {
-	r, n, fs := newAttachRegistry(t)
+	r, n, _ := newAttachRegistry(t)
 	d := mustDisk(t, r, "data", 1)
 	markReady(r, d.ID)
 	createWithDisks(t, r, "with", AttachRequest{DiskID: d.ID, MountPath: "/data"})
 	createWithDisks(t, r, "without")
-	if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "st:10809"}, fs); err != nil {
-		t.Fatal(err)
-	}
+	setStorageEndpoint(t, r, "st:10809")
 	gens := func() map[string]uint64 {
 		out := map[string]uint64{}
 		for _, v := range r.VMs() {
@@ -344,9 +349,7 @@ func TestEndpointChangeBumpsVMs(t *testing.T) {
 	if g := gens(); g["with"] != 1 || g["without"] != 1 {
 		t.Fatalf("same endpoint bumped: %+v", g)
 	}
-	if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "st2:10809"}, fs); err != nil {
-		t.Fatal(err)
-	}
+	setStorageEndpoint(t, r, "st2:10809")
 	if g := gens(); g["with"] != 2 || g["without"] != 1 {
 		t.Fatalf("gens = %+v", g)
 	}
@@ -359,11 +362,8 @@ func TestEndpointChangeBumpsVMs(t *testing.T) {
 	if len(urls) != 1 || urls[0] != "nbd://st2:10809/"+d.ID+".img" {
 		t.Fatalf("urls = %v", urls)
 	}
-	if err := r.StorageConnected(proto.StorageMessage{Type: "register"}, fs); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("empty endpoint: err = %v", err)
-	}
 	if r.Storage().Endpoint != "st2:10809" {
-		t.Fatal("empty endpoint saved")
+		t.Fatalf("view endpoint = %q", r.Storage().Endpoint)
 	}
 }
 
@@ -504,9 +504,7 @@ func TestSeenDiskMissing(t *testing.T) {
 		t.Fatalf("attach missing: err = %v", err)
 	}
 	r.StorageDisconnected(fs)
-	if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: "st:10809"}, fs); err != nil {
-		t.Fatal(err)
-	}
+	r.StorageConnected(fs)
 	if v := diskOf(t, r, d.ID); v.State == "missing" {
 		t.Fatal("missing before the reconnected storage reported")
 	}
@@ -544,18 +542,6 @@ func TestAttachURLWaitsForSeen(t *testing.T) {
 	}
 	if a := n2.last().Desired[0].Spec.Attachments[0]; a.URL != want {
 		t.Fatalf("url after hub restart = %q", a.URL)
-	}
-}
-
-func TestStorageRegisterNeedsHostPort(t *testing.T) {
-	r, _, fs := newAttachRegistry(t)
-	for _, ep := range []string{"storage", "storage:1:2", "nbd://storage:10809", "st:", "st:abc", "st:0", "st:65536"} {
-		if err := r.StorageConnected(proto.StorageMessage{Type: "register", Endpoint: ep}, fs); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("%q: err = %v", ep, err)
-		}
-	}
-	if r.Storage().Endpoint != "st:10809" {
-		t.Fatal("invalid endpoint saved")
 	}
 }
 

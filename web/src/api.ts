@@ -138,11 +138,14 @@ export interface Settings {
   underlay: { port: number }
   clients: { endpoint: string; port: number }
   guestMTU: number
+  storage: { endpoint?: string; port: number }
   setupComplete: boolean
   devices: number
+  storageEndpoint: string
+  vmsWithDisks: number
 }
 
-export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string } }
+export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string }; storage?: { endpoint?: string } }
 
 export interface CreateVMRequest {
   nodeId: string

@@ -357,7 +357,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	registerSettings(mux, cfg, net)
+	registerSettings(mux, r, cfg, net)
 	return setupGuard(cfg, mux)
 }
 

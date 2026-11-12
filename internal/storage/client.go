@@ -19,9 +19,9 @@ const (
 
 // Run keeps a link to the hub: it applies every desired list, then reports its files, and also reports every `report`.
 // token is called before every connect, so a token changed on the hub is picked up on reconnect.
-func Run(ctx context.Context, hubURL string, token func() (string, error), endpoint string, dir Dir, report time.Duration) error {
+func Run(ctx context.Context, hubURL string, token func() (string, error), dir Dir, report time.Duration) error {
 	for {
-		if err := dial(ctx, hubURL, token, endpoint, dir, report); err != nil && ctx.Err() == nil {
+		if err := dial(ctx, hubURL, token, dir, report); err != nil && ctx.Err() == nil {
 			log.Printf("hub connection: %v", err)
 		}
 		select {
@@ -32,15 +32,15 @@ func Run(ctx context.Context, hubURL string, token func() (string, error), endpo
 	}
 }
 
-func dial(ctx context.Context, hubURL string, token func() (string, error), endpoint string, dir Dir, report time.Duration) error {
+func dial(ctx context.Context, hubURL string, token func() (string, error), dir Dir, report time.Duration) error {
 	t, err := token()
 	if err != nil {
 		return err
 	}
-	return connect(ctx, hubURL, t, endpoint, dir, report)
+	return connect(ctx, hubURL, t, dir, report)
 }
 
-func connect(ctx context.Context, hubURL, token, endpoint string, dir Dir, report time.Duration) error {
+func connect(ctx context.Context, hubURL, token string, dir Dir, report time.Duration) error {
 	c, _, err := websocket.Dial(ctx, hubURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
 	})
@@ -49,7 +49,7 @@ func connect(ctx context.Context, hubURL, token, endpoint string, dir Dir, repor
 	}
 	defer c.CloseNow()
 	c.SetReadLimit(messageLimit)
-	if err := wsjson.Write(ctx, c, proto.StorageMessage{Type: "register", Endpoint: endpoint}); err != nil {
+	if err := wsjson.Write(ctx, c, proto.StorageMessage{Type: "register"}); err != nil {
 		return err
 	}
 

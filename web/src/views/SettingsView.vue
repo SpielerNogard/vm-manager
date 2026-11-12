@@ -17,6 +17,7 @@ const { settings, loaded, refresh } = useFleet()
 
 const tab = ref<Tab>('networking')
 const endpoint = ref('')
+const storageEndpoint = ref('')
 const token = ref('')
 const mtu = ref(1300)
 const showToken = ref(false)
@@ -27,6 +28,7 @@ const savedTab = ref<Tab | null>(null)
 // Seed the form once; the 2s poll must not overwrite what the user is typing.
 function seed(s: Settings) {
   endpoint.value = s.clients.endpoint
+  storageEndpoint.value = s.storage.endpoint ?? ''
   token.value = s.token
   mtu.value = s.guestMTU
 }
@@ -46,7 +48,12 @@ const ports = computed(() => [
   { key: 'hubPort', value: settings.value?.hub.port },
   { key: 'underlayPort', value: settings.value?.underlay.port },
   { key: 'clientsPort', value: settings.value?.clients.port },
+  { key: 'storagePort', value: settings.value?.storage.port },
 ])
+
+const hostPort = (host: string, port?: number) => (host.includes(':') ? `[${host}]` : host) + `:${port ?? ''}`
+// Mirrors the hub: an empty storage endpoint means the client endpoint with the storage port.
+const storageDefault = computed(() => (endpoint.value ? hostPort(endpoint.value, settings.value?.storage.port) : ''))
 
 function onTabKeydown(e: KeyboardEvent) {
   const last = tabs.length - 1
@@ -63,7 +70,10 @@ async function apply(forTab: Tab, call: () => Promise<Settings>) {
   error.value = ''
   try {
     const s = await call()
-    if (forTab === 'networking') endpoint.value = s.clients.endpoint
+    if (forTab === 'networking') {
+      endpoint.value = s.clients.endpoint
+      storageEndpoint.value = s.storage.endpoint ?? ''
+    }
     else if (forTab === 'security') token.value = s.token
     else mtu.value = s.guestMTU
     await refresh()
@@ -75,15 +85,23 @@ async function apply(forTab: Tab, call: () => Promise<Settings>) {
 
 const patch = (p: SettingsPatch) => () => api.updateSettings(p)
 
+const devicesAffected = computed(() =>
+  endpoint.value !== settings.value?.clients.endpoint ? (settings.value?.devices ?? 0) : 0,
+)
+const vmsAffected = computed(() =>
+  (storageEndpoint.value || storageDefault.value) !== settings.value?.storageEndpoint ? (settings.value?.vmsWithDisks ?? 0) : 0,
+)
+const saveNetworking = () => api.updateSettings({ clients: { endpoint: endpoint.value }, storage: { endpoint: storageEndpoint.value } })
+
 function saveEndpoint() {
-  if ((settings.value?.devices ?? 0) > 0 && endpoint.value !== settings.value?.clients.endpoint) pending.value = 'endpoint'
-  else void apply('networking', patch({ clients: { endpoint: endpoint.value } }))
+  if (devicesAffected.value > 0 || vmsAffected.value > 0) pending.value = 'endpoint'
+  else void apply('networking', saveNetworking)
 }
 
 function confirm() {
   const p = pending.value
   pending.value = null
-  if (p === 'endpoint') void apply('networking', patch({ clients: { endpoint: endpoint.value } }))
+  if (p === 'endpoint') void apply('networking', saveNetworking)
   else if (p === 'token') void apply('security', patch({ token: token.value }))
   else if (p === 'regenerate') void apply('security', () => api.regenerateToken())
 }
@@ -105,7 +123,16 @@ async function copyToken() {
 
 const dialog = computed(() =>
   pending.value === 'endpoint'
-    ? { title: t('settings.endpointChangeTitle'), body: t('settings.endpointChangeBody', { count: settings.value?.devices ?? 0 }, settings.value?.devices ?? 0), label: t('settings.confirm') }
+    ? {
+        title: t('settings.endpointChangeTitle'),
+        body: [
+          devicesAffected.value > 0 ? t('settings.endpointChangeBody', { count: devicesAffected.value }, devicesAffected.value) : '',
+          vmsAffected.value > 0 ? t('settings.storageChangeBody', { count: vmsAffected.value }, vmsAffected.value) : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+        label: t('settings.confirm'),
+      }
     : { title: t('settings.tokenChangeTitle'), body: t('settings.tokenChangeBody'), label: t('settings.tokenChangeConfirm') },
 )
 
@@ -157,6 +184,11 @@ watch(tab, () => {
               <span class="label-text mb-1 text-sm font-medium">{{ t('settings.endpoint') }}</span>
               <input v-model.trim="endpoint" type="text" class="input input-sm input-bordered w-full font-token" required />
               <span class="text-base-content/60 mt-1 text-xs">{{ t('settings.endpointHint') }}</span>
+            </label>
+            <label class="form-control">
+              <span class="label-text mb-1 text-sm font-medium">{{ t('settings.storageEndpoint') }}</span>
+              <input v-model.trim="storageEndpoint" type="text" class="input input-sm input-bordered w-full font-token" :placeholder="storageDefault" />
+              <span class="text-base-content/60 mt-1 text-xs">{{ t('settings.storageEndpointHint') }}</span>
             </label>
             <div class="grid grid-cols-2 gap-3">
               <label v-for="{ key, value } in ports" :key="key" class="form-control">

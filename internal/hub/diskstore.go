@@ -28,10 +28,10 @@ type StoredDisk struct {
 type diskState struct {
 	Disks      []StoredDisk `json:"disks"`
 	Tombstones []string     `json:"tombstones"`
-	Endpoint   string       `json:"endpoint"`
+	Endpoint   string       `json:"endpoint,omitempty"`
 }
 
-// DiskStore holds the hub's standalone disks, deleted-disk tombstones and the storage endpoint.
+// DiskStore holds the hub's standalone disks, deleted-disk tombstones and the storage endpoint the attachment URLs were last built from.
 type DiskStore struct {
 	mu         sync.Mutex
 	path       string

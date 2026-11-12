@@ -155,11 +155,10 @@ type StorageDisk struct {
 
 // StorageMessage types: "register" and "report" (agent→hub), "desired" (hub→agent).
 type StorageMessage struct {
-	Type     string        `json:"type"`
-	Endpoint string        `json:"endpoint,omitempty"` // register: host:port nodes use for NBD
-	Files    []StorageFile `json:"files,omitempty"`
-	Disks    []StorageDisk `json:"disks,omitempty"`
-	Deleted  []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
+	Type    string        `json:"type"`
+	Files   []StorageFile `json:"files,omitempty"`
+	Disks   []StorageDisk `json:"disks,omitempty"`
+	Deleted []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
 }
 
 // ValidEndpoint reports whether s is host:port with a non-empty host and a port in 1-65535.

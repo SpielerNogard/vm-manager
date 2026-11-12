@@ -33,7 +33,7 @@ Settings page:
 
 | Tab | |
 |---|---|
-| Networking | Client endpoint (host name or IP, no scheme or port) that devices connect to. Ports and listen address are shown read-only |
+| Networking | Client endpoint (host name or IP, no scheme or port) that devices connect to. Storage endpoint (`host:port`) nodes use for disks; empty means the client endpoint with the storage port. Ports and listen address are shown read-only |
 | Security | Node token: show, copy, regenerate or set (at least 16 characters) |
 | Guests | Guest mgmt MTU (576-9000), delivered by OVN DHCP |
 
@@ -47,8 +47,7 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
 | `HUB_SSH_DIR` | `~/.ssh` | Directory with the default SSH public keys offered as hub keys |
-| `STORAGE_ENDPOINT` | none | `host:port` nodes use to reach the storage server's NBD port. Only for the `storage` profile |
-| `STORAGE_PORT` | `10809` | Published NBD port of the storage server (tcp) |
+| `STORAGE_PORT` | `10809` | Published NBD port of the storage server (tcp); also the port of the default storage endpoint |
 
 To change a port, set it in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
 
@@ -80,7 +79,6 @@ curl -X POST http://<hub>:8080/api/vms -d '{
 Standalone disks hold data that outlives VMs. They live on a storage server and nodes attach them to VMs over NBD, so a disk can move between VMs and nodes. The storage server is optional and runs as a compose profile (an nbdkit server plus an agent that connects to the hub), usually on the hub host:
 
 ```sh
-# in deploy/.env: STORAGE_ENDPOINT=<host>:<STORAGE_PORT>, reachable from the nodes
 docker compose -f deploy/compose.yaml --profile storage up -d --build
 ```
 
@@ -89,11 +87,11 @@ The compose `storage` service reads the hub token from `/data/hub.json` on every
 ```sh
 docker build -f deploy/storage.Dockerfile -t vm-manager-storage .
 docker run -d --restart unless-stopped -p 10809:10809 -v vm-manager-disks:/disks \
-  -e HUB_TOKEN=<hub token> -e STORAGE_ENDPOINT=<this host>:10809 \
+  -e HUB_TOKEN=<hub token> \
   vm-manager-storage -hub ws://<hub>:<HUB_PORT>/api/storage/connect
 ```
 
-`STORAGE_ENDPOINT` (or `-advertise`) must be `host:port` reachable from the nodes. Keep the `/disks` volume: the storage server never recreates the file of a disk it already had, so a lost volume shows those disks as `missing` instead of handing VMs blank disks.
+Nodes reach the storage server at the storage endpoint from Settings: by default the client endpoint with `STORAGE_PORT`, which fits the compose service on the hub host. For a storage server on another host set it to that host's `host:port`. Keep the `/disks` volume: the storage server never recreates the file of a disk it already had, so a lost volume shows those disks as `missing` instead of handing VMs blank disks.
 
 Without a storage server, disks stay `creating` and VMs with disks fail to start with `storage not ready`. A new disk is usable once the storage server has created its file (`ready`); a VM attached earlier starts then. Create a disk with `POST /api/disks` or the GUI (**Disks** page), then attach it at VM creation (`disks` on `POST /api/vms`) or later:
 
@@ -155,6 +153,8 @@ Upgrade note: upgrade the hub and all nodes together; old and new versions don't
 | `clients.endpoint` | empty | Address devices connect to; the GUI stays locked until set |
 | `clients.port` | `51821` | Published clients WireGuard port |
 | `guestMTU` | `1300` | Guest mgmt MTU, delivered by OVN DHCP |
+| `storage.endpoint` | empty | `host:port` nodes use for NBD; empty means `clients.endpoint` with `storage.port` |
+| `storage.port` | `10809`, or `STORAGE_PORT` | Port of the default storage endpoint |
 
 **Node:** the required keys are `hub.url`, `hub.token`, `provider` (`vz`), `paths.vms` and `paths.images`. `nodeId` is optional and defaults to the hostname. Set it explicitly: if it changes (or the hostname changes while it is unset), the hub refuses the node because its VMs belong to the old ID. The node keeps its VMs and retries. `capacity.cpus`/`memoryMB` are optional and default to the hardware, minus 4 GB of RAM. `underlay.endpoint` overrides the hub's WireGuard endpoint (default: the host of `hub.url` plus the hub's underlay port). `underlay.mtu` is the `wg-underlay` MTU (default 1420). The node's WireGuard chassis key is stored in `<paths.vms>/chassis.key`.
 
@@ -168,8 +168,8 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | POST | `/api/nodes` | Add a node (`{"id"}`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
-| GET | `/api/settings` | Client endpoint, ports, listen address, guest MTU, node token, plus `setupComplete` and `devices` (device count) |
-| PUT | `/api/settings` | Partial update of `clients.endpoint`, `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
+| GET | `/api/settings` | Client endpoint, storage endpoint, ports, listen address, guest MTU, node token, plus `setupComplete`, `devices` (device count), `storageEndpoint` (effective) and `vmsWithDisks` |
+| PUT | `/api/settings` | Partial update of `clients.endpoint`, `storage.endpoint` (`host:port` or empty), `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |
@@ -215,7 +215,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 - Create, delete and power changes for an offline node are accepted and shown as `pending` until the node connects.
 - Nodes join the gateway over a WireGuard underlay (`10.198.0.0/24`); OVN Geneve tunnels run on top of it. VMs get a management NIC on `10.200.0.0/16`, devices get addresses in `10.201.0.0/24`.
 - The hub is meant for a trusted home network. Node↔hub traffic is plain `ws://` with a shared token, and the GUI and API, including device creation, have no user auth.
-- The storage server's NBD port is unauthenticated: anyone who can reach `STORAGE_PORT` can read and write every disk. Changing `STORAGE_ENDPOINT` restarts every VM with disks, as their NBD URLs change.
+- The storage server's NBD port is unauthenticated: anyone who can reach `STORAGE_PORT` can read and write every disk. Changing the effective storage endpoint (also the client endpoint while the storage endpoint is empty) restarts every VM with disks, as their NBD URLs change.
 - WireGuard devices can only reach the VMs' management IPs and the gateway DNS. The hub API and the OVN databases are firewalled from them.
 - The hub stores device private keys, so configs can be downloaded again.
 - VMs cannot reach each other on the management network; they talk only via shared networks (see Networks). The vz NAT NIC (`eth0`, internet) is still shared.

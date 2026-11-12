@@ -31,6 +31,7 @@ services:
       HUB_PORT: ${HUB_PORT:-8080}
       UNDERLAY_PORT: ${UNDERLAY_PORT:-51820}
       CLIENTS_PORT: ${CLIENTS_PORT:-51821}
+      STORAGE_PORT: ${STORAGE_PORT:-10809}
     command: ["-config", "/data/hub.json", "-ssh-dir", "/host-ssh"]
     volumes:
       - data:/data
@@ -43,8 +44,6 @@ services:
     restart: unless-stopped
     ports:
       - "${STORAGE_PORT:-10809}:10809/tcp"
-    environment:
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
     command: ["-hub", "ws://netns:8080/api/storage/connect", "-token-file", "/data/hub.json"]
     volumes:
       - disks:/disks
