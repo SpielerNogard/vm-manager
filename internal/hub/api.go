@@ -218,13 +218,14 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 	mux.HandleFunc("GET /api/nodes", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.Nodes()) })
 	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, req *http.Request) {
 		var q struct {
-			ID string `json:"id"`
+			ID       string `json:"id"`
+			Provider string `json:"provider"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
 			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 			return
 		}
-		n, err := r.CreateNode(q.ID)
+		n, err := r.CreateNode(q.ID, q.Provider)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -246,6 +247,15 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(b)
+	})
+	mux.HandleFunc("GET /api/nodes/{id}/install-command", func(w http.ResponseWriter, req *http.Request) {
+		cmd, err := r.InstallCommand(req.PathValue("id"), req.URL.Query().Get("host"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		io.WriteString(w, cmd)
 	})
 	mux.HandleFunc("GET /api/vms", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.VMs()) })
 	mux.HandleFunc("GET /api/vms/{id}", func(w http.ResponseWriter, req *http.Request) {

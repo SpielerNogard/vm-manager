@@ -3,6 +3,7 @@ package hub
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -455,7 +456,7 @@ func TestAPINodesLifecycle(t *testing.T) {
 	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"Mac X"}`); code != http.StatusBadRequest {
 		t.Fatalf("status = %d body = %s", code, b)
 	}
-	code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x"}`)
+	code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x","provider":"vz"}`)
 	var n map[string]any
 	json.Unmarshal(b, &n)
 	if code != http.StatusCreated || n["id"] != "mac-x" || n["state"] != "pending" {
@@ -464,7 +465,7 @@ func TestAPINodesLifecycle(t *testing.T) {
 	if _, ok := n["online"]; ok {
 		t.Fatalf("online still in JSON: %s", b)
 	}
-	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x"}`); code != http.StatusConflict {
+	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x","provider":"vz"}`); code != http.StatusConflict {
 		t.Fatalf("status = %d body = %s", code, b)
 	}
 
@@ -509,7 +510,7 @@ func TestAPINodesBlockedBeforeSetup(t *testing.T) {
 	cfg := testAPIConfig()
 	cfg.Clients.Endpoint = ""
 	srv, r, _ := apiServerWith(t, cfg)
-	if code, _ := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x"}`); code != http.StatusConflict {
+	if code, _ := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x","provider":"vz"}`); code != http.StatusConflict {
 		t.Fatalf("status = %d", code)
 	}
 	if code, _ := doJSON(t, "DELETE", srv.URL+"/api/nodes/n1", ""); code != http.StatusConflict {
@@ -590,5 +591,33 @@ func TestVersionEndpoint(t *testing.T) {
 	status, body := doJSON(t, "GET", srv.URL+"/api/version", "")
 	if status != 200 || strings.TrimSpace(string(body)) != `{"version":"v9.9.9"}` {
 		t.Fatalf("status %d body %s", status, body)
+	}
+}
+
+func TestInstallScriptServed(t *testing.T) {
+	srv := httptest.NewServer(InstallScriptHandler())
+	t.Cleanup(srv.Close)
+	resp, err := http.Get(srv.URL + "/node/install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/x-shellscript" || string(body) != string(InstallScript) || len(body) == 0 {
+		t.Fatalf("status %d type %q len %d", resp.StatusCode, resp.Header.Get("Content-Type"), len(body))
+	}
+}
+
+func TestInstallCommandEndpoint(t *testing.T) {
+	srv, r, _ := apiServerWith(t, testAPIConfig())
+	if _, err := r.CreateNode("n2", "firecracker"); err != nil {
+		t.Fatal(err)
+	}
+	status, body := doJSON(t, "GET", srv.URL+"/api/nodes/n2/install-command?host=h.lan", "")
+	if status != 200 || !strings.HasPrefix(string(body), "curl -fsSL http://h.lan:") || !strings.Contains(string(body), "--provider firecracker") {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	if status, _ := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"n3"}`); status != 400 {
+		t.Fatalf("create without provider: %d", status)
 	}
 }

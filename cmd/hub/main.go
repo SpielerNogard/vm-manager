@@ -67,6 +67,7 @@ func main() {
 	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, token))
 	mux.Handle("/api/storage/connect", hub.StorageHandler(r, token))
 	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg))
+	mux.Handle("/node/install.sh", hub.InstallScriptHandler())
 	mux.Handle("/", spa(dist))
 
 	listen := cfg.Get().Listen
