@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/version"
 )
 
 func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) http.Handler {
@@ -55,6 +56,9 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 		}
 		return out
 	}
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"version": version.Version})
+	})
 	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, networkViews()) })
 	mux.HandleFunc("GET /api/networks/{id}", func(w http.ResponseWriter, req *http.Request) {
 		for _, n := range networkViews() {

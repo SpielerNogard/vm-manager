@@ -13,6 +13,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/gateway.Dockerfile
+      args:
+        VMM_VERSION: ${VMM_VERSION:-}
+        VMM_BIN: ${VMM_BIN:-release}
     restart: unless-stopped
     network_mode: service:netns
     cap_add: [NET_ADMIN]
@@ -25,6 +28,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/hub.Dockerfile
+      args:
+        VMM_VERSION: ${VMM_VERSION:-}
+        VMM_BIN: ${VMM_BIN:-release}
     restart: unless-stopped
     network_mode: service:netns
     environment:
@@ -40,6 +46,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/storage.Dockerfile
+      args:
+        VMM_VERSION: ${VMM_VERSION:-}
+        VMM_BIN: ${VMM_BIN:-release}
     profiles: [storage]
     restart: unless-stopped
     ports:

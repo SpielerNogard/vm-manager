@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
 
 	"vm-manager/internal/storage"
+	"vm-manager/internal/version"
 )
 
 func main() {
@@ -24,6 +26,7 @@ func main() {
 	nbdPort := flag.Int("nbd-port", 10809, "NBD port nbdkit listens on")
 	nbdkit := flag.Bool("nbdkit", true, "run nbdkit as a child process")
 	flag.Parse()
+	log.Printf("%s %s", filepath.Base(os.Args[0]), version.Version)
 	if (*token == "") == (*tokenFile == "") {
 		log.Fatal("set exactly one of -token (or HUB_TOKEN) and -token-file")
 	}

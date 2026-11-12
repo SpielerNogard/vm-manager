@@ -1,0 +1,131 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    # The CI's own bump commit triggers nothing (GITHUB_TOKEN pushes never do); this skips pushes whose tip is a manual bump.
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'bump:') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true # zizmor: ignore[artipacked] this job pushes the bump commit and tag
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: make test
+      - id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set +e
+          uvx --from commitizen==4.19.3 cz bump --yes --changelog-to-stdout --git-output-to-stderr > notes.md
+          rc=$?
+          set -e
+          # 21 = NO_COMMITS_TO_BUMP (nothing release-worthy), 3 = NO_COMMITS_FOUND (no commits since the last tag).
+          if [ "$rc" = 21 ] || [ "$rc" = 3 ]; then echo "nothing to release"; exit 0; fi
+          [ "$rc" = 0 ] || exit "$rc"
+          # Atomic: a rejected branch push (main moved meanwhile) must not leave the tag behind.
+          git push --atomic --follow-tags
+          echo "version=$(uvx --from commitizen==4.19.3 cz version --project)" >> "$GITHUB_OUTPUT"
+      - if: steps.bump.outputs.version != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notes
+          path: notes.md
+
+  linux:
+    needs: bump
+    if: needs.bump.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.bump.outputs.version }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: make web dist
+        env:
+          VERSION: v${{ needs.bump.outputs.version }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux
+          path: dist/
+
+  darwin:
+    needs: bump
+    if: needs.bump.outputs.version != ''
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.bump.outputs.version }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: make dist-darwin
+        env:
+          VERSION: v${{ needs.bump.outputs.version }}
+      # Without the entitlement vz refuses to start VMs.
+      - run: codesign -d --entitlements - dist/node-darwin-arm64 | grep -q com.apple.security.virtualization
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: darwin
+          path: dist/
+
+  publish:
+    needs: [bump, linux, darwin]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.bump.outputs.version }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: "{linux,darwin}"
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: notes
+      - run: |
+          make checksums
+          gh release create "v$VERSION" dist/* --title "v$VERSION" --notes-file notes.md
+        env:
+          VERSION: ${{ needs.bump.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

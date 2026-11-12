@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/version"
 )
 
 func apiServer(t *testing.T) *httptest.Server {
@@ -577,5 +578,17 @@ func TestAPIForceRelease(t *testing.T) {
 	}
 	if s, out := doJSON(t, "DELETE", srv.URL+"/api/disks/"+d.ID, ""); s != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", s, out)
+	}
+}
+
+func TestVersionEndpoint(t *testing.T) {
+	old := version.Version
+	version.Version = "v9.9.9"
+	t.Cleanup(func() { version.Version = old })
+	// Before setup: install.sh reads the version of a hub that may not be configured yet.
+	srv, _, _ := apiServerWith(t, Config{})
+	status, body := doJSON(t, "GET", srv.URL+"/api/version", "")
+	if status != 200 || strings.TrimSpace(string(body)) != `{"version":"v9.9.9"}` {
+		t.Fatalf("status %d body %s", status, body)
 	}
 }

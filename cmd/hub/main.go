@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"vm-manager/internal/hub"
+	"vm-manager/internal/version"
 	"vm-manager/web"
 )
 
@@ -69,7 +70,7 @@ func main() {
 	mux.Handle("/", spa(dist))
 
 	listen := cfg.Get().Listen
-	log.Printf("hub listening on %s, keys in %s", listen, keysPath)
+	log.Printf("hub %s listening on %s, keys in %s", version.Version, listen, keysPath)
 	log.Fatal(http.ListenAndServe(listen, mux))
 }
 
