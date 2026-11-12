@@ -18,14 +18,13 @@ const (
 )
 
 type VMSpec struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	CPUs          int        `json:"cpus"`
-	MemoryMB      int        `json:"memoryMB"`
-	DiskGB        int        `json:"diskGB"`
-	DataDisks     []DataDisk `json:"dataDisks,omitempty"`
-	SSHPublicKeys []string   `json:"sshPublicKeys"`
-	NICs          []NIC      `json:"nics"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	CPUs          int      `json:"cpus"`
+	MemoryMB      int      `json:"memoryMB"`
+	DiskGB        int      `json:"diskGB"`
+	SSHPublicKeys []string `json:"sshPublicKeys"`
+	NICs          []NIC    `json:"nics"`
 }
 
 // NIC is one virtual network interface; Port is the OVN logical switch port name.
@@ -36,14 +35,7 @@ type NIC struct {
 	Port    string `json:"port"`
 }
 
-// DataDisk is formatted as ext4 labelled Name on first boot and mounted at MountPath.
-type DataDisk struct {
-	Name      string `json:"name"`
-	MountPath string `json:"mountPath"`
-	SizeGB    int    `json:"sizeGB"`
-}
-
-// Disk is a block device the node attached to the VM; Name is "root", the data disk's name, or "seed".
+// Disk is a block device the node attached to the VM; Name is "root" or "seed".
 type Disk struct {
 	Name           string `json:"name"`
 	File           string `json:"file"`

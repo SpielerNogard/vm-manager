@@ -11,7 +11,7 @@ import (
 
 func TestDisksFollowAttachOrder(t *testing.T) {
 	dir := t.TempDir()
-	sizes := map[string]int64{"root.img": 1 << 20, "data-0.img": 2 << 20, "data-1.img": 3 << 20, "seed.iso": 4096}
+	sizes := map[string]int64{"root.img": 1 << 20, "seed.iso": 4096}
 	for name, size := range sizes {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
@@ -20,12 +20,12 @@ func TestDisksFollowAttachOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "data-0.img"), []byte("hello"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "root.img"), []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	os.Truncate(filepath.Join(dir, "data-0.img"), sizes["data-0.img"])
+	os.Truncate(filepath.Join(dir, "root.img"), sizes["root.img"])
 
-	f := node.VMFile{Spec: proto.VMSpec{DataDisks: []proto.DataDisk{{Name: "data"}, {Name: "cache"}}}}
+	f := node.VMFile{Spec: proto.VMSpec{}}
 	got, err := (&Provider{}).Disks(f, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -35,9 +35,7 @@ func TestDisksFollowAttachOrder(t *testing.T) {
 		ro                 bool
 	}{
 		{"root", "root.img", "vda", false},
-		{"data", "data-0.img", "vdb", false},
-		{"cache", "data-1.img", "vdc", false},
-		{"seed", "seed.iso", "vdd", true},
+		{"seed", "seed.iso", "vdb", true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("disks = %+v", got)
@@ -48,7 +46,7 @@ func TestDisksFollowAttachOrder(t *testing.T) {
 			t.Errorf("disk %d = %+v, want %+v", i, d, w)
 		}
 	}
-	if got[1].AllocatedBytes <= 0 || got[1].AllocatedBytes > got[1].SizeBytes {
-		t.Errorf("allocated = %d", got[1].AllocatedBytes)
+	if got[0].AllocatedBytes <= 0 || got[0].AllocatedBytes > got[0].SizeBytes {
+		t.Errorf("allocated = %d", got[0].AllocatedBytes)
 	}
 }

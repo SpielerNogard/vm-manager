@@ -64,9 +64,6 @@ func (p *Provider) Prepare(ctx context.Context, f node.VMFile, dir string) error
 	if err := node.CloneResize(base, filepath.Join(dir, "root.img"), f.Spec.DiskGB); err != nil {
 		return err
 	}
-	if err := node.CreateDataDisks(dir, f.Spec.DataDisks); err != nil {
-		return err
-	}
 	return makeSeedISO(ctx, dir, writeGuestSeed(f))
 }
 

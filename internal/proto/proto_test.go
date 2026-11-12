@@ -14,7 +14,7 @@ func TestMessageRoundTrip(t *testing.T) {
 			VMs: []VMStatus{{ID: "abc", State: StateRunning, IP: "192.168.64.2", Generation: 3}},
 		}},
 		{Type: "desired", Desired: []DesiredVM{{
-			Spec:  VMSpec{ID: "abc", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, DataDisks: []DataDisk{{Name: "data", MountPath: "/data", SizeGB: 5}}, SSHPublicKeys: []string{"ssh-ed25519 AAA"}, NICs: []NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Port: "abc-mgmt"}}},
+			Spec:  VMSpec{ID: "abc", Name: "dev", CPUs: 2, MemoryMB: 2048, DiskGB: 20, SSHPublicKeys: []string{"ssh-ed25519 AAA"}, NICs: []NIC{{Network: "mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Port: "abc-mgmt"}}},
 			Power: PowerStopped, StopMode: StopHard, Generation: 3, Provisioned: true,
 		}}},
 	} {

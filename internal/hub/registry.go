@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -30,8 +29,6 @@ var (
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// ext4 labels are limited to 16 bytes.
-var diskNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,14}[a-z0-9])?$`)
 var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
 
 // Mounting here (or below, for the first list) would hide files the guest needs to boot or to let us in via SSH.
@@ -109,14 +106,13 @@ func (vm *VM) desired() proto.DesiredVM {
 }
 
 type CreateVMRequest struct {
-	NodeID     string           `json:"nodeId"`
-	Name       string           `json:"name"`
-	CPUs       int              `json:"cpus"`
-	MemoryMB   int              `json:"memoryMB"`
-	DiskGB     int              `json:"diskGB"`
-	DataDisks  []proto.DataDisk `json:"dataDisks"`
-	SSHKeyIDs  []string         `json:"sshKeyIds"`
-	NetworkIDs []string         `json:"networkIds"`
+	NodeID     string   `json:"nodeId"`
+	Name       string   `json:"name"`
+	CPUs       int      `json:"cpus"`
+	MemoryMB   int      `json:"memoryMB"`
+	DiskGB     int      `json:"diskGB"`
+	SSHKeyIDs  []string `json:"sshKeyIds"`
+	NetworkIDs []string `json:"networkIds"`
 	// SSHPublicKeys is resolved from SSHKeyIDs by the API.
 	SSHPublicKeys []string `json:"-"`
 }
@@ -377,7 +373,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	}
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
-			DataDisks: req.DataDisks, SSHPublicKeys: req.SSHPublicKeys, NICs: nics},
+			SSHPublicKeys: req.SSHPublicKeys, NICs: nics},
 		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending, Power: proto.PowerRunning, generation: 1,
 	}
 	if err := r.store.PutVM(vm.stored()); err != nil {
@@ -606,24 +602,6 @@ func validate(q CreateVMRequest) error {
 		return fmt.Errorf("%w: diskGB must be >= 4", ErrInvalid)
 	case len(q.SSHPublicKeys) == 0:
 		return fmt.Errorf("%w: at least one SSH key is required", ErrInvalid)
-	}
-	names, paths := map[string]bool{}, map[string]bool{}
-	for _, d := range q.DataDisks {
-		switch {
-		case !diskNameRe.MatchString(d.Name):
-			return fmt.Errorf("%w: disk name must match %s", ErrInvalid, diskNameRe)
-		case !mountPathRe.MatchString(d.MountPath) || path.Clean(d.MountPath) != d.MountPath:
-			return fmt.Errorf("%w: disk %q: mountPath must be a clean absolute path other than /", ErrInvalid, d.Name)
-		case reservedMount(d.MountPath):
-			return fmt.Errorf("%w: disk %q: mountPath %s is reserved by the system", ErrInvalid, d.Name, d.MountPath)
-		case d.SizeGB < 1:
-			return fmt.Errorf("%w: disk %q must be >= 1 GB", ErrInvalid, d.Name)
-		case names[d.Name]:
-			return fmt.Errorf("%w: disk name %q is used twice", ErrInvalid, d.Name)
-		case paths[d.MountPath]:
-			return fmt.Errorf("%w: mountPath %q is used twice", ErrInvalid, d.MountPath)
-		}
-		names[d.Name], paths[d.MountPath] = true, true
 	}
 	return nil
 }

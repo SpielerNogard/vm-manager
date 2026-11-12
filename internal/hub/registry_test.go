@@ -320,41 +320,8 @@ func TestCreateVMRejectsInvalid(t *testing.T) {
 		"cpus":          func(q *CreateVMRequest) { q.CPUs = 0 },
 		"memory":        func(q *CreateVMRequest) { q.MemoryMB = 256 },
 		"disk":          func(q *CreateVMRequest) { q.DiskGB = 3 },
-		"disk size": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/data", SizeGB: 0}}
-		},
-		"disk name": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "Data_1", MountPath: "/data", SizeGB: 1}}
-		},
-		"disk name len": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "a234567890123456x", MountPath: "/data", SizeGB: 1}}
-		},
-		"mount root": func(q *CreateVMRequest) { q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/", SizeGB: 1}} },
-		"mount rel":  func(q *CreateVMRequest) { q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "data", SizeGB: 1}} },
-		"mount unclean": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/a/../etc", SizeGB: 1}}
-		},
-		"mount space": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/my data", SizeGB: 1}}
-		},
-		"mount etc": func(q *CreateVMRequest) { q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/etc", SizeGB: 1}} },
-		"mount usr sub": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/usr/local", SizeGB: 1}}
-		},
-		"mount home": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/home/ubuntu", SizeGB: 1}}
-		},
-		"mount ssh": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "data", MountPath: "/home/ubuntu/.ssh", SizeGB: 1}}
-		},
-		"dup disk name": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "a", MountPath: "/a", SizeGB: 1}, {Name: "a", MountPath: "/b", SizeGB: 1}}
-		},
-		"dup mount": func(q *CreateVMRequest) {
-			q.DataDisks = []proto.DataDisk{{Name: "a", MountPath: "/a", SizeGB: 1}, {Name: "b", MountPath: "/a", SizeGB: 1}}
-		},
-		"empty key":    func(q *CreateVMRequest) { q.SSHPublicKeys = nil },
-		"unknown node": func(q *CreateVMRequest) { q.NodeID = "nope" },
+		"empty key":     func(q *CreateVMRequest) { q.SSHPublicKeys = nil },
+		"unknown node":  func(q *CreateVMRequest) { q.NodeID = "nope" },
 	}
 	for name, mod := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -449,19 +416,6 @@ func TestReconnectSameNodeKeepsVMs(t *testing.T) {
 	vms := r.VMs()
 	if len(vms) != 1 || vms[0].State != proto.StateRunning || vms[0].NICs[0].IP != "10.200.0.10" {
 		t.Fatalf("vms = %+v", vms)
-	}
-}
-
-func TestCreateVMAcceptsDataDisks(t *testing.T) {
-	r, _ := newTestRegistry(t)
-	q := validReq()
-	q.DataDisks = []proto.DataDisk{
-		{Name: "data", MountPath: "/data", SizeGB: 1},
-		{Name: "cache", MountPath: "/var/cache/build", SizeGB: 1},
-		{Name: "work", MountPath: "/home/ubuntu/work", SizeGB: 1},
-	}
-	if _, err := r.CreateVM(q); err != nil {
-		t.Fatal(err)
 	}
 }
 

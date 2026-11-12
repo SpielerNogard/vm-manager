@@ -55,19 +55,6 @@ func TestCloneResizeTooSmall(t *testing.T) {
 	}
 }
 
-func TestCreateDataDisks(t *testing.T) {
-	dir := t.TempDir()
-	if err := CreateDataDisks(dir, []proto.DataDisk{{Name: "a", MountPath: "/a", SizeGB: 1}, {Name: "b", MountPath: "/b", SizeGB: 2}}); err != nil {
-		t.Fatal(err)
-	}
-	for i, want := range []int64{1 << 30, 2 << 30} {
-		st, err := os.Stat(filepath.Join(dir, DataDiskName(i)))
-		if err != nil || st.Size() != want {
-			t.Fatalf("disk %d: %v size %d", i, err, st.Size())
-		}
-	}
-}
-
 func TestCloudInit(t *testing.T) {
 	f := VMFile{Spec: proto.VMSpec{ID: "abc123", Name: "dev", SSHPublicKeys: []string{"ssh-ed25519 AAAAkey me@host", "ssh-rsa BBBBkey you@host"}}, MAC: "7e:30:17:4e:4a:00"}
 	ud, md, nc := CloudInit(f)
@@ -84,29 +71,6 @@ func TestCloudInit(t *testing.T) {
 		if !strings.Contains(nc, want) {
 			t.Errorf("network-config missing %q:\n%s", want, nc)
 		}
-	}
-}
-
-func TestCloudInitDataDisks(t *testing.T) {
-	f := VMFile{Spec: proto.VMSpec{Name: "dev", DataDisks: []proto.DataDisk{{Name: "data", MountPath: "/data", SizeGB: 1}, {Name: "cache", MountPath: "/var/cache/x", SizeGB: 2}}}}
-	ud, _, _ := CloudInit(f)
-	for _, want := range []string{
-		"fs_setup:\n",
-		`{label: "data", filesystem: ext4, device: /dev/vdb, partition: none}`,
-		`{label: "cache", filesystem: ext4, device: /dev/vdc, partition: none}`,
-		"mounts:\n",
-		`["LABEL=data", "/data", ext4, "defaults,nofail", "0", "2"]`,
-		`["LABEL=cache", "/var/cache/x", ext4, "defaults,nofail", "0", "2"]`,
-		"runcmd:\n",
-		`[chown, "ubuntu:ubuntu", "/data"]`,
-		`[chown, "ubuntu:ubuntu", "/var/cache/x"]`,
-	} {
-		if !strings.Contains(ud, want) {
-			t.Errorf("user-data missing %q:\n%s", want, ud)
-		}
-	}
-	if ud, _, _ := CloudInit(VMFile{Spec: proto.VMSpec{Name: "dev"}}); strings.Contains(ud, "fs_setup") || strings.Contains(ud, "mounts") {
-		t.Errorf("user-data without disks has disk config:\n%s", ud)
 	}
 }
 

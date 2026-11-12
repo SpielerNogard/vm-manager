@@ -18,9 +18,6 @@ type attachedDisk struct {
 // attachOrder is the single source of the storage device order; the guest names them vda, vdb, ... by position.
 func attachOrder(f node.VMFile) []attachedDisk {
 	disks := []attachedDisk{{name: "root", file: "root.img"}}
-	for i, d := range f.Spec.DataDisks {
-		disks = append(disks, attachedDisk{name: d.Name, file: node.DataDiskName(i)})
-	}
 	return append(disks, attachedDisk{name: "seed", file: seedISO, readOnly: true})
 }
 
