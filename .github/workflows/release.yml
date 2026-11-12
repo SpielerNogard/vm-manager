@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   bump:
-    # The bump commit is pushed with GITHUB_TOKEN and triggers nothing; this guards manual re-runs on it.
+    # The CI's own bump commit triggers nothing (GITHUB_TOKEN pushes never do); this skips pushes whose tip is a manual bump.
     if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'bump:') }}
     runs-on: ubuntu-latest
     permissions:
@@ -28,6 +28,11 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: make test
       - id: bump
         run: |
           git config user.name "github-actions[bot]"
@@ -36,8 +41,8 @@ jobs:
           uvx --from commitizen==4.19.3 cz bump --yes --changelog-to-stdout --git-output-to-stderr > notes.md
           rc=$?
           set -e
-          # 21 = NO_COMMITS_TO_BUMP: nothing release-worthy since the last tag.
-          if [ "$rc" = 21 ]; then echo "nothing to release"; exit 0; fi
+          # 21 = NO_COMMITS_TO_BUMP (nothing release-worthy), 3 = NO_COMMITS_FOUND (no commits since the last tag).
+          if [ "$rc" = 21 ] || [ "$rc" = 3 ]; then echo "nothing to release"; exit 0; fi
           [ "$rc" = 0 ] || exit "$rc"
           # Atomic: a rejected branch push (main moved meanwhile) must not leave the tag behind.
           git push --atomic --follow-tags

@@ -13,7 +13,8 @@ RUN CGO_ENABLED=0 go build -ldflags "-X vm-manager/internal/version.Version=$VER
 FROM alpine:3.22 AS bin-release
 ARG VMM_VERSION
 ARG TARGETARCH
-RUN apk add --no-cache curl && test -n "$VMM_VERSION" \
+RUN { [ -n "$VMM_VERSION" ] || { echo "VMM_VERSION is not set: put the release to run into deploy/.env" >&2; exit 1; }; } \
+    && apk add --no-cache curl \
     && base=https://github.com/SpielerNogard/vm-manager/releases/download/$VMM_VERSION \
     && curl -fsSLO "$base/gateway-linux-$TARGETARCH" && curl -fsSLO "$base/SHA256SUMS" \
     && grep "  gateway-linux-$TARGETARCH\$" SHA256SUMS | sha256sum -c - \

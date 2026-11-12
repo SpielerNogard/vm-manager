@@ -2,7 +2,7 @@
 
 ## Releases
 
-Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`hub`, `gateway`, `storage`, `node`, `netagent` per OS/arch, plus `SHA256SUMS`) on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version.
+Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`hub`, `gateway`, `storage`, `node`, `netagent` per OS/arch, plus `SHA256SUMS`) on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version. The release workflow runs the tests before tagging. If a release build still fails after the tag was pushed, re-run the failed jobs of that workflow run; if the code needs a fix, delete the orphan tag (`git push origin :refs/tags/vX.Y.Z`) and the next release-worthy commit on `main` releases a new version.
 
 ## Build
 
@@ -47,7 +47,7 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 
 | Variable | Default | |
 |---|---|---|
-| `VMM_VERSION` | none, required | Release whose binaries the images use, e.g. `v0.1.0` |
+| `VMM_VERSION` | none, required to build the images | Release whose binaries the images use, e.g. `v0.1.0` |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
