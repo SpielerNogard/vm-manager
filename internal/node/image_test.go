@@ -175,10 +175,13 @@ func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
 
 func TestDiskScript(t *testing.T) {
 	s := DiskScript(VMFile{Spec: proto.VMSpec{Attachments: []proto.DiskAttachment{{DiskID: "d1", MountPath: "/data"}, {DiskID: "d2", MountPath: "/it's"}}}})
-	for _, want := range []string{"virtio-d1", "virtio-d2", "mkfs.ext4", "'/data'", `'/it'\''s'`, "resize2fs", "chown ubuntu:ubuntu '/data'"} {
+	for _, want := range []string{"virtio-d1", "virtio-d2", `blkid -p "$dev" >/dev/null 2>&1; rc=$?`, `[ $rc -eq 2 ] && mkfs.ext4`, "mountpoint -q '/data' || mount \"$dev\" '/data'; } && {", "'/data'", `'/it'\''s'`, "resize2fs", "chown ubuntu:ubuntu '/data'"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script missing %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "|| { mkfs") {
+		t.Errorf("formats on any blkid failure:\n%s", s)
 	}
 	if s := DiskScript(VMFile{}); strings.Contains(s, "mkfs") {
 		t.Fatalf("empty script formats:\n%s", s)

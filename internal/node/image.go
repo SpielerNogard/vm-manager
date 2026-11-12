@@ -182,10 +182,13 @@ func DiskScript(f VMFile) string {
 		fmt.Fprintf(&b, `dev=%s
 i=0; while [ ! -b "$dev" ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
 if [ -b "$dev" ]; then
-  new=; blkid "$dev" >/dev/null 2>&1 || { mkfs.ext4 -q "$dev" && new=1; }
-  mkdir -p %[2]s; mountpoint -q %[2]s || mount "$dev" %[2]s
-  resize2fs "$dev" >/dev/null 2>&1
-  [ -n "$new" ] && chown ubuntu:ubuntu %[2]s
+  # blkid exits 2 only when it found no filesystem; any other failure must never lead to a format.
+  new=; blkid -p "$dev" >/dev/null 2>&1; rc=$?
+  [ $rc -eq 2 ] && mkfs.ext4 -q "$dev" && new=1
+  mkdir -p %[2]s && { mountpoint -q %[2]s || mount "$dev" %[2]s; } && {
+    resize2fs "$dev" >/dev/null 2>&1
+    [ -n "$new" ] && chown ubuntu:ubuntu %[2]s
+  }
 fi
 `, dev, mnt)
 	}

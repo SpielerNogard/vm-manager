@@ -625,3 +625,25 @@ func TestStartFailsWhenStorageUnreachable(t *testing.T) {
 		t.Fatal("started without storage")
 	}
 }
+
+func TestDestroyKeepsDisksInUseUntilInstanceExits(t *testing.T) {
+	old := killWait
+	killWait = 50 * time.Millisecond
+	t.Cleanup(func() { killWait = old })
+	a, p := newReconcileAgent(t)
+	lastDisks := captureDisks(a)
+	addr := storageAddr(t)
+	a.reconcile(context.Background(), 1, []proto.DesiredVM{dvAtts("a", proto.PowerRunning, 1, att("da", "/data", addr))})
+	waitState(t, a, "a", proto.StateRunning, 1)
+	inst := p.instance("a")
+	inst.hang = true
+	a.reconcile(context.Background(), 2, nil)
+	if m := lastDisks(); m.AppliedSeq != 2 || !slices.Equal(m.DisksInUse, []string{"da"}) {
+		t.Fatalf("disks freed while the instance still runs: %+v", m)
+	}
+	inst.guestShutdown()
+	eventually(t, "disk freed after exit", func() bool {
+		m := lastDisks()
+		return m.AppliedSeq == 2 && len(m.DisksInUse) == 0
+	})
+}

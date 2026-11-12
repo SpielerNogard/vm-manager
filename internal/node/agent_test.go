@@ -27,6 +27,7 @@ type fakeInstance struct {
 	killed  atomic.Bool
 	p       *fakeProvider
 	staleIP bool // simulates finding the previous boot's lease only after the VM already died
+	hang    bool // Kill does not end the instance
 }
 
 func (i *fakeInstance) WaitIP(context.Context) (string, error) {
@@ -47,6 +48,10 @@ func (i *fakeInstance) Stop() error {
 }
 
 func (i *fakeInstance) Kill() error {
+	if i.hang {
+		i.p.record("kill-guest")
+		return nil
+	}
 	i.once.Do(func() { i.killed.Store(true); close(i.done) })
 	if i.p != nil {
 		i.p.record("kill-guest")

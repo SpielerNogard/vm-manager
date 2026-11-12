@@ -5,6 +5,7 @@ import (
 	"log"
 	"slices"
 	"sync"
+	"time"
 
 	"vm-manager/internal/proto"
 )
@@ -25,6 +26,10 @@ func (a *Agent) reconcile(ctx context.Context, seq uint64, desired []proto.Desir
 		if !want[id] {
 			gone = append(gone, e)
 			delete(a.vms, id)
+			if a.dying == nil {
+				a.dying = map[*vmEntry]bool{}
+			}
+			a.dying[e] = true
 		}
 	}
 	deferred := a.deferred
@@ -57,10 +62,16 @@ func (a *Agent) reconcile(ctx context.Context, seq uint64, desired []proto.Desir
 
 	a.mu.Lock()
 	a.appliedSeq = seq
-	inUse, send := a.disksInUse(), a.send
+	a.mu.Unlock()
+	a.sendDisks()
+}
+
+func (a *Agent) sendDisks() {
+	a.mu.Lock()
+	m, send := proto.Message{Type: "disks", DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq}, a.send
 	a.mu.Unlock()
 	if send != nil {
-		if err := send(proto.Message{Type: "disks", DisksInUse: inUse, AppliedSeq: seq}); err != nil {
+		if err := send(m); err != nil {
 			log.Printf("disks in use: %v", err)
 		}
 	}
@@ -96,11 +107,29 @@ func (a *Agent) destroy(e *vmEntry) {
 	id := e.file.Spec.ID
 	e.cancel()
 	<-e.booted
+	gone := func() {
+		a.mu.Lock()
+		delete(a.dying, e)
+		a.mu.Unlock()
+	}
 	if inst := a.instance(e); inst != nil {
 		e.stopRequested.Store(true)
 		if err := inst.Kill(); err != nil {
 			log.Printf("vm %s: kill: %v", id, err)
 		}
+		select {
+		case <-inst.Done():
+			gone()
+		case <-time.After(killWait):
+			log.Printf("vm %s: still running %s after kill; its disks stay in use until it exits", id, killWait)
+			go func() {
+				<-inst.Done()
+				gone()
+				a.sendDisks()
+			}()
+		}
+	} else {
+		gone()
 	}
 	if err := DeleteVMDir(a.VMsDir, id); err != nil {
 		log.Printf("vm %s: delete dir: %v", id, err)

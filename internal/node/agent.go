@@ -36,6 +36,7 @@ const (
 var (
 	restartBackoff = []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second, 15 * time.Second, 30 * time.Second}
 	quickRun       = 60 * time.Second
+	killWait       = 30 * time.Second
 )
 
 type Agent struct {
@@ -66,6 +67,8 @@ type Agent struct {
 	// deferred holds restored VMs with disks; they boot only once the hub's first desired list still wants them.
 	deferred   []VMFile
 	appliedSeq uint64
+	// dying holds removed entries whose instance may still run; their disks stay in use until it exits.
+	dying map[*vmEntry]bool
 }
 
 type vmEntry struct {
@@ -235,6 +238,11 @@ func (a *Agent) registerMsg() *proto.Register {
 func (a *Agent) disksInUse() []string {
 	var ids []string
 	for _, e := range a.vms {
+		for _, at := range e.file.Spec.Attachments {
+			ids = append(ids, at.DiskID)
+		}
+	}
+	for e := range a.dying {
 		for _, at := range e.file.Spec.Attachments {
 			ids = append(ids, at.DiskID)
 		}
