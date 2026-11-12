@@ -53,6 +53,8 @@ type Device struct {
 	PublicKey  string    `json:"publicKey"`
 	PrivateKey string    `json:"privateKey"`
 	CreatedAt  time.Time `json:"createdAt"`
+	// OnHub devices run on the hub machine itself and connect via loopback.
+	OnHub bool `json:"onHub,omitempty"`
 }
 
 type Network struct {
@@ -439,7 +441,7 @@ func (m *NetModel) Chassis() []Chassis {
 	return out
 }
 
-func (m *NetModel) AddDevice(name string) (Device, error) {
+func (m *NetModel) AddDevice(name string, onHub bool) (Device, error) {
 	if !nameRe.MatchString(name) {
 		return Device{}, fmt.Errorf("%w: name must match %s", ErrInvalid, nameRe)
 	}
@@ -457,7 +459,7 @@ func (m *NetModel) AddDevice(name string) (Device, error) {
 		if err != nil {
 			return err
 		}
-		out = Device{ID: newID(), Name: name, IP: ip, PublicKey: pub, PrivateKey: priv, CreatedAt: time.Now().UTC()}
+		out = Device{ID: newID(), Name: name, IP: ip, PublicKey: pub, PrivateKey: priv, CreatedAt: time.Now().UTC(), OnHub: onHub}
 		st.Devices = append(st.Devices, out)
 		return nil
 	})

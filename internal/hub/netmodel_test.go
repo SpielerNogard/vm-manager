@@ -42,7 +42,7 @@ func TestNetModelReloadKeepsAllocations(t *testing.T) {
 	m, path := newModel(t)
 	nics, _ := m.AllocNICs("vm1", "vm1", nil)
 	ch, _ := m.Enroll("nodeA", "keyA")
-	dev, err := m.AddDevice("laptop")
+	dev, err := m.AddDevice("laptop", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestNetModelEnrollStable(t *testing.T) {
 
 func TestNetModelDevices(t *testing.T) {
 	m, _ := newModel(t)
-	d, err := m.AddDevice("laptop")
+	d, err := m.AddDevice("laptop", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestNetModelDevices(t *testing.T) {
 	if pub, _ := wgkey.Public(d.PrivateKey); pub != d.PublicKey {
 		t.Fatal("public key does not match private key")
 	}
-	if _, err := m.AddDevice("Bad Name"); !errors.Is(err, ErrInvalid) {
+	if _, err := m.AddDevice("Bad Name", false); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("err = %v, want ErrInvalid", err)
 	}
 	if err := m.DeleteDevice("nope"); !errors.Is(err, ErrNotFound) {

@@ -75,7 +75,9 @@ async function deleteDevice() {
         </thead>
         <tbody>
           <tr v-for="d in devices" :key="d.id">
-            <td class="font-medium">{{ d.name }}</td>
+            <td class="font-medium">
+              {{ d.name }}<span v-if="d.onHub" class="badge badge-sm badge-accent ml-2" :title="t('devices.onHubHint')">{{ t('devices.onHubBadge') }}</span>
+            </td>
             <td class="font-token text-sm">{{ d.ip }}</td>
             <td class="text-sm">{{ new Date(d.createdAt).toLocaleString(locale) }}</td>
             <td>

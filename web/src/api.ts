@@ -87,6 +87,7 @@ export interface Device {
   ip: string
   publicKey: string
   createdAt: string
+  onHub?: boolean
 }
 
 export interface SSHKey {
@@ -144,7 +145,8 @@ export const api = {
   setVMNetworks: (id: string, networkIds: string[], restartAllowed: boolean) =>
     request<VM>('PUT', `/api/vms/${id}/networks?restartAllowed=${restartAllowed}`, { networkIds }),
   devices: () => request<Device[]>('GET', '/api/devices'),
-  addDevice: (name: string) => request<{ device: Device; config: string }>('POST', '/api/devices', { name }),
+  addDevice: (name: string, onHub: boolean) =>
+    request<{ device: Device; config: string }>('POST', '/api/devices', { name, onHub }),
   deleteDevice: (id: string) => request<void>('DELETE', `/api/devices/${id}`),
   deviceConfig: (id: string) => text(`/api/devices/${id}/config`),
 }

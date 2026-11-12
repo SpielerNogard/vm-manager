@@ -83,7 +83,7 @@ ssh ubuntu@dev.mgmt.internal
 The device config points DNS at the gateway, which resolves `*.mgmt.internal` and forwards other names upstream. Adding devices requires `clients.endpoint` (`CLIENTS_ENDPOINT`).
 
 Client notes:
-- On the hub machine itself, set the peer's `Endpoint` to `127.0.0.1:<CLIENTS_PORT>`. The WireGuard app on macOS doesn't reach the machine's own Tailscale or LAN address.
+- For a device on the hub machine itself, tick **This device is the hub machine** (preselected when the GUI is opened via `localhost`), or pass `"onHub": true`. Its config then uses `127.0.0.1:<CLIENTS_PORT>` as endpoint, because the WireGuard app on macOS doesn't reach the machine's own Tailscale or LAN address (on Linux either works). Such a device doesn't need `clients.endpoint`.
 - On macOS the WireGuard app uses the tunnel DNS only as a supplemental resolver for split tunnels, so `*.internal` doesn't resolve. Route the zone to the gateway once:
 
   ```sh
@@ -149,7 +149,7 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
 | DELETE | `/api/networks/{id}` | Delete a network. 409 while it has members; the management network cannot be deleted |
 | GET | `/api/devices` | Client devices |
-| POST | `/api/devices` | Add a device (`name`), returns the device and its WireGuard config |
+| POST | `/api/devices` | Add a device (`name`, optional `onHub` for a device on the hub machine), returns the device and its WireGuard config |
 | DELETE | `/api/devices/{id}` | Remove a device |
 | GET | `/api/devices/{id}/config` | Download the device's WireGuard config |
 | GET | `/api/gateway/state` | Internal, token-protected: desired network state for the gateway |
