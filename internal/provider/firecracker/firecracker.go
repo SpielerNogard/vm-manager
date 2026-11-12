@@ -100,7 +100,7 @@ func (p *Provider) Start(f node.VMFile, dir string) (_ node.Instance, err error)
 	if err := p.Reseed(context.Background(), f, dir); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
 	}
-	kernel, initrd, err := extractBoot(filepath.Join(dir, "root.img"), dir)
+	kernel, initrd, err := bootFiles(filepath.Join(dir, "root.img"), dir)
 	if err != nil {
 		return nil, fmt.Errorf("boot files: %w", err)
 	}

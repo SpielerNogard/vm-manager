@@ -204,13 +204,15 @@ if [ -b "$dev" ]; then
 fi
 `, dev, mnt)
 	}
-	fmt.Fprintf(&b, `systemd-run --no-block --collect --expand-environment=no --description='vmm ready probe' sh -c '
+	fmt.Fprintf(&b, `cat > /run/vmm-ready.sh <<'VMM_READY'
 for i in $(seq 300); do
   for n in /sys/class/net/*; do
     [ "$(cat $n/address)" = %s ] && ip -4 -o addr show dev "${n##*/}" | grep -q inet && {
       for t in /dev/hvc0 /dev/ttyS0; do [ -c $t ] && echo %s > $t; done; exit 0; }
   done; sleep 1
-done'
+done
+VMM_READY
+systemd-run --no-block --collect --description='vmm ready probe' sh /run/vmm-ready.sh
 `, strings.ToLower(f.MAC), ReadyMarker)
 	return b.String()
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,36 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+// Limits for what is read from the guest-controlled disk, far above real Ubuntu kernels (~70 MiB ELF) and initrds.
+const (
+	maxKernelSize = 256 << 20
+	maxInitrdSize = 1 << 30
+)
+
+// bootFiles extracts the guest's current kernel, falling back to the last extracted pair so a broken /boot (e.g. an interrupted upgrade) stays bootable.
+func bootFiles(rootImg, dir string) (kernel, initrd string, err error) {
+	kernel, initrd, err = extractBoot(rootImg, dir)
+	if err == nil {
+		return kernel, initrd, nil
+	}
+	kernel, initrd = filepath.Join(dir, "vmlinux"), filepath.Join(dir, "initrd.img")
+	if _, kerr := os.Stat(kernel); kerr == nil {
+		if _, ierr := os.Stat(initrd); ierr == nil {
+			log.Printf("%s: %v; booting the last extracted kernel", rootImg, err)
+			return kernel, initrd, nil
+		}
+	}
+	return "", "", err
+}
+
 // extractBoot copies the guest's current kernel (as ELF) and initrd out of its raw root disk, so apt kernel upgrades take effect.
 func extractBoot(rootImg, outDir string) (kernel, initrd string, err error) {
+	// The disk is guest-controlled; a parser panic on corrupt metadata must not take the node and its other VMs down.
+	defer func() {
+		if r := recover(); r != nil {
+			kernel, initrd, err = "", "", fmt.Errorf("reading %s: %v", rootImg, r)
+		}
+	}()
 	d, err := diskfs.Open(rootImg, diskfs.WithOpenMode(diskfs.ReadOnly))
 	if err != nil {
 		return "", "", err
@@ -49,7 +78,7 @@ func extractBoot(rootImg, outDir string) (kernel, initrd string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("guest has no %sinitrd.img: %w", prefix, err)
 	}
-	if err := writeFrom(iTmp, in); err != nil {
+	if err := writeFrom(iTmp, in, maxInitrdSize); err != nil {
 		return "", "", err
 	}
 	if err := os.Rename(kTmp, kernel); err != nil {
@@ -81,21 +110,34 @@ func bootFilesystem(d interface {
 	return root, "/boot/", nil
 }
 
-func writeFrom(path string, r io.Reader) error {
+func writeFrom(path string, r io.Reader, limit int64) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, r); err != nil {
+	n, err := io.Copy(f, io.LimitReader(r, limit+1))
+	if err == nil && n > limit {
+		err = fmt.Errorf("%s exceeds %d bytes", filepath.Base(path), limit)
+	}
+	if err != nil {
 		f.Close()
 		return err
 	}
 	return f.Close()
 }
 
+// readLimited reads r fully, failing instead of growing past limit bytes.
+func readLimited(r io.Reader, limit int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err == nil && int64(len(b)) > limit {
+		err = fmt.Errorf("larger than %d bytes", limit)
+	}
+	return b, err
+}
+
 // bzImageToELF decompresses the vmlinux inside an x86 bzImage, located via the setup header's payload_offset/length.
 func bzImageToELF(r io.Reader) ([]byte, error) {
-	img, err := io.ReadAll(r)
+	img, err := readLimited(r, maxKernelSize)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +158,7 @@ func bzImageToELF(r io.Reader) ([]byte, error) {
 	var out []byte
 	switch {
 	case bytes.HasPrefix(payload, []byte{0x28, 0xb5, 0x2f, 0xfd}):
-		dec, err := zstd.NewReader(nil)
+		dec, err := zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxKernelSize))
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +176,7 @@ func bzImageToELF(r io.Reader) ([]byte, error) {
 			return nil, err
 		}
 		gz.Multistream(false)
-		if out, err = io.ReadAll(gz); err != nil {
+		if out, err = readLimited(gz, maxKernelSize); err != nil {
 			return nil, fmt.Errorf("gzip: %w", err)
 		}
 	default:

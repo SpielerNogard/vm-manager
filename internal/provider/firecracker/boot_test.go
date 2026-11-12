@@ -111,3 +111,29 @@ func TestExtractBootRealImage(t *testing.T) {
 		t.Fatalf("initrd: %v", err)
 	}
 }
+
+func TestBootFilesFallsBackToLastGood(t *testing.T) {
+	dir := t.TempDir()
+	disk := bootDisk(t)
+	if _, _, err := bootFiles(disk, dir); err == nil {
+		t.Fatal("no kernel and no previous pair must fail")
+	}
+	for _, f := range []string{"vmlinux", "initrd.img"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A half-finished kernel upgrade must not leave the VM unbootable: the last extracted pair still works.
+	k, i, err := bootFiles(disk, dir)
+	if err != nil || k != filepath.Join(dir, "vmlinux") || i != filepath.Join(dir, "initrd.img") {
+		t.Fatalf("got %s %s %v", k, i, err)
+	}
+}
+
+func TestBzImageToELFRejectsBomb(t *testing.T) {
+	enc, _ := zstd.NewWriter(nil)
+	big := append([]byte("\x7fELF"), make([]byte, maxKernelSize+1)...)
+	if _, err := bzImageToELF(bytes.NewReader(fakeBzImage(t, enc.EncodeAll(big, nil)))); err == nil {
+		t.Fatal("accepted a kernel larger than the limit")
+	}
+}

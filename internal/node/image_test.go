@@ -206,8 +206,9 @@ func TestDiskScriptEmitsReadyMarker(t *testing.T) {
 		}
 		// systemd expands $VAR and %-specifiers in ExecStart, which would blank the probe's shell variables.
 		probe := s[strings.Index(s, "systemd-run"):]
-		if !strings.Contains(probe, "--expand-environment=no") || strings.Contains(probe, "%") {
-			t.Errorf("probe is subject to systemd expansion:\n%s", probe)
+		// systemd < 254 has no --expand-environment, so the probe runs from a script file systemd never expands.
+		if strings.Contains(probe, "--expand-environment") || !strings.Contains(probe, "sh /run/vmm-ready.sh") || !strings.Contains(s, "<<'VMM_READY'") {
+			t.Errorf("probe depends on systemd expansion rules:\n%s", s)
 		}
 		if n := strings.Count(s, ReadyMarker); n != 1 {
 			t.Errorf("marker appears %d times, want 1:\n%s", n, s)
