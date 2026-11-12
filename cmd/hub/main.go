@@ -20,7 +20,7 @@ func main() {
 	sshDir := flag.String("ssh-dir", "~/.ssh", "directory holding the hub's default SSH public keys")
 	flag.Parse()
 
-	cfg, err := hub.LoadConfig(expandHome(*configPath, home))
+	cfg, err := hub.LoadOrCreateConfig(expandHome(*configPath, home), os.Getenv)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -54,12 +54,13 @@ func main() {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, cfg.Token))
+	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, func() string { return cfg.Get().Token }))
 	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg))
 	mux.Handle("/", spa(dist))
 
-	log.Printf("hub listening on %s, keys in %s", cfg.Listen, keysPath)
-	log.Fatal(http.ListenAndServe(cfg.Listen, mux))
+	listen := cfg.Get().Listen
+	log.Printf("hub listening on %s, keys in %s", listen, keysPath)
+	log.Fatal(http.ListenAndServe(listen, mux))
 }
 
 // spa serves index.html for extensionless paths that are not files, so GUI routes like /vms survive a reload.

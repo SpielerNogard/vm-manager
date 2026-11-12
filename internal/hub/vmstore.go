@@ -31,6 +31,8 @@ type StoredNode struct {
 	CPUs     int            `json:"cpus"`
 	MemoryMB int            `json:"memoryMB"`
 	Machine  *proto.Machine `json:"machine,omitempty"`
+	// Pending marks a node created on the hub that has never registered.
+	Pending bool `json:"pending,omitempty"`
 }
 
 type vmState struct {
@@ -113,6 +115,12 @@ func (s *VMStore) PutNode(n StoredNode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mutate(func() { s.nodes[n.ID] = n })
+}
+
+func (s *VMStore) DeleteNode(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mutate(func() { delete(s.nodes, id) })
 }
 
 func (s *VMStore) VMs() []StoredVM {

@@ -433,6 +433,18 @@ func (m *NetModel) Enroll(nodeID, publicKey string) (Chassis, error) {
 	return out, err
 }
 
+func (m *NetModel) ReleaseChassis(nodeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !slices.ContainsFunc(m.st.Chassis, func(c Chassis) bool { return c.NodeID == nodeID }) {
+		return nil
+	}
+	return m.mutate(func(st *netState) error {
+		st.Chassis = slices.DeleteFunc(st.Chassis, func(c Chassis) bool { return c.NodeID == nodeID })
+		return nil
+	})
+}
+
 func (m *NetModel) Chassis() []Chassis {
 	m.mu.Lock()
 	defer m.mu.Unlock()

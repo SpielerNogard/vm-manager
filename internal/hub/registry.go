@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"path"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +51,14 @@ func reservedMount(p string) bool {
 
 type NodeConn interface {
 	Send(proto.Message) error
+	Close() error
 }
+
+const (
+	NodePending = "pending"
+	NodeOnline  = "online"
+	NodeOffline = "offline"
+)
 
 type Node struct {
 	ID           string `json:"id"`
@@ -59,7 +68,8 @@ type Node struct {
 	MemoryMB     int    `json:"memoryMB"`
 	FreeCPUs     int    `json:"freeCpus"`
 	FreeMemoryMB int    `json:"freeMemoryMB"`
-	Online       bool   `json:"online"`
+	// State is NodePending (created, never registered), NodeOnline or NodeOffline.
+	State string `json:"state"`
 	// ConnectedAt is when the node last registered.
 	ConnectedAt time.Time       `json:"connectedAt"`
 	Config      json.RawMessage `json:"config,omitempty"`
@@ -122,15 +132,19 @@ type Registry struct {
 	vms   map[string]*VM
 	net   *NetModel
 	store *VMStore
-	cfg   Config
-	// sendMu (per node, kept across reconnects) orders desired lists so a node never receives an older one after a newer one.
+	cfg   *ConfigStore
+	// sendMu (per node, kept across reconnects and node deletion so ordering survives re-registration) orders desired lists so a node never receives an older one after a newer one.
 	sendMu map[string]*sync.Mutex
 }
 
-func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
+func NewRegistry(net *NetModel, store *VMStore, cfg *ConfigStore) *Registry {
 	r := &Registry{nodes: map[string]*nodeEntry{}, vms: map[string]*VM{}, net: net, store: store, cfg: cfg, sendMu: map[string]*sync.Mutex{}}
 	for _, n := range store.Nodes() {
-		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine}}
+		state := NodeOffline
+		if n.Pending {
+			state = NodePending
+		}
+		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state}}
 	}
 	for _, s := range store.VMs() {
 		vm := &VM{VMSpec: s.Spec, NodeID: s.NodeID, Provider: s.Provider, State: proto.StateUnknown, Power: s.Power,
@@ -148,6 +162,14 @@ func NewRegistry(net *NetModel, store *VMStore, cfg Config) *Registry {
 		}
 		if err := net.Release(id); err != nil {
 			log.Printf("releasing orphan NICs of %s: %v", id, err)
+		}
+	}
+	for _, c := range net.Chassis() {
+		if _, ok := r.nodes[c.NodeID]; ok {
+			continue
+		}
+		if err := net.ReleaseChassis(c.NodeID); err != nil {
+			log.Printf("releasing orphan chassis of %s: %v", c.NodeID, err)
 		}
 	}
 	return r
@@ -182,14 +204,18 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	if len(foreign) > 0 {
 		return nil, fmt.Errorf("reports VMs of other nodes: %s; was its nodeId or hostname changed?", strings.Join(foreign, ", "))
 	}
-	r.nodes[reg.NodeID] = &nodeEntry{
-		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, Online: true,
-			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
-		conn: c,
-	}
 	if err := r.store.PutNode(StoredNode{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs,
 		MemoryMB: reg.MemoryMB, Machine: reg.Machine}); err != nil {
+		// A pending node must not go online while the store still says pending; the node retries on reconnect.
+		if prev := r.nodes[reg.NodeID]; prev != nil && prev.State == NodePending {
+			return nil, fmt.Errorf("saving node: %w", err)
+		}
 		log.Printf("node %s: saving: %v", reg.NodeID, err)
+	}
+	r.nodes[reg.NodeID] = &nodeEntry{
+		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, State: NodeOnline,
+			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
+		conn: c,
 	}
 	for _, st := range reg.VMs {
 		if vm, ok := r.vms[st.ID]; ok && vm.NodeID == reg.NodeID {
@@ -210,7 +236,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 		log.Printf("hub underlay key: %v", err)
 		return nil, nil
 	}
-	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}, nil
+	return &proto.Underlay{Address: ch.IP + "/24", HubKey: hubKey, Port: r.cfg.Get().Underlay.Port, SBRemote: "tcp:10.198.0.1:6642"}, nil
 }
 
 // NodeDisconnected ignores c if the node has already reconnected with a newer connection.
@@ -221,12 +247,101 @@ func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 	if !ok || n.conn != c {
 		return
 	}
-	n.Online, n.conn = false, nil
+	n.State, n.conn = NodeOffline, nil
 	for _, vm := range r.vms {
 		if vm.NodeID == nodeID {
 			vm.State, vm.IP = proto.StateUnknown, ""
 		}
 	}
+}
+
+func (r *Registry) CreateNode(id string) (Node, error) {
+	if !nameRe.MatchString(id) {
+		return Node{}, fmt.Errorf("%w: id must match %s", ErrInvalid, nameRe)
+	}
+	if id == "connect" {
+		return Node{}, fmt.Errorf("%w: name \"connect\" is reserved", ErrInvalid)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.nodes[id]; ok {
+		return Node{}, fmt.Errorf("%w: node %q already exists", ErrConflict, id)
+	}
+	if err := r.store.PutNode(StoredNode{ID: id, Pending: true}); err != nil {
+		return Node{}, err
+	}
+	n := &nodeEntry{Node: Node{ID: id, State: NodePending}}
+	r.nodes[id] = n
+	return n.Node, nil
+}
+
+// DeleteNode forgets the node and disconnects it if online; a still running node reconnects and registers anew.
+func (r *Registry) DeleteNode(id string) error {
+	r.mu.Lock()
+	n, ok := r.nodes[id]
+	if !ok {
+		r.mu.Unlock()
+		return fmt.Errorf("%w: node %q", ErrNotFound, id)
+	}
+	for _, vm := range r.vms {
+		if vm.NodeID == id {
+			r.mu.Unlock()
+			return fmt.Errorf("%w: node %q still has VMs", ErrConflict, id)
+		}
+	}
+	if err := r.store.DeleteNode(id); err != nil {
+		r.mu.Unlock()
+		return err
+	}
+	releaseErr := r.net.ReleaseChassis(id)
+	delete(r.nodes, id)
+	conn := n.conn
+	r.mu.Unlock()
+	if conn != nil {
+		if err := conn.Close(); err != nil {
+			log.Printf("node %s: closing connection: %v", id, err)
+		}
+	}
+	return releaseErr
+}
+
+// NodeConfig renders a node.json for the node; host is how the node reaches the hub and defaults to clients.endpoint.
+func (r *Registry) NodeConfig(id, host string) ([]byte, error) {
+	r.mu.Lock()
+	_, ok := r.nodes[id]
+	r.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: node %q", ErrNotFound, id)
+	}
+	c := r.cfg.Get()
+	if host == "" {
+		host = c.Clients.Endpoint
+	}
+	if host == "" {
+		return nil, fmt.Errorf("%w: setup incomplete: set the client endpoint in settings", ErrConflict)
+	}
+	if validEndpoint(host) != nil {
+		return nil, fmt.Errorf("%w: host must be a host name or IP without scheme or port", ErrInvalid)
+	}
+	type hubConf struct {
+		URL   string `json:"url"`
+		Token string `json:"token"`
+	}
+	type pathsConf struct {
+		VMs    string `json:"vms"`
+		Images string `json:"images"`
+	}
+	return json.MarshalIndent(struct {
+		NodeID   string    `json:"nodeId"`
+		Hub      hubConf   `json:"hub"`
+		Provider string    `json:"provider"`
+		Paths    pathsConf `json:"paths"`
+	}{
+		NodeID:   id,
+		Hub:      hubConf{URL: "ws://" + net.JoinHostPort(host, strconv.Itoa(c.Hub.Port)) + "/api/nodes/connect", Token: c.Token},
+		Provider: "vz",
+		Paths:    pathsConf{VMs: "~/.vm-manager/vms", Images: "~/.vm-manager/images"},
+	}, "", "  ")
 }
 
 func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
@@ -238,6 +353,10 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	if !ok {
 		r.mu.Unlock()
 		return VM{}, fmt.Errorf("%w: unknown node %q", ErrInvalid, req.NodeID)
+	}
+	if n.State == NodePending {
+		r.mu.Unlock()
+		return VM{}, fmt.Errorf("%w: node %q has not connected yet", ErrConflict, n.ID)
 	}
 	for _, vm := range r.vms {
 		if vm.Name == req.Name {

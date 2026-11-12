@@ -26,8 +26,9 @@ func testAPIConfig() Config {
 	return cfg
 }
 
-func apiServerWith(t *testing.T, cfg Config) (*httptest.Server, *Registry, *NetModel) {
+func apiServerWith(t *testing.T, c Config) (*httptest.Server, *Registry, *NetModel) {
 	t.Helper()
+	cfg := newTestConfig(t, c)
 	nm := newTestNet(t)
 	r := NewRegistry(nm, newTestStore(t), cfg)
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})
@@ -209,7 +210,7 @@ func TestAPIDevicesLifecycle(t *testing.T) {
 	}
 }
 
-func TestAPIDeviceNeedsEndpoint(t *testing.T) {
+func TestAPIDeviceBlockedBeforeSetup(t *testing.T) {
 	cfg := testAPIConfig()
 	cfg.Clients.Endpoint = ""
 	srv, _, nm := apiServerWith(t, cfg)
@@ -220,7 +221,7 @@ func TestAPIDeviceNeedsEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 	var out map[string]string
 	json.NewDecoder(resp.Body).Decode(&out)
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(out["error"], "clients.endpoint") || len(nm.Devices()) != 0 {
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(out["error"], "client endpoint") || len(nm.Devices()) != 0 {
 		t.Fatalf("status = %d out = %v", resp.StatusCode, out)
 	}
 }
@@ -417,9 +418,7 @@ func TestAPIGetNetwork(t *testing.T) {
 }
 
 func TestAPIDeviceOnHub(t *testing.T) {
-	cfg := testAPIConfig()
-	cfg.Clients.Endpoint = ""
-	srv, _, _ := apiServerWith(t, cfg)
+	srv, _, _ := apiServerWith(t, testAPIConfig())
 	s, body := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"mac","onHub":true}`)
 	var out struct {
 		Device struct {
@@ -445,5 +444,84 @@ func TestAPIDeviceDefaultsToClientsEndpoint(t *testing.T) {
 	s, body := doJSON(t, "POST", srv.URL+"/api/devices", `{"name":"laptop"}`)
 	if s != http.StatusCreated || !strings.Contains(string(body), `Endpoint = vmm.lan:51821`) || strings.Contains(string(body), `"onHub"`) {
 		t.Fatalf("status = %d body = %s", s, body)
+	}
+}
+
+func TestAPINodesLifecycle(t *testing.T) {
+	c := testAPIConfig()
+	c.Hub.Port = 8080
+	srv, r, _ := apiServerWith(t, c)
+	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"Mac X"}`); code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", code, b)
+	}
+	code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x"}`)
+	var n map[string]any
+	json.Unmarshal(b, &n)
+	if code != http.StatusCreated || n["id"] != "mac-x" || n["state"] != "pending" {
+		t.Fatalf("status = %d body = %s", code, b)
+	}
+	if _, ok := n["online"]; ok {
+		t.Fatalf("online still in JSON: %s", b)
+	}
+	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x"}`); code != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", code, b)
+	}
+
+	resp, err := http.Get(srv.URL + "/api/nodes/mac-x/config?host=localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conf struct {
+		Hub struct{ URL, Token string }
+	}
+	json.NewDecoder(resp.Body).Decode(&conf)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/json" ||
+		conf.Hub.URL != "ws://localhost:8080/api/nodes/connect" || conf.Hub.Token != "tok" {
+		t.Fatalf("status = %d conf = %+v", resp.StatusCode, conf)
+	}
+	if code, b := doJSON(t, "GET", srv.URL+"/api/nodes/mac-x/config?host=a:b:c:x", ""); code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", code, b)
+	}
+	if code, _ := doJSON(t, "GET", srv.URL+"/api/nodes/nope/config", ""); code != http.StatusNotFound {
+		t.Fatalf("status = %d", code)
+	}
+
+	if resp, _ := postVM(t, srv, validBody); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create vm: %d", resp.StatusCode)
+	}
+	if code, _ := doJSON(t, "DELETE", srv.URL+"/api/nodes/n1", ""); code != http.StatusConflict {
+		t.Fatalf("status = %d", code)
+	}
+	if code, _ := doJSON(t, "DELETE", srv.URL+"/api/nodes/nope", ""); code != http.StatusNotFound {
+		t.Fatalf("status = %d", code)
+	}
+	if code, _ := doJSON(t, "DELETE", srv.URL+"/api/nodes/mac-x", ""); code != http.StatusNoContent {
+		t.Fatalf("status = %d", code)
+	}
+	if _, ok := nodeByID(r, "mac-x"); ok {
+		t.Fatal("node still listed")
+	}
+}
+
+func TestAPINodesBlockedBeforeSetup(t *testing.T) {
+	cfg := testAPIConfig()
+	cfg.Clients.Endpoint = ""
+	srv, r, _ := apiServerWith(t, cfg)
+	if code, _ := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"mac-x"}`); code != http.StatusConflict {
+		t.Fatalf("status = %d", code)
+	}
+	if code, _ := doJSON(t, "DELETE", srv.URL+"/api/nodes/n1", ""); code != http.StatusConflict {
+		t.Fatalf("status = %d", code)
+	}
+	if len(r.Nodes()) != 1 {
+		t.Fatalf("nodes = %+v", r.Nodes())
+	}
+}
+
+func TestAPICreateNodeMalformedJSON(t *testing.T) {
+	srv, _, _ := apiServerWith(t, testAPIConfig())
+	if code, b := doJSON(t, "POST", srv.URL+"/api/nodes", `{`); code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", code, b)
 	}
 }

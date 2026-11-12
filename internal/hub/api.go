@@ -13,11 +13,11 @@ import (
 	"vm-manager/internal/proto"
 )
 
-func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Handler {
+func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) http.Handler {
 	mux := http.NewServeMux()
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
-		want := []byte("Bearer " + cfg.Token)
 		return func(w http.ResponseWriter, req *http.Request) {
+			want := []byte("Bearer " + cfg.Get().Token)
 			if subtle.ConstantTimeCompare([]byte(req.Header.Get("Authorization")), want) != 1 {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
@@ -108,16 +108,13 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
 			return
 		}
-		if cfg.Clients.Endpoint == "" && !q.OnHub {
-			writeError(w, fmt.Errorf("%w: set clients.endpoint in the hub config before adding devices", ErrConflict))
-			return
-		}
+		c := cfg.Get()
 		d, err := net.AddDevice(q.Name, q.OnHub)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		conf, err := deviceConfig(r, d, cfg)
+		conf, err := deviceConfig(r, d, c)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -137,7 +134,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 			writeError(w, fmt.Errorf("%w: device", ErrNotFound))
 			return
 		}
-		conf, err := deviceConfig(r, net.Devices()[i], cfg)
+		conf, err := deviceConfig(r, net.Devices()[i], cfg.Get())
 		if err != nil {
 			writeError(w, err)
 			return
@@ -146,6 +143,37 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 		io.WriteString(w, conf)
 	})
 	mux.HandleFunc("GET /api/nodes", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.Nodes()) })
+	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		n, err := r.CreateNode(q.ID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, n)
+	})
+	mux.HandleFunc("DELETE /api/nodes/{id}", func(w http.ResponseWriter, req *http.Request) {
+		if err := r.DeleteNode(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/nodes/{id}/config", func(w http.ResponseWriter, req *http.Request) {
+		b, err := r.NodeConfig(req.PathValue("id"), req.URL.Query().Get("host"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(b)
+	})
 	mux.HandleFunc("GET /api/vms", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.VMs()) })
 	mux.HandleFunc("GET /api/vms/{id}", func(w http.ResponseWriter, req *http.Request) {
 		for _, vm := range r.VMs() {
@@ -241,7 +269,8 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg Config) http.Han
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	return mux
+	registerSettings(mux, cfg, net)
+	return setupGuard(cfg, mux)
 }
 
 // deviceView is Device without its private key, which only leaves the hub inside a client config.

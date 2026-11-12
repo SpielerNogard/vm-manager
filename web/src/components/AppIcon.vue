@@ -71,6 +71,18 @@ defineProps<{ name: string }>()
       <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
       <path d="M4.5 14.5v4A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-4" />
     </template>
+    <template v-else-if="name === 'settings'">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" />
+    </template>
+    <template v-else-if="name === 'lock'">
+      <rect x="5" y="11" width="14" height="9" rx="1.5" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </template>
+    <template v-else-if="name === 'warning'">
+      <path d="M12 4 2.5 20h19L12 4Z" />
+      <path d="M12 10v4.5M12 17.2v.1" />
+    </template>
     <template v-else-if="name === 'menu'">
       <path d="M4 7h16M4 12h16M4 17h16" />
     </template>
