@@ -14,6 +14,8 @@ export interface Node {
   config?: Record<string, unknown>
   machine?: Machine
   chassis?: Chassis
+  /** Set when the node registered with another hypervisor than it was created for. */
+  error?: string
 }
 
 export interface Chassis {
@@ -178,10 +180,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   nodes: () => request<Node[]>('GET', '/api/nodes'),
-  createNode: (id: string) => request<Node>('POST', '/api/nodes', { id }),
+  createNode: (id: string, provider: string) => request<Node>('POST', '/api/nodes', { id, provider }),
   deleteNode: (id: string) => request<void>('DELETE', `/api/nodes/${id}`),
   nodeConfig: (id: string, host?: string) =>
     text(`/api/nodes/${id}/config${host ? `?host=${encodeURIComponent(host)}` : ''}`),
+  installCommand: (id: string, host?: string) =>
+    text(`/api/nodes/${id}/install-command${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   vms: () => request<VM[]>('GET', '/api/vms'),
   createVM: (req: CreateVMRequest) => request<VM>('POST', '/api/vms', req),
   deleteVM: (id: string) => request<void>('DELETE', `/api/vms/${id}`),
