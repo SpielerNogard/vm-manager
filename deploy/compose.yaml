@@ -17,23 +17,20 @@ services:
     network_mode: service:netns
     cap_add: [NET_ADMIN]
     devices: [/dev/net/tun]
-    environment:
-      HUB_TOKEN: ${HUB_TOKEN:-}
-      CLIENTS_ENDPOINT: ${CLIENTS_ENDPOINT:-}
-      UNDERLAY_PORT: ${UNDERLAY_PORT:-51820}
-      CLIENTS_PORT: ${CLIENTS_PORT:-51821}
     volumes:
       - ovn:/var/lib/ovn
       - ovs:/etc/openvswitch
-      # read-write: the gateway writes hub.json on first start
-      - data:/data
+      - data:/data:ro
   hub:
     build:
       context: ..
       dockerfile: deploy/hub.Dockerfile
-    # the hub exits until gateway-start.sh has written /data/hub.json
     restart: unless-stopped
     network_mode: service:netns
+    environment:
+      HUB_PORT: ${HUB_PORT:-8080}
+      UNDERLAY_PORT: ${UNDERLAY_PORT:-51820}
+      CLIENTS_PORT: ${CLIENTS_PORT:-51821}
     command: ["-config", "/data/hub.json", "-ssh-dir", "/host-ssh"]
     volumes:
       - data:/data

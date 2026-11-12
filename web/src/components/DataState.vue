@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Every list goes through here, so loading and emptiness look the same on every page.
-defineProps<{ loading: boolean; empty: boolean; emptyTitle: string }>()
+defineProps<{ loading: boolean; empty?: boolean; emptyTitle?: string }>()
 </script>
 
 <template>

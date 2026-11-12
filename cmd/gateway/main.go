@@ -23,26 +23,9 @@ func main() {
 	hubURL := flag.String("hub", "http://127.0.0.1:8080", "hub base URL")
 	tokenFile := flag.String("token-file", "/data/hub.json", "hub config holding the API token")
 	nbDB := flag.String("nb", "unix:/var/run/ovn/ovnnb_db.sock", "OVN NB database")
-	initConfig := flag.String("init-config", "", "write the hub config to this path from the environment and exit")
 	flag.Parse()
 
-	if *initConfig != "" {
-		if err := writeHubConfig(*initConfig, os.Getenv); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
-
-	raw, err := os.ReadFile(*tokenFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var cfg struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil || cfg.Token == "" {
-		log.Fatalf("no token in %s", *tokenFile)
-	}
+	token := waitForToken(*tokenFile)
 
 	run := func(args ...string) (string, error) {
 		if args[0] == "ovn-nbctl" {
@@ -70,7 +53,7 @@ func main() {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	call := func(method, path string, body []byte) ([]byte, error) {
-		return callHub(client, *hubURL, cfg.Token, method, path, body)
+		return callHubRereadingToken(client, *hubURL, *tokenFile, &token, method, path, body)
 	}
 
 	var lastHash [32]byte
@@ -178,8 +161,57 @@ func callHub(client *http.Client, baseURL, token, method, path string, body []by
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("%s %s: %w", method, path, errUnauthorized)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, fmt.Errorf("%s %s: %s", method, path, resp.Status)
 	}
 	return b, nil
+}
+
+var errUnauthorized = errors.New("hub rejected the token")
+
+func readToken(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	if cfg.Token == "" {
+		return "", fmt.Errorf("no token in %s", path)
+	}
+	return cfg.Token, nil
+}
+
+func waitForToken(path string) string {
+	for logged := false; ; time.Sleep(time.Second) {
+		token, err := readToken(path)
+		if err == nil {
+			return token
+		}
+		if !logged {
+			log.Printf("waiting for the hub to write %s: %v", path, err)
+			logged = true
+		}
+	}
+}
+
+// the hub rewrites the token when it is changed in settings
+func callHubRereadingToken(client *http.Client, baseURL, tokenFile string, token *string, method, path string, body []byte) ([]byte, error) {
+	b, err := callHub(client, baseURL, *token, method, path, body)
+	if !errors.Is(err, errUnauthorized) {
+		return b, err
+	}
+	fresh, rerr := readToken(tokenFile)
+	if rerr != nil {
+		return nil, rerr
+	}
+	*token = fresh
+	return callHub(client, baseURL, fresh, method, path, body)
 }

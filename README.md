@@ -24,42 +24,43 @@ make test
 Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub):
 
 ```sh
-cp deploy/.env.example deploy/.env   # set HUB_TOKEN and CLIENTS_ENDPOINT
-make stack                           # docker compose -f deploy/compose.yaml up -d --build
+make stack   # docker compose -f deploy/compose.yaml up -d --build
 ```
+
+No config is needed. On first start the hub creates `/data/hub.json` in the `data` volume with a random node token and an empty client endpoint. Open `http://<hub>:8080`: every page except **Settings** redirects there until the client endpoint is set (the API answers POST/PUT/DELETE with 409 meanwhile, except settings, node transport and gateway routes).
+
+Settings page:
+
+| Tab | |
+|---|---|
+| Networking | Client endpoint (host name or IP, no scheme or port) that devices connect to. Ports and listen address are shown read-only |
+| Security | Node token: show, copy, regenerate or set (at least 16 characters) |
+| Guests | Guest mgmt MTU (576-9000), delivered by OVN DHCP |
+
+Changes apply without a restart; the gateway re-reads the token automatically.
+
+`deploy/.env` is optional and only sets the published ports (and the SSH dir); the hub writes the ports into `hub.json` on start:
 
 | Variable | Default | |
 |---|---|---|
-| `HUB_TOKEN` | none | Shared hub/node token. Only read on first start, when `/data/hub.json` does not exist yet |
-| `CLIENTS_ENDPOINT` | none | Address devices use to reach the clients WireGuard port |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
 | `HUB_SSH_DIR` | `~/.ssh` | Directory with the default SSH public keys offered as hub keys |
 
-The hub config lives in the `data` volume as `/data/hub.json`, written by the gateway on first start from these variables. Editing `.env` later does not change it. To change `guestMTU` or `clients.endpoint` afterwards, copy the file out, edit it and copy it back (the gateway image has no editor), then restart the hub:
+To change a port, set it in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
+
+Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at the client endpoint. To run the hub without the stack, start `./bin/hub`; it creates `~/.vm-manager/hub.json` on first start (random token, empty client endpoint) and you finish setup in the GUI. Without the gateway container, VMs get no network.
+
+Add a node: on the **Nodes** page click **Add node** (name: lowercase letters, digits, hyphens). The node appears as `pending` and its detail page shows its `node.json` with copy and download. The hub address in it is editable and defaults to the client endpoint; use `localhost` on the hub's own Mac, or a LAN IP if nodes reach the hub differently. Save it as `~/.vm-manager/node.json` on the node and start it:
 
 ```sh
-docker compose -f deploy/compose.yaml cp gateway:/data/hub.json hub.json
-$EDITOR hub.json
-docker compose -f deploy/compose.yaml cp hub.json gateway:/data/hub.json
-docker compose -f deploy/compose.yaml exec gateway chmod 600 /data/hub.json
-docker compose -f deploy/compose.yaml restart hub
-rm hub.json   # holds the token
+./bin/node   # config defaults to ~/.vm-manager/node.json
 ```
 
-To change a port, edit the matching `.env` variable (`HUB_PORT`, `UNDERLAY_PORT`, `CLIENTS_PORT`) and the same value in `/data/hub.json` (`underlay.port`, `clients.port`; `HUB_PORT` has no hub.json key), then run `docker compose -f deploy/compose.yaml up -d` to recreate the services. The hub.json values are only what nodes and devices are told; publishing comes from `.env`. Existing device configs and the nodes' `underlay.endpoint` must be updated to the new ports as well.
+Node states are `pending` (added, never connected), `online` and `offline`. Nodes without VMs can be deleted in any state; a deleted node that keeps running reconnects and appears again. Unknown nodes can also register themselves with the token. For a manual config copy `node.example.json` and set `hub.url` (`ws://<hub>:<HUB_PORT>/api/nodes/connect`), the same token and paths.
 
-Ports to open on the hub host: nodes need tcp `HUB_PORT` and udp `UNDERLAY_PORT`; devices need udp `CLIENTS_PORT` at `CLIENTS_ENDPOINT`. To run the hub without the stack, copy `hub.example.json` to `~/.vm-manager/hub.json` and start `./bin/hub`. Without the gateway container, VMs get no network.
-
-Node (config defaults to `~/.vm-manager/node.json`):
-
-```sh
-cp node.example.json ~/.vm-manager/node.json  # set hub.url, the same token, paths
-./bin/node
-```
-
-Set `hub.url` to `ws://<hub>:<HUB_PORT>/api/nodes/connect`. A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to `<host>:<UNDERLAY_PORT>`, using the published host port. By default the node uses the host of `hub.url` and the hub's `underlay.port`. Behind Tailscale also set `underlay.mtu` to 1200 and the hub's `guestMTU` to 1140 or less (edit `/data/hub.json` as above). Guest mgmt NICs are IPv4-only (IPv6 is disabled on them), so the DHCP MTU is not raised to 1280.
+A loopback `hub.url` works for a node on the same Mac as the hub: the vz provider rewrites it to the vmnet gateway for the helper VM. If nodes reach the hub under another address (for example over Tailscale), set `underlay.endpoint` to `<host>:<UNDERLAY_PORT>`, using the published host port. By default the node uses the host of `hub.url` and the hub's `underlay.port`. Behind Tailscale also add `"underlay": {"mtu": 1200}` to `node.json` and set the guest MTU to 1140 or less in Settings. Guest mgmt NICs are IPv4-only (IPv6 is disabled on them), so the DHCP MTU is not raised to 1280.
 
 Open `http://<hub>:8080`, add your SSH public key under **SSH-Keys** (the hub's own default keys are already there), then pick a node and create a VM. You can also use the API:
 
@@ -80,10 +81,10 @@ VMs sit on the management network `10.200.0.0/16`, named `<vm-name>.mgmt.interna
 ssh ubuntu@dev.mgmt.internal
 ```
 
-The device config points DNS at the gateway, which resolves `*.mgmt.internal` and forwards other names upstream. Adding devices requires `clients.endpoint` (`CLIENTS_ENDPOINT`).
+The device config points DNS at the gateway, which resolves `*.mgmt.internal` and forwards other names upstream. Adding devices requires the client endpoint (Settings).
 
 Client notes:
-- On the hub machine itself, set the peer's `Endpoint` to `127.0.0.1:<CLIENTS_PORT>`. The WireGuard app on macOS doesn't reach the machine's own Tailscale or LAN address.
+- For a device on the hub machine itself, tick **This device is the hub machine** (preselected when the GUI is opened via `localhost`), or pass `"onHub": true`. Its config then uses `127.0.0.1:<CLIENTS_PORT>` as endpoint, because the WireGuard app on macOS doesn't reach the machine's own Tailscale or LAN address (on Linux either works). Such a device doesn't need the client endpoint.
 - On macOS the WireGuard app uses the tunnel DNS only as a supplemental resolver for split tunnels, so `*.internal` doesn't resolve. Route the zone to the gateway once:
 
   ```sh
@@ -113,14 +114,15 @@ Upgrade note: VMs created before the hub became the source of truth are deleted 
 
 ## Config
 
-**Hub** (`-config`, default `~/.vm-manager/hub.json`; `-ssh-dir`, default `~/.ssh`):
+**Hub** (`-config`, default `~/.vm-manager/hub.json`; `-ssh-dir`, default `~/.ssh`). Created on first start and edited through Settings:
 
 | Key | Default | |
 |---|---|---|
-| `token` | required | Shared secret with nodes |
+| `token` | random | Shared secret with nodes |
 | `listen` | `:8080` | HTTP listen address |
+| `hub.port` | port of `listen`, or `HUB_PORT` | Published HTTP port, used in generated `node.json` |
 | `underlay.port` | `51820` | Published underlay WireGuard port, handed to nodes |
-| `clients.endpoint` | none | Address devices connect to; required to add devices |
+| `clients.endpoint` | empty | Address devices connect to; the GUI stays locked until set |
 | `clients.port` | `51821` | Published clients WireGuard port |
 | `guestMTU` | `1300` | Guest mgmt MTU, delivered by OVN DHCP |
 
@@ -132,8 +134,15 @@ Provider settings go in a section named after the provider. For `vz` these are `
 
 | Method | Path | |
 |---|---|---|
-| GET | `/api/nodes` | Nodes with provider, capacity, online state, machine info, chassis state, and their config file without the hub token |
+| GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, and their config file without the hub token |
+| POST | `/api/nodes` | Add a node (`{"id"}`), state `pending` |
+| DELETE | `/api/nodes/{id}` | Delete a node without VMs |
+| GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
+| GET | `/api/settings` | Client endpoint, ports, listen address, guest MTU, node token, plus `setupComplete` and `devices` (device count) |
+| PUT | `/api/settings` | Partial update of `clients.endpoint`, `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
+| POST | `/api/settings/token` | Regenerate the node token (random); returns settings |
 | GET | `/api/vms` | VMs with state, desired power and IP |
+| GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |
 | POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `dataDisks` (`name`, `mountPath`, `sizeGB`), `sshKeyIds`, optional `networkIds`). Also works for an offline node: the VM shows `pending` until the node connects |
 | DELETE | `/api/vms/{id}` | Stop the VM and delete its disks. Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
 | PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`, required; `[]` detaches all). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
@@ -144,10 +153,11 @@ Provider settings go in a section named after the provider. For `vz` these are `
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
 | GET | `/api/networks` | Networks with subnet and members (VM IDs), management network first, marked builtin |
+| GET | `/api/networks/{id}` | One network, same fields as in the list (`mgmt` included); 404 if unknown |
 | POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
 | DELETE | `/api/networks/{id}` | Delete a network. 409 while it has members; the management network cannot be deleted |
 | GET | `/api/devices` | Client devices |
-| POST | `/api/devices` | Add a device (`name`), returns the device and its WireGuard config |
+| POST | `/api/devices` | Add a device (`name`, optional `onHub` for a device on the hub machine), returns the device and its WireGuard config |
 | DELETE | `/api/devices/{id}` | Remove a device |
 | GET | `/api/devices/{id}/config` | Download the device's WireGuard config |
 | GET | `/api/gateway/state` | Internal, token-protected: desired network state for the gateway |

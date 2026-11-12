@@ -21,6 +21,11 @@
     "networks": {
       "label": "Networks",
       "blurb": "Private networks that VMs can join. VMs on the same network reach each other as NAME.NETWORK.internal."
+    },
+    "system": "System",
+    "settings": {
+      "label": "Settings",
+      "blurb": "Hub address, token and defaults for guests."
     }
   },
   "topbar": {
@@ -36,7 +41,8 @@
     "actionsFor": "Actions for {name}",
     "name": "Name",
     "status": "Status",
-    "hubUnreachable": "Hub unreachable: {error}"
+    "hubUnreachable": "Hub unreachable: {error}",
+    "retry": "Retry"
   },
   "state": {
     "online": "online",
@@ -55,7 +61,12 @@
     "provider": "Provider",
     "capacity": "Capacity",
     "free": "Free",
-    "chassis": "Chassis"
+    "chassis": "Chassis",
+    "add": "Add node",
+    "dialogTitle": "Add node",
+    "nameHint": "lowercase letters, digits, hyphens",
+    "create": "Create node",
+    "pendingLabel": "waiting for first connection"
   },
   "vms": {
     "new": "New VM",
@@ -137,7 +148,19 @@
     "vms": "VMs on this node",
     "noVMs": "No VMs on this node",
     "open": "Open {name}",
-    "chassis": "Chassis"
+    "chassis": "Chassis",
+    "nodeConfig": "Configuration",
+    "hubAddress": "Hub address for this node",
+    "hubAddressHint": "Use localhost for the hub's own Mac, or a LAN IP when nodes reach the hub differently.",
+    "download": "Download node.json",
+    "saveHint": "Save as ~/.vm-manager/node.json on the node and start ./bin/node",
+    "copyFailed": "Copy failed; select the text manually.",
+    "delete": "Delete node",
+    "deleteBlocked": "This node still has VMs",
+    "deleteTitle": "Delete {name}?",
+    "deleteBody": "The node is removed from the hub.",
+    "deleteBodyOnline": "The node is removed from the hub and disconnected; if it keeps running it reconnects and appears again.",
+    "deleteConfirm": "Delete node"
   },
   "vm": {
     "notFound": "No VM with ID {id}.",
@@ -184,7 +207,10 @@
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The device loses access to all VMs immediately.",
     "deleteConfirm": "Delete device",
-    "qrFailed": "The QR code could not be generated. Use the config text or the download."
+    "qrFailed": "The QR code could not be generated. Use the config text or the download.",
+    "onHub": "This device is the hub machine",
+    "onHubHint": "Its WireGuard config connects via 127.0.0.1, which the WireGuard app on the hub machine needs.",
+    "onHubBadge": "hub machine"
   },
   "networks": {
     "add": "Add network",
@@ -202,5 +228,36 @@
     "deleteConfirm": "Delete network",
     "inUse": "in use",
     "builtin": "built-in"
+  },
+  "settings": {
+    "setupBanner": "Setup not finished – set the client endpoint",
+    "tabs": {
+      "networking": "Networking",
+      "security": "Security",
+      "guests": "Guests"
+    },
+    "save": "Save",
+    "saved": "Saved",
+    "confirm": "Confirm",
+    "endpoint": "Client endpoint",
+    "endpointHint": "Address devices and nodes use to reach the hub",
+    "loadFailed": "Settings could not be loaded.",
+    "endpointChangeTitle": "Change client endpoint?",
+    "endpointChangeBody": "No device keeps the old address in its config.|One device keeps the old address in its config; download it again.|{count} devices keep the old address in their configs; download them again.",
+    "listen": "Listen address",
+    "hubPort": "Hub port",
+    "underlayPort": "Underlay port",
+    "clientsPort": "Client port",
+    "portsHint": "set via .env (HUB_PORT, UNDERLAY_PORT, CLIENTS_PORT)",
+    "token": "Hub token",
+    "show": "Show",
+    "hide": "Hide",
+    "copy": "Copy",
+    "regenerate": "Regenerate",
+    "tokenChangeTitle": "Change hub token?",
+    "tokenChangeBody": "Nodes need the new token in their node.json the next time they connect.",
+    "tokenChangeConfirm": "Change token",
+    "guestMTU": "Guest MTU",
+    "guestMTUHint": "applied to VMs on their next DHCP lease or reboot (576–9000)"
   }
 }

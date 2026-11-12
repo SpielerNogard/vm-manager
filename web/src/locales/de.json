@@ -21,6 +21,11 @@
     "networks": {
       "label": "Netzwerke",
       "blurb": "Private Netzwerke, denen VMs beitreten können. VMs im selben Netzwerk erreichen sich als NAME.NETZWERK.internal."
+    },
+    "system": "System",
+    "settings": {
+      "label": "Einstellungen",
+      "blurb": "Hub-Adresse, Token und Standardwerte für Gäste."
     }
   },
   "topbar": {
@@ -36,7 +41,8 @@
     "actionsFor": "Aktionen für {name}",
     "name": "Name",
     "status": "Status",
-    "hubUnreachable": "Hub nicht erreichbar: {error}"
+    "hubUnreachable": "Hub nicht erreichbar: {error}",
+    "retry": "Erneut versuchen"
   },
   "state": {
     "online": "online",
@@ -55,7 +61,12 @@
     "provider": "Provider",
     "capacity": "Kapazität",
     "free": "Frei",
-    "chassis": "Chassis"
+    "chassis": "Chassis",
+    "add": "Node hinzufügen",
+    "dialogTitle": "Node hinzufügen",
+    "nameHint": "Kleinbuchstaben, Ziffern, Bindestriche",
+    "create": "Node anlegen",
+    "pendingLabel": "wartet auf erste Verbindung"
   },
   "vms": {
     "new": "Neue VM",
@@ -137,7 +148,19 @@
     "vms": "VMs auf dieser Node",
     "noVMs": "Keine VMs auf dieser Node",
     "open": "{name} öffnen",
-    "chassis": "Chassis"
+    "chassis": "Chassis",
+    "nodeConfig": "Konfiguration",
+    "hubAddress": "Hub-Adresse für diese Node",
+    "hubAddressHint": "localhost für den eigenen Mac des Hubs, oder eine LAN-IP, wenn Nodes den Hub anders erreichen.",
+    "download": "node.json herunterladen",
+    "saveHint": "Als ~/.vm-manager/node.json auf der Node speichern und ./bin/node starten",
+    "copyFailed": "Kopieren fehlgeschlagen; Text manuell markieren.",
+    "delete": "Node löschen",
+    "deleteBlocked": "Diese Node hat noch VMs",
+    "deleteTitle": "{name} löschen?",
+    "deleteBody": "Die Node wird vom Hub entfernt.",
+    "deleteBodyOnline": "Die Node wird vom Hub entfernt und getrennt; läuft sie weiter, verbindet sie sich neu und taucht wieder auf.",
+    "deleteConfirm": "Node löschen"
   },
   "vm": {
     "notFound": "Keine VM mit der ID {id}.",
@@ -184,7 +207,10 @@
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Das Gerät verliert sofort den Zugriff auf alle VMs.",
     "deleteConfirm": "Gerät löschen",
-    "qrFailed": "Der QR-Code konnte nicht erzeugt werden. Nutze den Konfigurationstext oder den Download."
+    "qrFailed": "Der QR-Code konnte nicht erzeugt werden. Nutze den Konfigurationstext oder den Download.",
+    "onHub": "Dieses Gerät ist der Hub-Rechner",
+    "onHubHint": "Die WireGuard-Config verbindet sich über 127.0.0.1, was die WireGuard-App auf dem Hub-Rechner braucht.",
+    "onHubBadge": "Hub-Rechner"
   },
   "networks": {
     "add": "Netzwerk hinzufügen",
@@ -202,5 +228,36 @@
     "deleteConfirm": "Netzwerk löschen",
     "inUse": "in Benutzung",
     "builtin": "integriert"
+  },
+  "settings": {
+    "setupBanner": "Einrichtung nicht abgeschlossen – Client-Endpoint setzen",
+    "tabs": {
+      "networking": "Netzwerk",
+      "security": "Sicherheit",
+      "guests": "Gäste"
+    },
+    "save": "Speichern",
+    "saved": "Gespeichert",
+    "confirm": "Bestätigen",
+    "endpoint": "Client-Endpoint",
+    "endpointHint": "Adresse, unter der Geräte und Nodes den Hub erreichen",
+    "loadFailed": "Einstellungen konnten nicht geladen werden.",
+    "endpointChangeTitle": "Client-Endpoint ändern?",
+    "endpointChangeBody": "Kein Gerät behält die alte Adresse in seiner Config.|Ein Gerät behält die alte Adresse in seiner Config; lade sie neu herunter.|{count} Geräte behalten die alte Adresse in ihren Configs; lade sie neu herunter.",
+    "listen": "Listen-Adresse",
+    "hubPort": "Hub-Port",
+    "underlayPort": "Underlay-Port",
+    "clientsPort": "Client-Port",
+    "portsHint": "per .env gesetzt (HUB_PORT, UNDERLAY_PORT, CLIENTS_PORT)",
+    "token": "Hub-Token",
+    "show": "Anzeigen",
+    "hide": "Verbergen",
+    "copy": "Kopieren",
+    "regenerate": "Neu erzeugen",
+    "tokenChangeTitle": "Hub-Token ändern?",
+    "tokenChangeBody": "Nodes brauchen den neuen Token in ihrer node.json, wenn sie sich das nächste Mal verbinden.",
+    "tokenChangeConfirm": "Token ändern",
+    "guestMTU": "Gast-MTU",
+    "guestMTUHint": "wird auf VMs bei der nächsten DHCP-Lease oder beim Neustart angewendet (576–9000)"
   }
 }

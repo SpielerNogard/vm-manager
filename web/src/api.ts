@@ -8,7 +8,7 @@ export interface Node {
   memoryMB: number
   freeCpus: number
   freeMemoryMB: number
-  online: boolean
+  state: 'pending' | 'online' | 'offline'
   connectedAt: string
   /** The node's config file without the hub token. */
   config?: Record<string, unknown>
@@ -87,6 +87,7 @@ export interface Device {
   ip: string
   publicKey: string
   createdAt: string
+  onHub?: boolean
 }
 
 export interface SSHKey {
@@ -97,6 +98,19 @@ export interface SSHKey {
   fingerprint: string
   hub?: boolean
 }
+
+export interface Settings {
+  listen: string
+  token: string
+  hub: { port: number }
+  underlay: { port: number }
+  clients: { endpoint: string; port: number }
+  guestMTU: number
+  setupComplete: boolean
+  devices: number
+}
+
+export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string } }
 
 export interface CreateVMRequest {
   nodeId: string
@@ -129,6 +143,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   nodes: () => request<Node[]>('GET', '/api/nodes'),
+  createNode: (id: string) => request<Node>('POST', '/api/nodes', { id }),
+  deleteNode: (id: string) => request<void>('DELETE', `/api/nodes/${id}`),
+  nodeConfig: (id: string, host?: string) =>
+    text(`/api/nodes/${id}/config${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   vms: () => request<VM[]>('GET', '/api/vms'),
   createVM: (req: CreateVMRequest) => request<VM>('POST', '/api/vms', req),
   deleteVM: (id: string) => request<void>('DELETE', `/api/vms/${id}`),
@@ -144,7 +162,11 @@ export const api = {
   setVMNetworks: (id: string, networkIds: string[], restartAllowed: boolean) =>
     request<VM>('PUT', `/api/vms/${id}/networks?restartAllowed=${restartAllowed}`, { networkIds }),
   devices: () => request<Device[]>('GET', '/api/devices'),
-  addDevice: (name: string) => request<{ device: Device; config: string }>('POST', '/api/devices', { name }),
+  addDevice: (name: string, onHub: boolean) =>
+    request<{ device: Device; config: string }>('POST', '/api/devices', { name, onHub }),
   deleteDevice: (id: string) => request<void>('DELETE', `/api/devices/${id}`),
+  settings: () => request<Settings>('GET', '/api/settings'),
+  updateSettings: (patch: SettingsPatch) => request<Settings>('PUT', '/api/settings', patch),
+  regenerateToken: () => request<Settings>('POST', '/api/settings/token'),
   deviceConfig: (id: string) => text(`/api/devices/${id}/config`),
 }

@@ -14,7 +14,7 @@ func gatewayRegistry(t *testing.T) (*Registry, string) {
 	t.Helper()
 	var cfg Config
 	cfg.Underlay.Port, cfg.GuestMTU = 51820, 1300
-	r := NewRegistry(newTestNet(t), newTestStore(t), cfg)
+	r := NewRegistry(newTestNet(t), newTestStore(t), newTestConfig(t, cfg))
 	_, pub, _ := wgkey.Generate()
 	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192, ChassisKey: pub}, &fakeNode{})
 	return r, pub
@@ -26,7 +26,7 @@ func TestGatewayStateListsPortsAndPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dev, err := r.net.AddDevice("laptop")
+	dev, err := r.net.AddDevice("laptop", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestGatewayStateKeepsPortsAfterHubRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := NewRegistry(m2, store, Config{}).GatewayState()
+	st := NewRegistry(m2, store, newTestConfig(t, Config{})).GatewayState()
 	want := []GatewayPort{
 		{Name: db.ID + "-mgmt", MAC: "02:0a:c8:00:00:0b", IP: "10.200.0.11", Hostname: "db.mgmt.internal", Network: "mgmt"},
 		{Name: vm.ID + "-mgmt", MAC: "02:0a:c8:00:00:0a", IP: "10.200.0.10", Hostname: "dev.mgmt.internal", Network: "mgmt"},
@@ -126,8 +126,18 @@ func TestGatewayStateNetworks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st2 := NewRegistry(m2, store, Config{}).GatewayState()
+	st2 := NewRegistry(m2, store, newTestConfig(t, Config{})).GatewayState()
 	if !slices.Equal(st2.Networks, st.Networks) || !slices.Equal(st2.Ports, st.Ports) {
 		t.Fatalf("after restart: %+v", st2)
+	}
+}
+
+func TestGatewayStateReflectsGuestMTUChange(t *testing.T) {
+	r, _ := gatewayRegistry(t)
+	if _, err := r.cfg.Update(func(c *Config) error { c.GuestMTU = 1200; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.GatewayState().GuestMTU; got != 1200 {
+		t.Fatalf("GuestMTU = %d", got)
 	}
 }
