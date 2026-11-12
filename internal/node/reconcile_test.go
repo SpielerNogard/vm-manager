@@ -647,3 +647,22 @@ func TestDestroyKeepsDisksInUseUntilInstanceExits(t *testing.T) {
 		return m.AppliedSeq == 2 && len(m.DisksInUse) == 0
 	})
 }
+
+func TestDestroyStopsVMWithDisksGracefully(t *testing.T) {
+	a, p := newReconcileAgent(t)
+	addr := storageAddr(t)
+	a.reconcile(context.Background(), 1, []proto.DesiredVM{
+		dvAtts("with", proto.PowerRunning, 1, att("da", "/data", addr)),
+		dvAtts("without", proto.PowerRunning, 1),
+	})
+	waitState(t, a, "with", proto.StateRunning, 1)
+	waitState(t, a, "without", proto.StateRunning, 1)
+	with, without := p.instance("with"), p.instance("without")
+	a.reconcile(context.Background(), 2, nil)
+	if !with.stopped.Load() || with.killed.Load() {
+		t.Fatalf("with disks: stopped %v killed %v", with.stopped.Load(), with.killed.Load())
+	}
+	if !without.killed.Load() {
+		t.Fatal("without disks: not killed")
+	}
+}

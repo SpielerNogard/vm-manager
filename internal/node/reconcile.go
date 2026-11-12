@@ -114,14 +114,22 @@ func (a *Agent) destroy(e *vmEntry) {
 	}
 	if inst := a.instance(e); inst != nil {
 		e.stopRequested.Store(true)
-		if err := inst.Kill(); err != nil {
+		// Disks outlive the VM, so the guest must flush them; Stop powers off hard if the guest does not shut down.
+		if len(e.file.Spec.Attachments) > 0 {
+			if err := inst.Stop(); err != nil {
+				log.Printf("vm %s: stop: %v", id, err)
+				if err := inst.Kill(); err != nil {
+					log.Printf("vm %s: kill: %v", id, err)
+				}
+			}
+		} else if err := inst.Kill(); err != nil {
 			log.Printf("vm %s: kill: %v", id, err)
 		}
 		select {
 		case <-inst.Done():
 			gone()
 		case <-time.After(killWait):
-			log.Printf("vm %s: still running %s after kill; its disks stay in use until it exits", id, killWait)
+			log.Printf("vm %s: still running %s after power-off; its disks stay in use until it exits", id, killWait)
 			go func() {
 				<-inst.Done()
 				gone()
