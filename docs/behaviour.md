@@ -1,0 +1,18 @@
+# Behaviour
+
+- The hub keeps disks in `disks.json` next to its config file, with the storage endpoint and tombstones of deleted disks. The storage server holds one file per disk and follows the hub: it creates, copies and grows files, and deletes those of deleted disks. Files it has no disk for are reported as orphans (`GET /api/storage`) and are never deleted.
+- A disk is `creating` until the storage server reports its file at full size, `ready` after that, and `releasing` from detach or VM delete until the node confirms it no longer uses the disk. A releasing disk cannot be attached, grown or deleted. If the node stays offline, force the release (see [API](api.md)).
+- A disk is `missing` when the connected storage server no longer has the file of a disk it reported before (lost volume, another storage server). It is never recreated blank; a missing disk cannot be attached (409). Restore the file to bring it back.
+- A node starts a VM with disks only after the hub has confirmed that they are still wanted. It fails the VM with `storage not ready` while a disk's file has not been created yet, and with `storage unreachable` if an NBD server cannot be reached. A VM that is already running keeps working when the storage container restarts.
+- On every boot, the guest formats a disk only if it is blank, mounts it at `mountPath` (found by `/dev/disk/by-id/virtio-<diskID>`) and grows the filesystem to the disk size. The first format makes the mount owned by `ubuntu`.
+- The hub keeps SSH keys in `keys.json`, the network model (WireGuard keys, VM NICs, chassis, devices) in `network.json`, and VMs and nodes in `vms.json`, all next to its config file. The hub is the source of truth for VMs.
+- The hub also lists its own user's default public keys (`~/.ssh/id_ed25519.pub`, `id_ecdsa.pub`, `id_rsa.pub`, …), read on each start. They cannot be deleted through the API and are preselected in the GUI.
+- On connect and on every change, the hub pushes the desired VMs and their power state to the node. The node converges to it: it deletes VMs the hub does not know, creates missing ones and applies power. A VM that should run is restarted with backoff, and goes to `error` after repeated quick failures.
+- The node stores each VM in `paths.vms/<id>/vm.json`. If a provisioned VM's directory is missing, it shows `error` ("VM directory missing"), and a start rebuilds it blank.
+- Create, delete and power changes for an offline node are accepted and shown as `pending` until the node connects.
+- Nodes join the gateway over a WireGuard underlay (`10.198.0.0/24`); OVN Geneve tunnels run on top of it. VMs get a management NIC on `10.200.0.0/16`, devices get addresses in `10.201.0.0/24`.
+- The hub is meant for a trusted home network. Node↔hub traffic is plain `ws://` with a shared token, and the GUI and API, including device creation, have no user auth.
+- The storage server's NBD port is unauthenticated: anyone who can reach `STORAGE_PORT` can read and write every disk. Changing the effective storage endpoint (also the client endpoint while the storage endpoint is empty) restarts every VM with disks, as their NBD URLs change.
+- WireGuard devices can only reach the VMs' management IPs and the gateway DNS. The hub API and the OVN databases are firewalled from them.
+- The hub stores device private keys, so configs can be downloaded again.
+- VMs cannot reach each other on the management network; they talk only via shared networks (see [Networks](networking.md#networks)). The vz NAT NIC (`eth0`, internet) is still shared.

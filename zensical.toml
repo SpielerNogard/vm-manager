@@ -1,0 +1,38 @@
+[project]
+site_name = "vm-manager"
+site_description = "A hub that manages lightweight Linux VMs on nodes."
+site_url = "https://spielernogard.github.io/vm-manager/"
+repo_url = "https://github.com/SpielerNogard/vm-manager"
+repo_name = "SpielerNogard/vm-manager"
+nav = [
+  { "Overview" = "index.md" },
+  { "Install" = "install.md" },
+  { "Disks" = "disks.md" },
+  { "Networking" = "networking.md" },
+  { "Config" = "config.md" },
+  { "API" = "api.md" },
+  { "Behaviour" = "behaviour.md" },
+]
+extra_css = ["stylesheets/extra.css"]
+
+[project.theme]
+font = false
+logo = "assets/logo.svg"
+favicon = "assets/logo.svg"
+features = ["content.code.copy", "navigation.footer", "search.highlight"]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to light mode"
