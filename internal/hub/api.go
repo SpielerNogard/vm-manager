@@ -69,6 +69,13 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 		u.CheckNow(req.Context())
 		writeJSON(w, http.StatusOK, u.Status(r, stack))
 	})
+	mux.HandleFunc("POST /api/updates/apply", func(w http.ResponseWriter, _ *http.Request) {
+		if err := u.StartHubUpdate(); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
 	mux.HandleFunc("POST /api/updates/stack/retry", func(w http.ResponseWriter, _ *http.Request) {
 		if !stack.State().Managed {
 			writeError(w, fmt.Errorf("%w: this hub does not manage its containers", ErrConflict))

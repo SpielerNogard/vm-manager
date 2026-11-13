@@ -24,12 +24,19 @@ type Updates struct {
 	URL string
 	// MinInterval is how soon after a check an on-demand check asks again; GitHub allows 60 requests an hour.
 	MinInterval time.Duration
-	client      *http.Client
+	// SelfExe is the hub's own binary when it updates itself; empty means the operator upgrades the hub.
+	SelfExe    string
+	ReleaseURL func(version string) string
+	restart    func(exe string) error
+	client     *http.Client
 
 	mu        sync.Mutex
 	latest    string
 	checkedAt time.Time
 	err       string
+
+	hubUpdating bool
+	hubErr      string
 }
 
 type UpdateStatus struct {
@@ -40,13 +47,17 @@ type UpdateStatus struct {
 	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
 	CheckError      string     `json:"checkError,omitempty"`
 	UpdateAvailable bool       `json:"updateAvailable"`
-	// HubUpdate is "none" on a dev build and "manual" otherwise: the operator upgrades the stack.
+	// HubUpdate is "none" on a dev build, "self" when the hub replaces its own binary, else "manual".
 	HubUpdate string     `json:"hubUpdate"`
 	Stack     StackState `json:"stack"`
+
+	HubUpdating    bool   `json:"hubUpdating,omitempty"`
+	HubUpdateError string `json:"hubUpdateError,omitempty"`
 }
 
 func NewUpdates() *Updates {
-	return &Updates{URL: releaseAPI, MinInterval: 30 * time.Second, client: &http.Client{Timeout: 15 * time.Second}}
+	return &Updates{URL: releaseAPI, MinInterval: 30 * time.Second, restart: restartInPlace,
+		ReleaseURL: func(v string) string { return releaseDownloads + v }, client: &http.Client{Timeout: 15 * time.Second}}
 }
 
 // Check asks for the latest release once; a failure is recorded and keeps the last known release.
@@ -125,6 +136,10 @@ func (u *Updates) Status(r *Registry, s *Stack) UpdateStatus {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	st.HubUpdate, st.Latest, st.CheckError = "manual", u.latest, u.err
+	if u.SelfExe != "" {
+		st.HubUpdate = "self"
+	}
+	st.HubUpdating, st.HubUpdateError = u.hubUpdating, u.hubErr
 	if !u.checkedAt.IsZero() {
 		t := u.checkedAt
 		st.CheckedAt = &t

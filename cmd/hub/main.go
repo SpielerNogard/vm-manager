@@ -84,6 +84,15 @@ func main() {
 		stack = hub.NewStack(dataDir, cfg)
 		stack.Storage = func() bool { return cfg.Get().Storage.Local }
 		stack.ReleaseURL = os.Getenv("VMM_RELEASE_URL")
+		if stack.ReleaseURL != "" {
+			updates.ReleaseURL = func(string) string { return stack.ReleaseURL }
+		}
+		// Only a hub that manages its stack can also rebuild it after replacing itself.
+		if exe, err := os.Executable(); err == nil {
+			if exe, err = filepath.EvalSymlinks(exe); err == nil {
+				updates.SelfExe = exe
+			}
+		}
 		go stack.Run(context.Background())
 	case *manageStack:
 		log.Print("-stack ignored: a development build does not manage the stack (use make stack)")
