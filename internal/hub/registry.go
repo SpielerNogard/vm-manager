@@ -80,6 +80,9 @@ type Node struct {
 	// Updatable is whether the node was installed by the installer; UpdateAvailable whether it is older than the hub.
 	Updatable       bool `json:"updatable"`
 	UpdateAvailable bool `json:"updateAvailable"`
+	// Updating is set from an accepted update until the node reports a failure or registers again.
+	Updating    bool   `json:"updating,omitempty"`
+	UpdateError string `json:"updateError,omitempty"`
 }
 
 type ChassisState struct {
@@ -287,6 +290,43 @@ func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 		if vm.NodeID == nodeID {
 			vm.State, vm.IP = proto.StateUnknown, ""
 		}
+	}
+}
+
+// UpdateNode tells an online node to update itself to the hub's version by running the hub's installer.
+func (r *Registry) UpdateNode(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[id]
+	refuse := func(why string) error { return fmt.Errorf("%w: node %q %s", ErrConflict, id, why) }
+	switch {
+	case !ok:
+		return fmt.Errorf("%w: node %q", ErrNotFound, id)
+	case n.conn == nil:
+		return refuse("is offline")
+	case !version.Released(version.Version):
+		return refuse("cannot be updated by a hub that is a development build")
+	case n.Version == "":
+		return refuse("reports no version; re-run its install command")
+	case !version.Older(n.Version, version.Version):
+		return refuse("is not older than the hub")
+	case !n.Updatable:
+		return refuse("was not installed by the installer; re-run its install command")
+	case n.Updating:
+		return refuse("has an update already running")
+	}
+	if err := n.conn.Send(proto.Message{Type: "update"}); err != nil {
+		return err
+	}
+	n.Updating, n.UpdateError = true, ""
+	return nil
+}
+
+func (r *Registry) NodeUpdateFailed(id, msg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n, ok := r.nodes[id]; ok {
+		n.Updating, n.UpdateError = false, msg
 	}
 }
 

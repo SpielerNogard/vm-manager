@@ -2,9 +2,10 @@
 
 | Method | Path | |
 |---|---|---|
-| GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, their config file without the hub token, `version` (absent for nodes that report none), `updatable` (installed by the installer) and `updateAvailable` (older than the hub) |
+| GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, their config file without the hub token, `version` (absent for nodes that report none), `updatable` (installed by the installer), `updateAvailable` (older than the hub), `updating` and `updateError` (why the last update failed, with the end of the installer output) |
 | POST | `/api/nodes` | Add a node (`{"id", "provider"}`, provider `vz`, `firecracker` or `cloud-hypervisor`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
+| POST | `/api/nodes/{id}/update` | Update the node to the hub's version; its VMs restart with it. 204 once the node has the command. 409 if the node is offline, reports no version, is not older than the hub, was not installed by the installer, has an update running, or the hub is a development build |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
 | GET | `/api/nodes/{id}/install-command?host=` | The one-line install command for the node (text); `host` as above |
 | GET | `/api/version` | The hub's version (`{"version"}`), no token needed |

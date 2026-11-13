@@ -249,6 +249,13 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/nodes/{id}/update", func(w http.ResponseWriter, req *http.Request) {
+		if err := r.UpdateNode(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /api/nodes/{id}/config", func(w http.ResponseWriter, req *http.Request) {
 		b, err := r.NodeConfig(req.PathValue("id"), req.URL.Query().Get("host"))
 		if err != nil {
