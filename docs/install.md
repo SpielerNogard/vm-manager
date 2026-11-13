@@ -20,6 +20,41 @@ Builds outside a release report version `dev`; `GET /api/version` shows the hub'
 
 ## Run
 
+There are two ways to run the hub:
+
+| | On the host | In Docker Compose |
+|---|---|---|
+| Hub | binary on the host, run as a service | container |
+| Gateway | container, started and rebuilt by the hub | container |
+| Storage server (optional) | container, started and rebuilt by the hub (**Settings › Networking**) | container, compose profile `storage` |
+| Data | directory on the host | Docker volume `data` |
+| Hub update | one click in **Settings › Updates** | by hand, see [Upgrading](#upgrading) |
+| Node update | one click per node | one click per node |
+
+### On the host
+
+The machine needs Docker with Compose v2 (Linux amd64/arm64, or an Apple Silicon Mac). Run:
+
+```sh
+curl -fsSL https://github.com/SpielerNogard/vm-manager/releases/latest/download/install-hub.sh | sh
+```
+
+The installer downloads the hub of the latest release (verified against `SHA256SUMS`; `--version vX.Y.Z` picks another one), installs it as a service and starts it. On Linux it runs as root or with sudo and also loads the kernel modules the gateway needs (`openvswitch`, `wireguard`). Running it again updates the hub and keeps all data.
+
+| | Linux | macOS |
+|---|---|---|
+| Binary | `/usr/local/bin/vm-manager-hub` | `~/.vm-manager-hub/bin/vm-manager-hub` |
+| Data | `/var/lib/vm-manager-hub` | `~/.vm-manager-hub` |
+| Service | systemd `vm-manager-hub` (`journalctl -u vm-manager-hub`) | launchd agent `dev.vm-manager.hub` (log `~/.vm-manager-hub/hub.log`) |
+
+On its first start the hub builds the gateway image from the binaries of its own release and starts it; **Settings › Updates** shows whether the containers run, and the error with a **Retry** if not (the hub also retries every minute, for example when Docker starts after the hub). The hub controls Docker, which amounts to root on the host.
+
+The hub listens on port 8080; to change it, set `"listen"` in `hub.json` in the data directory and restart the service. The published WireGuard and storage ports come from `hub.json` as well (`underlay.port`, `clients.port`, `storage.port`). The containers reach the hub on the host: on a Linux host whose firewall drops incoming traffic, allow the hub port for the Docker bridge. The hub's default SSH keys are those of the user who ran the installer.
+
+Everything below about setup, settings and nodes applies to both ways.
+
+### In Docker Compose
+
 Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub). The images are built from the binaries of the release named in `deploy/.env`:
 
 ```sh

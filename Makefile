@@ -33,6 +33,7 @@ dist:
 		case $$1 in hub|node) out=vm-manager-$$1 ;; *) out=$$1 ;; esac; \
 		CGO_ENABLED=0 GOOS=$$2 GOARCH=$$3 go build -ldflags "$(LDFLAGS)" -o dist/$$out-$$2-$$3 ./cmd/$$1 || exit 1; \
 	done
+	cp deploy/install-hub.sh dist/
 
 dist-darwin:
 	mkdir -p dist
