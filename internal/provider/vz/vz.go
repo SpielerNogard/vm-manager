@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -38,6 +39,7 @@ type Provider struct {
 
 type nbdAttachment struct {
 	diskID string
+	addr   string // host:port of the NBD server
 	att    *vz.NetworkBlockDeviceStorageDeviceAttachment
 }
 
@@ -124,7 +126,7 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	inst := &instance{vm: vm, console: console, offset: offset, ip: node.MgmtIP(f), done: make(chan struct{})}
 	go inst.watch()
 	for _, n := range nbds {
-		go p.trackNBD(f.Spec.ID, n.diskID, n.att, inst.done)
+		go p.trackNBD(f.Spec.ID, n, inst)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -213,7 +215,11 @@ func (p *Provider) vmConfig(f node.VMFile, dir string, extraNICs []*vz.VirtioNet
 			var nbd *vz.NetworkBlockDeviceStorageDeviceAttachment
 			nbd, err = vz.NewNetworkBlockDeviceStorageDeviceAttachment(d.File, 10*time.Second, false, vz.DiskSynchronizationModeFull)
 			if err == nil {
-				nbds = append(nbds, nbdAttachment{diskID: d.Name, att: nbd})
+				addr := ""
+				if u, perr := url.Parse(d.File); perr == nil {
+					addr = u.Host
+				}
+				nbds = append(nbds, nbdAttachment{diskID: d.Name, addr: addr, att: nbd})
 			}
 			att = nbd
 		} else {

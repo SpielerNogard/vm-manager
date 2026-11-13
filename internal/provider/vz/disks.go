@@ -3,7 +3,8 @@
 package vz
 
 import (
-	"github.com/Code-Hex/vz/v3"
+	"log"
+	"time"
 
 	"vm-manager/internal/node"
 	"vm-manager/internal/proto"
@@ -19,21 +20,22 @@ func (p *Provider) Disks(f node.VMFile, dir string) ([]proto.Disk, error) {
 
 func nbdKey(vmID, diskID string) string { return vmID + "/" + diskID }
 
-// trackNBD mirrors the attachment's error state into nbdErrs until done closes.
-func (p *Provider) trackNBD(vmID, diskID string, att *vz.NetworkBlockDeviceStorageDeviceAttachment, done <-chan struct{}) {
-	key := nbdKey(vmID, diskID)
+// trackNBD follows one NBD attachment until the VM is gone.
+func (p *Provider) trackNBD(vmID string, n nbdAttachment, inst *instance) {
+	key := nbdKey(vmID, n.diskID)
 	defer p.nbdErrs.Delete(key)
-	errs, connected := att.DidEncounterError(), att.Connected()
-	for {
-		select {
-		case err := <-errs:
-			if err != nil {
-				p.nbdErrs.Store(key, err.Error())
+	t := time.NewTicker(nbdProbeInterval)
+	defer t.Stop()
+	watchNBD(n.att.DidEncounterError(), n.att.Connected(), inst.done, t.C, func() bool { return nbdServerUp(n.addr) },
+		func(msg string) {
+			if msg == "" {
+				p.nbdErrs.Delete(key)
+				return
 			}
-		case <-connected:
-			p.nbdErrs.Delete(key)
-		case <-done:
-			return
-		}
-	}
+			p.nbdErrs.Store(key, msg)
+		},
+		func() {
+			log.Printf("vm %s: disk %s stayed failed after the storage server came back; restarting the VM", vmID, n.diskID)
+			inst.Kill()
+		})
 }
