@@ -83,7 +83,7 @@ func TestStackEnsureWritesProject(t *testing.T) {
 		t.Error("gateway-start.sh is not executable")
 	}
 	env, _ := os.ReadFile(filepath.Join(dir, ".env"))
-	want := "VMM_VERSION=v0.5.0\nVMM_RELEASE_URL=\nHUB_PORT=8080\nUNDERLAY_PORT=51820\nCLIENTS_PORT=51821\nSTORAGE_PORT=10809\nDATA_DIR=" + s.DataDir + "\n"
+	want := "VMM_VERSION=v0.5.0\nVMM_RELEASE_URL=''\nHUB_PORT=8080\nUNDERLAY_PORT=51820\nCLIENTS_PORT=51821\nSTORAGE_PORT=10809\nDATA_DIR='" + s.DataDir + "'\n"
 	if string(env) != want {
 		t.Errorf(".env:\n%s\nwant:\n%s", env, want)
 	}
@@ -179,5 +179,76 @@ func TestStackNil(t *testing.T) {
 	s.Kick()
 	if st := s.State(); st != (StackState{}) {
 		t.Errorf("state of no stack = %+v", st)
+	}
+}
+
+// blockBuilds makes every build call wait until its context ends or release is closed.
+func (r *stackRunner) blockBuilds(release chan struct{}) func(context.Context, string, ...string) ([]byte, error) {
+	return func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+		out, err := r.run(ctx, dir, args...)
+		if strings.HasSuffix(strings.Join(args, " "), " build") && err == nil {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-release:
+			}
+		}
+		return out, err
+	}
+}
+
+func TestStackStopEndsRunningBuild(t *testing.T) {
+	s, r := testStack(t)
+	s.run = r.blockBuilds(make(chan struct{}))
+	go s.Run(context.Background())
+	waitFor(t, "a build to start", func() bool { return r.count(" build") == 1 })
+	stopped := make(chan struct{})
+	go func() { s.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not end the running build")
+	}
+	s.Kick()
+	time.Sleep(50 * time.Millisecond)
+	if n := r.count(" build"); n != 1 {
+		t.Errorf("the stopped stack built again (%d builds)", n)
+	}
+}
+
+func TestStackKeepsErrorWhileRetrying(t *testing.T) {
+	s, r := testStack(t)
+	r.fail = map[string]string{"build": "boom"}
+	s.Ensure(context.Background())
+	r.mu.Lock()
+	r.fail = nil
+	r.mu.Unlock()
+	release := make(chan struct{})
+	s.run = r.blockBuilds(release)
+	go s.Ensure(context.Background())
+	waitFor(t, "the retry to build", func() bool { return s.State().State == "building" })
+	if st := s.State(); !strings.Contains(st.Error, "boom") {
+		t.Errorf("the last error disappears during a retry: %+v", st)
+	}
+	close(release)
+	waitFor(t, "the retry to finish", func() bool { return s.State().State == "running" })
+	if st := s.State(); st.Error != "" {
+		t.Errorf("error after success: %+v", st)
+	}
+}
+
+func TestStackEnvQuoting(t *testing.T) {
+	s, _ := testStack(t)
+	s.ReleaseURL = "http://mirror.lan/rel#1"
+	if err := s.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := os.ReadFile(filepath.Join(s.DataDir, "stack", ".env"))
+	if !strings.Contains(string(env), "VMM_RELEASE_URL='http://mirror.lan/rel#1'\n") || !strings.Contains(string(env), "DATA_DIR='"+s.DataDir+"'\n") {
+		t.Errorf("values are not quoted, so Compose would cut them at # or expand $:\n%s", env)
+	}
+	s.DataDir = filepath.Join(t.TempDir(), "it's")
+	if err := s.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "quote") {
+		t.Errorf("a path Compose cannot take was accepted: %v", err)
 	}
 }

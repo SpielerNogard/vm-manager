@@ -313,7 +313,7 @@
       "updateHub": "Hub auf {version} aktualisieren",
       "updatingHub": "Hub wird aktualisiert…",
       "updateHubTitle": "Hub auf {version} aktualisieren?",
-      "updateHubBody": "Der Hub startet neu und baut seine Container neu. Nodes verbinden sich neu; das VM-Netz und angehängte Disks sind kurz unterbrochen. VMs laufen weiter.",
+      "updateHubBody": "Der Hub startet neu und baut seine Container neu. Nodes verbinden sich neu; das VM-Netz und angehängte Disks sind kurz unterbrochen. VMs laufen weiter. Linux-Nodes mit v0.5.0 oder älter vorher aktualisieren: Sie verlieren Schreibvorgänge auf Disks, wenn der Storage-Server neu startet.",
       "hubUpdateFailed": "Das Hub-Update ist fehlgeschlagen: {error}",
       "containers": "Container",
       "stack": {

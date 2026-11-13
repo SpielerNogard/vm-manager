@@ -68,6 +68,8 @@ func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *Net
 			writeError(w, fmt.Errorf("%w: unexpected data after JSON object", ErrInvalid))
 			return
 		}
+		// Read before cfg.Update: a registering node holds the registry and then reads the config.
+		withDisks := r.vmsWithDisks()
 		c, err := cfg.Update(func(c *Config) error {
 			if p.Clients != nil && p.Clients.Endpoint != nil {
 				if err := validEndpoint(*p.Clients.Endpoint); err != nil {
@@ -91,8 +93,8 @@ func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *Net
 				switch {
 				case !stack.State().Managed:
 					return fmt.Errorf("%w: this hub does not manage its containers; in Docker Compose the storage server is the compose profile storage", ErrConflict)
-				case !*p.Storage.Local && r.vmsWithDisks() > 0:
-					return fmt.Errorf("%w: %d VMs have a disk attached; detach the disks before switching the storage server off", ErrConflict, r.vmsWithDisks())
+				case !*p.Storage.Local && withDisks > 0:
+					return fmt.Errorf("%w: %d VMs have a disk attached; detach the disks before switching the storage server off", ErrConflict, withDisks)
 				}
 				c.Storage.Local = *p.Storage.Local
 			}

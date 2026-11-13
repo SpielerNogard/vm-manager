@@ -83,8 +83,15 @@ func (u *Updates) applyHubUpdate(ctx context.Context, target string) error {
 		os.Remove(previous)
 		return err
 	}
+	if u.BeforeRestart != nil {
+		u.BeforeRestart()
+	}
 	if err := u.restart(u.SelfExe); err != nil {
-		return fmt.Errorf("%s is installed but the hub could not restart itself (%w); restart the hub service", target, err)
+		// Put the running version back, so a second attempt cannot overwrite it in .previous.
+		if rerr := os.Rename(previous, u.SelfExe); rerr != nil {
+			return fmt.Errorf("%s is installed but the hub could not restart itself (%w), and the previous binary could not be put back (%v); restart the hub service", target, err, rerr)
+		}
+		return fmt.Errorf("the hub could not restart itself as %s (%w); it keeps running %s, restart the hub service before trying again", target, err, version.Version)
 	}
 	return nil
 }

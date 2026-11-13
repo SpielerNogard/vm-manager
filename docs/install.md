@@ -84,7 +84,7 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 | Variable | Default | |
 |---|---|---|
 | `VMM_VERSION` | none, required to build the images | Release whose binaries the images use, e.g. `v0.1.0` |
-| `VMM_RELEASE_URL` | the GitHub release of `VMM_VERSION` | Base URL of the release files, for a mirror |
+| `VMM_RELEASE_URL` | the GitHub release of `VMM_VERSION` | URL of the directory that holds this release's files, for a mirror; the version is not appended |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
@@ -204,7 +204,7 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 The hub works with older nodes, so upgrade the hub first and each node afterwards. **Settings › Updates** shows the latest release and the versions of hub, gateway and storage.
 
-1. Hub on the host: click **Update hub** in **Settings › Updates**, or re-run `install-hub.sh`. The hub downloads and verifies the new binary, restarts in place and rebuilds its containers. Nodes reconnect; the VM network and attached disks are interrupted briefly while gateway and storage are replaced; VMs keep running. The old binary stays next to the new one as `vm-manager-hub.previous`: if the new hub does not start, move it back and restart the service. A release that changes the service file needs `install-hub.sh` re-run. A storage server on another machine is upgraded by hand.
+1. Hub on the host: click **Update hub** in **Settings › Updates**, or re-run `install-hub.sh`. The hub downloads and verifies the new binary, restarts in place and rebuilds its containers. Nodes reconnect; the VM network and attached disks are interrupted briefly while gateway and storage are replaced; VMs keep running. A hub update restarts the storage server on the hub: linux nodes up to v0.5.0 lose disk writes when the storage server restarts, without an error. If such a node has a VM with a disk attached, update that node first (or stop those VMs) before anything restarts the storage server. The old binary stays next to the new one as `vm-manager-hub.previous`: if the new hub does not start, move it back and restart the service. A release that changes the service file needs `install-hub.sh` re-run. A storage server on another machine is upgraded by hand.
 
    Hub in Docker Compose: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
 2. Nodes: every node older than the hub shows **update available**. Click **Update node** on its page, or re-run its install command. The node's VMs restart. A node is never newer than its hub.
@@ -217,13 +217,22 @@ Upgrading to v0.5.0 from an older release is still one joint upgrade: older vers
 
 A Compose installation can become a hub on the host without losing VMs or disks. The nodes keep their config: the hub keeps its token and ports.
 
+Before you start: the move stops the storage server. Linux nodes up to v0.5.0 lose disk writes when the storage server restarts, without an error. If such a node has a VM with a disk attached, update that node first (or stop those VMs) before anything restarts the storage server. To get there, upgrade the Compose stack to this release and update the nodes from their pages.
+
 ```sh
 # 1. Stop the stack; the volumes stay.
 docker compose -f deploy/compose.yaml --profile storage down
 
-# 2. Copy the hub's data into the new data directory (macOS: ~/.vm-manager-hub).
+# 2. Copy the hub's data into the new data directory.
+#    Linux:
 sudo mkdir -p /var/lib/vm-manager-hub
 docker run --rm -v deploy_data:/from -v /var/lib/vm-manager-hub:/to debian:trixie-slim cp -a /from/. /to/
+#    macOS (no sudo, the hub runs as you):
+mkdir -p ~/.vm-manager-hub
+docker run --rm -v deploy_data:/from -v ~/.vm-manager-hub:/to debian:trixie-slim cp -a /from/. /to/
+
+#    If HUB_PORT in deploy/.env was not 8080: the hub on the host listens on the port itself,
+#    so set "listen": ":<HUB_PORT>" in the copied hub.json. Otherwise the nodes no longer find it.
 
 # 3. Only if the storage server ran in the stack: copy the disks into the new volume (GNU cp keeps them sparse).
 docker run --rm -v deploy_disks:/from -v vm-manager-disks:/to debian:trixie-slim cp -a --sparse=always /from/. /to/

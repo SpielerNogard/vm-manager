@@ -1,6 +1,6 @@
 # Config
 
-**Hub** (`-config`, default `~/.vm-manager/hub.json`; `-ssh-dir`, default `~/.ssh`; `-stack`: the hub builds and runs the gateway and storage containers itself, as the hub installer sets it up). Created on first start and edited through Settings:
+**Hub** (`-config`, default `~/.vm-manager/hub.json`; `-ssh-dir`, default `~/.ssh`; `-stack`: the hub builds and runs the gateway and storage containers itself, as the hub installer sets it up; its `hub.port` then always is the port of `listen`). For a mirror or for tests, the environment variable `VMM_RELEASE_URL` replaces the directory a hub with `-stack` takes release files from (image builds and its own update; the version is not appended), and `VMM_RELEASE_API` replaces the latest-release request. Created on first start and edited through Settings:
 
 | Key | Default | |
 |---|---|---|

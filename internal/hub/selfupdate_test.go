@@ -224,3 +224,24 @@ func TestApplyAPI(t *testing.T) {
 		t.Errorf("manual hub: status %d, want 409", code)
 	}
 }
+
+func TestApplyHubUpdateRestartFails(t *testing.T) {
+	e := selfUpdater(t)
+	var order []string
+	e.u.BeforeRestart = func() { order = append(order, "stop stack") }
+	e.u.restart = func(string) error { order = append(order, "restart"); return errors.New("exec format error") }
+	err := e.u.applyHubUpdate(context.Background(), "v0.6.0")
+	if err == nil || !strings.Contains(err.Error(), "exec format error") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Join(order, ",") != "stop stack,restart" {
+		t.Errorf("order = %v, want the stack stopped before the restart", order)
+	}
+	// A second click must not overwrite .previous with a binary that cannot start.
+	if b, _ := os.ReadFile(e.exe); string(b) != "old binary" {
+		t.Errorf("after a failed restart the hub binary is %q, want the old one back", b)
+	}
+	if _, err := os.Stat(e.exe + ".previous"); err == nil {
+		t.Error(".previous left behind after the rollback")
+	}
+}

@@ -28,7 +28,9 @@ type Updates struct {
 	SelfExe    string
 	ReleaseURL func(version string) string
 	restart    func(exe string) error
-	client     *http.Client
+	// BeforeRestart stops what must not run across the restart, such as a docker build.
+	BeforeRestart func()
+	client        *http.Client
 
 	mu        sync.Mutex
 	latest    string

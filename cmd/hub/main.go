@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -96,7 +97,6 @@ func main() {
 				updates.SelfExe = exe
 			}
 		}
-		go stack.Run(context.Background())
 	case *manageStack:
 		log.Print("-stack ignored: a development build does not manage the stack (use make stack)")
 	}
@@ -105,8 +105,17 @@ func main() {
 	mux.Handle("/", spa(dist))
 
 	listen := cfg.Get().Listen
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("hub %s listening on %s, keys in %s", version.Version, listen, keysPath)
-	log.Fatal(http.ListenAndServe(listen, mux))
+	// Only a hub that got its port touches Docker: a restart loop on a taken port must not build.
+	if stack != nil {
+		updates.BeforeRestart = stack.Stop
+		go stack.Run(context.Background())
+	}
+	log.Fatal(http.Serve(ln, mux))
 }
 
 // spa serves index.html for extensionless paths that are not files, so GUI routes like /vms survive a reload.

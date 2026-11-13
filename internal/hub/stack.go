@@ -34,12 +34,15 @@ type Stack struct {
 	run  func(ctx context.Context, dir string, args ...string) ([]byte, error)
 	kick chan struct{}
 
-	mu    sync.Mutex
-	state StackState
+	mu      sync.Mutex
+	state   StackState
+	cancel  context.CancelFunc
+	done    chan struct{}
+	stopped bool
 }
 
 func NewStack(dataDir string, cfg *ConfigStore) *Stack {
-	return &Stack{DataDir: dataDir, Retry: time.Minute, cfg: cfg, run: runDocker, kick: make(chan struct{}, 1),
+	return &Stack{DataDir: dataDir, Retry: time.Minute, cfg: cfg, run: runDocker, kick: make(chan struct{}, 1), done: make(chan struct{}),
 		state: StackState{Managed: true, State: "building"}}
 }
 
@@ -70,6 +73,16 @@ func (s *Stack) Kick() {
 
 // Run brings the stack up now, again after every Kick, and every Retry while the last attempt failed.
 func (s *Stack) Run(ctx context.Context) {
+	defer close(s.done)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.mu.Lock()
+	s.cancel = cancel
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		return
+	}
 	for {
 		var retry <-chan time.Time
 		if err := s.Ensure(ctx); err != nil {
@@ -84,9 +97,25 @@ func (s *Stack) Run(ctx context.Context) {
 	}
 }
 
+// Stop ends Run and the docker command it may be running; the hub calls it before it replaces its own process.
+func (s *Stack) Stop() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.stopped = true
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+		<-s.done
+	}
+}
+
 // Ensure writes the project out, builds and starts it; building first leaves the running containers alone if the build fails.
 func (s *Stack) Ensure(ctx context.Context) error {
-	s.set("building", "")
+	// The last error stays visible while the retry runs.
+	s.set("building", s.State().Error)
 	err := s.ensure(ctx)
 	if err != nil {
 		s.set("failed", err.Error())
@@ -117,7 +146,7 @@ func (s *Stack) ensure(ctx context.Context) error {
 		if err != nil {
 			msg := strings.TrimSpace(string(out))
 			if len(msg) > stackErrorTail {
-				msg = msg[len(msg)-stackErrorTail:]
+				msg = strings.ToValidUTF8(msg[len(msg)-stackErrorTail:], "")
 			}
 			return fmt.Errorf("docker compose %s: %w\n%s", args[0], err, msg)
 		}
@@ -155,7 +184,13 @@ func (s *Stack) writeProject(dir string) error {
 		}
 	}
 	c := s.cfg.Get()
-	env := fmt.Sprintf("VMM_VERSION=%s\nVMM_RELEASE_URL=%s\nHUB_PORT=%d\nUNDERLAY_PORT=%d\nCLIENTS_PORT=%d\nSTORAGE_PORT=%d\nDATA_DIR=%s\n",
+	// Single quotes keep # and $ literal in a compose env file; a quote inside cannot be written at all.
+	for _, v := range []string{s.ReleaseURL, s.DataDir} {
+		if strings.ContainsAny(v, "'\n") {
+			return fmt.Errorf("%q contains a quote or line break and cannot be used for the hub's containers", v)
+		}
+	}
+	env := fmt.Sprintf("VMM_VERSION=%s\nVMM_RELEASE_URL='%s'\nHUB_PORT=%d\nUNDERLAY_PORT=%d\nCLIENTS_PORT=%d\nSTORAGE_PORT=%d\nDATA_DIR='%s'\n",
 		version.Version, s.ReleaseURL, c.Hub.Port, c.Underlay.Port, c.Clients.Port, c.Storage.Port, s.DataDir)
 	return os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o644)
 }

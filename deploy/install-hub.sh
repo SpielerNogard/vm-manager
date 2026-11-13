@@ -87,10 +87,11 @@ install_linux() {
 	# root's ~/.ssh is usually empty: the hub's default keys are those of the user who ran the installer.
 	ssh_home=$HOME
 	[ -z "${SUDO_USER:-}" ] || ssh_home=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+	[ -n "$ssh_home" ] || ssh_home=$HOME
 	data=/var/lib/vm-manager-hub
 
 	say "loading the kernel modules the gateway needs"
-	$SUDO modprobe -a openvswitch wireguard
+	$SUDO modprobe -a openvswitch wireguard || die "this kernel has no openvswitch or wireguard module; the gateway container needs both"
 	printf 'openvswitch\nwireguard\n' | $SUDO tee /etc/modules-load.d/vm-manager-hub.conf >/dev/null
 
 	say "installing the hub"

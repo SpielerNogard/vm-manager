@@ -119,3 +119,24 @@ func TestUpdatesStackStateCompose(t *testing.T) {
 		t.Errorf("retry without a managed stack: status %d, want 409", code)
 	}
 }
+
+func TestSettingsStorageLocalDoesNotHoldConfigWhileReadingRegistry(t *testing.T) {
+	srv, cfg, r, _ := stackAPI(t, true)
+	if code, body := doJSON(t, "PUT", srv.URL+"/api/settings", `{"storage":{"local":true}}`); code != 200 {
+		t.Fatalf("status %d body %s", code, body)
+	}
+	// A registering node holds the registry and then reads the config; the settings handler must not do it the other way round.
+	r.mu.Lock()
+	done := make(chan struct{})
+	go func() { doJSON(t, "PUT", srv.URL+"/api/settings", `{"storage":{"local":false}}`); close(done) }()
+	time.Sleep(200 * time.Millisecond)
+	got := make(chan struct{})
+	go func() { cfg.Get(); close(got) }()
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Error("the config is locked while the settings handler waits for the registry")
+	}
+	r.mu.Unlock()
+	<-done
+}
