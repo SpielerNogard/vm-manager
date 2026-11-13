@@ -94,13 +94,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: make dist-darwin
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: make web dist-darwin
         env:
           VERSION: v${{ needs.bump.outputs.version }}
       # Without the entitlement vz refuses to start VMs.
       - run: codesign -d --entitlements - dist/vm-manager-node-darwin-arm64 | grep -q com.apple.security.virtualization
       # macOS keeps the Local Network grant across releases only for a fixed identifier.
       - run: codesign -dv dist/vm-manager-node-darwin-arm64 2>&1 | grep -qx 'Identifier=dev.vm-manager.node'
+      - run: codesign -dv dist/vm-manager-hub-darwin-arm64 2>&1 | grep -qx 'Identifier=dev.vm-manager.hub'
+      # A hub built without the GUI would serve an empty page.
+      - run: test -n "$(ls web/dist/assets 2>/dev/null)"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: darwin

@@ -35,10 +35,13 @@ dist:
 	done
 	cp deploy/install-hub.sh dist/
 
+# The hub embeds web/dist, so run `make web` first.
 dist-darwin:
 	mkdir -p dist
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/vm-manager-node-darwin-arm64 ./cmd/node
 	codesign --force --entitlements node.entitlements -s - -i dev.vm-manager.node dist/vm-manager-node-darwin-arm64
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/vm-manager-hub-darwin-arm64 ./cmd/hub
+	codesign --force -s - -i dev.vm-manager.hub dist/vm-manager-hub-darwin-arm64
 
 checksums:
 	cd dist && rm -f SHA256SUMS && shasum -a 256 * > SHA256SUMS
