@@ -166,4 +166,13 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 ## Upgrading
 
-Upgrade the hub and all nodes together; old and new versions don't work with each other. For the stack, set the new `VMM_VERSION` in `deploy/.env` and run `docker compose -f deploy/compose.yaml up -d --build`. Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
+The hub works with older nodes, so upgrade the hub first and each node afterwards. **Settings › Updates** shows the latest release and the versions of hub, gateway and storage.
+
+1. Hub: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
+2. Nodes: every node older than the hub shows **update available**. Click **Update node** on its page, or re-run its install command. The node's VMs restart. A node is never newer than its hub.
+
+A node that was started by hand, without the installer, has no **Update node**; install it with its install command once.
+
+Upgrading to v0.5.0 from an older release is still one joint upgrade: older versions do not work with newer ones and have no **Update node**. Upgrade the hub as above, then re-run the install command on every node. The release assets were renamed (`vm-manager-node-*`, `vm-manager-hub-*`), so the checkout must be updated before the build, and a macOS node asks for Local Network access once more, now as `vm-manager-node`.
+
+Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
