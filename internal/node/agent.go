@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"sync"
@@ -60,6 +61,9 @@ type Agent struct {
 	chassisWG       sync.WaitGroup
 
 	reconcileMu sync.Mutex
+
+	updateMu     sync.Mutex                                   // held while the installer runs
+	installerCmd func(script string, args []string) *exec.Cmd // nil means installerCommand; tests set it
 
 	mu       sync.Mutex
 	vms      map[string]*vmEntry
@@ -175,6 +179,8 @@ func (a *Agent) connect(ctx context.Context) error {
 			a.reconcile(ctx, m.Seq, m.Desired)
 		case m.Type == "underlay" && m.Underlay != nil:
 			go a.startChassis(ctx, *m.Underlay)
+		case m.Type == "update":
+			go a.update(ctx)
 		}
 	}
 }

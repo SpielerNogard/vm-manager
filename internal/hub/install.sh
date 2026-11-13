@@ -12,7 +12,7 @@ LABEL=dev.vm-manager.node
 
 usage() {
 	cat >&2 <<'EOF'
-usage: install.sh --hub http://HOST:PORT --token TOKEN --name NAME --provider vz|firecracker|cloud-hypervisor
+usage: install.sh --hub http://HOST:PORT --token TOKEN|--token-stdin --name NAME --provider vz|firecracker|cloud-hypervisor
                   [--version vX.Y.Z] [--underlay-endpoint HOST:PORT] [--underlay-mtu N] [--memory-mb N]
 EOF
 	exit 2
@@ -39,6 +39,11 @@ while [ $# -gt 0 ]; do
 		--memory-mb) MEMORY_MB=$2 ;;
 		esac
 		shift 2
+		;;
+	--token-stdin)
+		# The node updates itself this way: a token on the command line would show in process lists.
+		IFS= read -r TOKEN || true
+		shift
 		;;
 	*) usage ;;
 	esac
