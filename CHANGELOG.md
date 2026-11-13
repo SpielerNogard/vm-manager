@@ -1,3 +1,9 @@
+## v0.6.0 (2026-11-13)
+
+### Feat
+
+- run the hub on the host and update it on one click (#21)
+
 ## v0.5.1 (2026-11-13)
 
 ### Fix
