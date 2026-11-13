@@ -1,0 +1,58 @@
+# The stack of a hub that runs on the host (-stack); the hub writes this project out and runs it.
+name: vm-manager
+services:
+  # Loads the kernel modules the gateway needs (OrbStack ships openvswitch unloaded); a host that has them built in fails here and passes the gateway's own check.
+  modules:
+    image: alpine:3.22
+    privileged: true
+    volumes:
+      - /lib/modules:/lib/modules:ro
+    command: ["sh", "-c", "modprobe -a openvswitch wireguard || true"]
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/gateway.Dockerfile
+      args:
+        VMM_VERSION: ${VMM_VERSION}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
+    restart: unless-stopped
+    depends_on:
+      modules:
+        condition: service_completed_successfully
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    environment:
+      HUB_URL: http://host.docker.internal:${HUB_PORT}
+    ports:
+      - "${UNDERLAY_PORT}:51820/udp"
+      - "${CLIENTS_PORT}:51821/udp"
+    volumes:
+      - ovn:/var/lib/ovn
+      - ovs:/etc/openvswitch
+      - ${DATA_DIR}:/data:ro
+  storage:
+    build:
+      context: .
+      dockerfile: deploy/storage.Dockerfile
+      args:
+        VMM_VERSION: ${VMM_VERSION}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
+    profiles: [storage]
+    restart: unless-stopped
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports:
+      - "${STORAGE_PORT}:10809/tcp"
+    command: ["-hub", "ws://host.docker.internal:${HUB_PORT}/api/storage/connect", "-token-file", "/data/hub.json"]
+    volumes:
+      - disks:/disks
+      - ${DATA_DIR}:/data:ro
+volumes:
+  ovn:
+    name: vm-manager-ovn
+  ovs:
+    name: vm-manager-ovs
+  disks:
+    name: vm-manager-disks

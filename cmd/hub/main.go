@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -20,6 +21,7 @@ func main() {
 	home, _ := os.UserHomeDir()
 	configPath := flag.String("config", filepath.Join(home, ".vm-manager", "hub.json"), "path to hub config")
 	sshDir := flag.String("ssh-dir", "~/.ssh", "directory holding the hub's default SSH public keys")
+	manageStack := flag.Bool("stack", false, "manage the gateway and storage containers with Docker")
 	flag.Parse()
 
 	cfg, err := hub.LoadOrCreateConfig(expandHome(*configPath, home), os.Getenv)
@@ -68,14 +70,52 @@ func main() {
 	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, token))
 	mux.Handle("/api/storage/connect", hub.StorageHandler(r, token))
 	updates := hub.NewUpdates()
+	if api := os.Getenv("VMM_RELEASE_API"); api != "" {
+		updates.URL = api
+	}
 	go updates.Run(context.Background())
-	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg, updates))
+	var stack *hub.Stack
+	switch {
+	case *manageStack && version.Released(version.Version):
+		// Docker needs an absolute path to mount the data directory.
+		dataDir, err := filepath.Abs(dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := cfg.HubPortFromListen(); err != nil {
+			log.Fatal(err)
+		}
+		stack = hub.NewStack(dataDir, cfg)
+		stack.Storage = func() bool { return cfg.Get().Storage.Local }
+		stack.ReleaseURL = os.Getenv("VMM_RELEASE_URL")
+		if stack.ReleaseURL != "" {
+			updates.ReleaseURL = func(string) string { return stack.ReleaseURL }
+		}
+		// Only a hub that manages its stack can also rebuild it after replacing itself.
+		if exe, err := os.Executable(); err == nil {
+			if exe, err = filepath.EvalSymlinks(exe); err == nil {
+				updates.SelfExe = exe
+			}
+		}
+	case *manageStack:
+		log.Print("-stack ignored: a development build does not manage the stack (use make stack)")
+	}
+	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg, updates, stack))
 	mux.Handle("/node/install.sh", hub.InstallScriptHandler())
 	mux.Handle("/", spa(dist))
 
 	listen := cfg.Get().Listen
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("hub %s listening on %s, keys in %s", version.Version, listen, keysPath)
-	log.Fatal(http.ListenAndServe(listen, mux))
+	// Only a hub that got its port touches Docker: a restart loop on a taken port must not build.
+	if stack != nil {
+		updates.BeforeRestart = stack.Stop
+		go stack.Run(context.Background())
+	}
+	log.Fatal(http.Serve(ln, mux))
 }
 
 // spa serves index.html for extensionless paths that are not files, so GUI routes like /vms survive a reload.

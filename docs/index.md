@@ -6,6 +6,6 @@ This is a proof of concept. Nodes are Apple Silicon Macs using Virtualization.fr
 
 ## Requirements
 
-- Hub stack: Docker with Compose. Supported hosts are OrbStack on macOS and Docker on Linux. The Docker host kernel must have the `openvswitch` and `wireguard` modules loaded (the gateway container fails fast otherwise). Docker Desktop is not supported or tested.
+- Hub: Docker with Compose, for the hub's containers (the hub itself runs on the host or in Compose, see [Install](install.md#run)). Supported hosts are OrbStack on macOS and Docker on Linux. The Docker host kernel must provide the `openvswitch` and `wireguard` modules; the stack loads them itself (the gateway container fails fast if they are missing). Docker Desktop is not supported or tested.
 - Build: Go and Node.js/npm.
 - Node: an Apple Silicon Mac with macOS 14 or later (building it needs Go with cgo, i.e. the Xcode Command Line Tools), or an amd64 Linux host with KVM (Debian 13 or Ubuntu 24.04).

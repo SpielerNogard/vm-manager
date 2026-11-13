@@ -7,10 +7,11 @@ import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DataState from '@/components/DataState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import StateBadge from '@/components/StateBadge.vue'
 import { useFleet } from '@/composables/useFleet'
 
 type Tab = 'networking' | 'security' | 'guests' | 'updates'
-type Pending = 'endpoint' | 'token' | 'regenerate'
+type Pending = 'endpoint' | 'token' | 'regenerate' | 'hubUpdate'
 
 const { t, locale } = useI18n()
 const { settings, updates, loaded, refresh } = useFleet()
@@ -18,6 +19,7 @@ const { settings, updates, loaded, refresh } = useFleet()
 const tab = ref<Tab>('networking')
 const endpoint = ref('')
 const storageEndpoint = ref('')
+const storageLocal = ref(false)
 const token = ref('')
 const mtu = ref(1300)
 const showToken = ref(false)
@@ -29,6 +31,7 @@ const savedTab = ref<Tab | null>(null)
 function seed(s: Settings) {
   endpoint.value = s.clients.endpoint
   storageEndpoint.value = s.storage.endpoint ?? ''
+  storageLocal.value = s.storage.local ?? false
   token.value = s.token
   mtu.value = s.guestMTU
 }
@@ -73,6 +76,7 @@ async function apply(forTab: Tab, call: () => Promise<Settings>) {
     if (forTab === 'networking') {
       endpoint.value = s.clients.endpoint
       storageEndpoint.value = s.storage.endpoint ?? ''
+      storageLocal.value = s.storage.local ?? false
     }
     else if (forTab === 'security') token.value = s.token
     else mtu.value = s.guestMTU
@@ -91,7 +95,11 @@ const devicesAffected = computed(() =>
 const vmsAffected = computed(() =>
   (storageEndpoint.value || storageDefault.value) !== settings.value?.storageEndpoint ? (settings.value?.vmsWithDisks ?? 0) : 0,
 )
-const saveNetworking = () => api.updateSettings({ clients: { endpoint: endpoint.value }, storage: { endpoint: storageEndpoint.value } })
+const saveNetworking = () =>
+  api.updateSettings({
+    clients: { endpoint: endpoint.value },
+    storage: { endpoint: storageEndpoint.value, ...(settings.value?.stackManaged ? { local: storageLocal.value } : {}) },
+  })
 
 function saveEndpoint() {
   if (devicesAffected.value > 0 || vmsAffected.value > 0) pending.value = 'endpoint'
@@ -102,6 +110,7 @@ function confirm() {
   const p = pending.value
   pending.value = null
   if (p === 'endpoint') void apply('networking', saveNetworking)
+  else if (p === 'hubUpdate') void run(api.applyHubUpdate)
   else if (p === 'token') void apply('security', patch({ token: token.value }))
   else if (p === 'regenerate') void apply('security', () => api.regenerateToken())
 }
@@ -122,7 +131,13 @@ async function copyToken() {
 }
 
 const dialog = computed(() =>
-  pending.value === 'endpoint'
+  pending.value === 'hubUpdate'
+    ? {
+        title: t('settings.updates.updateHubTitle', { version: updates.value?.latest ?? '' }),
+        body: t('settings.updates.updateHubBody'),
+        label: t('settings.updates.updateHub', { version: updates.value?.latest ?? '' }),
+      }
+    : pending.value === 'endpoint'
     ? {
         title: t('settings.endpointChangeTitle'),
         body: [
@@ -154,6 +169,19 @@ const checkedAgo = computed(() => {
   const rtf = new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' })
   return Math.abs(minutes) < 60 ? rtf.format(minutes, 'minute') : rtf.format(Math.round(minutes / 60), 'hour')
 })
+
+const STACK_TONE = { running: 'good', building: 'quiet', failed: 'danger' } as const
+
+/** Runs a hub action whose result arrives with the next poll. */
+async function run(call: () => Promise<void>) {
+  error.value = ''
+  try {
+    await call()
+    await refresh()
+  } catch (e) {
+    error.value = (e as Error).message
+  }
+}
 
 async function checkNow() {
   checking.value = true
@@ -226,13 +254,20 @@ async function copyCommand() {
               <input v-model.trim="storageEndpoint" type="text" class="input input-sm input-bordered w-full font-token" :placeholder="storageDefault" />
               <span class="text-base-content/60 mt-1 text-xs">{{ t('settings.storageEndpointHint') }}</span>
             </label>
+            <label v-if="settings?.stackManaged" class="flex items-start gap-3">
+              <input v-model="storageLocal" type="checkbox" class="checkbox checkbox-sm mt-0.5" />
+              <span>
+                <span class="block text-sm font-medium">{{ t('settings.storageLocal') }}</span>
+                <span class="text-base-content/60 block text-xs">{{ t('settings.storageLocalHint') }}</span>
+              </span>
+            </label>
             <div class="grid grid-cols-2 gap-3">
               <label v-for="{ key, value } in ports" :key="key" class="form-control">
                 <span class="label-text mb-1 text-sm font-medium">{{ t(`settings.${key}`) }}</span>
                 <input :value="value" type="text" class="input input-sm input-bordered w-full font-token" readonly />
               </label>
             </div>
-            <p class="text-base-content/60 text-xs">{{ t('settings.portsHint') }}</p>
+            <p class="text-base-content/60 text-xs">{{ settings?.stackManaged ? t('settings.portsHintHost') : t('settings.portsHint') }}</p>
             <div class="flex items-center gap-3">
               <button type="submit" class="btn btn-sm btn-primary">{{ t('settings.save') }}</button>
               <span v-if="savedTab === 'networking'" class="text-success text-sm">{{ t('settings.saved') }}</span>
@@ -296,6 +331,10 @@ async function copyCommand() {
                   {{ t('settings.updates.storage') }} <span class="font-token">{{ updates.storage || '—' }}</span>
                 </span>
               </dd>
+              <template v-if="updates.stack.managed && updates.stack.state">
+                <dt class="text-base-content/60">{{ t('settings.updates.containers') }}</dt>
+                <dd><StateBadge :label="t(`settings.updates.stack.${updates.stack.state}`)" :tone="STACK_TONE[updates.stack.state]" /></dd>
+              </template>
               <template v-if="updates.hubUpdate !== 'none'">
                 <dt class="text-base-content/60">{{ t('settings.updates.latest') }}</dt>
                 <dd class="flex flex-wrap items-center gap-3">
@@ -311,7 +350,24 @@ async function copyCommand() {
             <div v-if="updates.checkError" role="alert" class="alert alert-error alert-soft text-sm">
               {{ t('settings.updates.checkFailed', { error: updates.checkError }) }}
             </div>
+            <div v-if="updates.stack.state === 'failed'" role="alert" class="alert alert-error alert-soft text-sm">
+              <!-- One child: the alert lays its children out as grid columns. -->
+              <div class="min-w-0 space-y-2">
+                <p>{{ t('settings.updates.stackFailed') }}</p>
+                <pre class="font-token text-xs break-words whitespace-pre-wrap">{{ updates.stack.error }}</pre>
+                <button type="button" class="btn btn-sm" @click="run(api.retryStack)">{{ t('settings.updates.retry') }}</button>
+              </div>
+            </div>
+            <div v-if="updates.hubUpdateError" role="alert" class="alert alert-error alert-soft text-sm">
+              {{ t('settings.updates.hubUpdateFailed', { error: updates.hubUpdateError }) }}
+            </div>
             <p v-if="updates.hubUpdate === 'none'" class="text-base-content/60">{{ t('settings.updates.devBuild') }}</p>
+            <div v-else-if="updates.updateAvailable && updates.hubUpdate === 'self'">
+              <button type="button" class="btn btn-sm btn-primary" :disabled="updates.hubUpdating" @click="pending = 'hubUpdate'">
+                <span v-if="updates.hubUpdating" class="loading loading-spinner loading-xs"></span>
+                {{ updates.hubUpdating ? t('settings.updates.updatingHub') : t('settings.updates.updateHub', { version: updates.latest }) }}
+              </button>
+            </div>
             <template v-else-if="updates.updateAvailable">
               <p>{{ t('settings.updates.manual', { version: updates.latest }) }}</p>
               <pre class="bg-base-200 rounded-box font-token p-3 text-xs break-all whitespace-pre-wrap">{{ upgradeCommand }}</pre>

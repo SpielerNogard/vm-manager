@@ -14,7 +14,7 @@ import (
 	"vm-manager/internal/version"
 )
 
-func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u *Updates) http.Handler {
+func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u *Updates, stack *Stack) http.Handler {
 	mux := http.NewServeMux()
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
@@ -59,7 +59,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"version": version.Version})
 	})
-	mux.HandleFunc("GET /api/updates", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, u.Status(r)) })
+	mux.HandleFunc("GET /api/updates", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, u.Status(r, stack)) })
 	mux.HandleFunc("POST /api/updates/check", func(w http.ResponseWriter, req *http.Request) {
 		if !version.Released(version.Version) {
 			writeError(w, fmt.Errorf("%w: %v", ErrConflict, errDevBuild))
@@ -67,7 +67,22 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 		}
 		// A failed check is part of the status, not a failed request.
 		u.CheckNow(req.Context())
-		writeJSON(w, http.StatusOK, u.Status(r))
+		writeJSON(w, http.StatusOK, u.Status(r, stack))
+	})
+	mux.HandleFunc("POST /api/updates/apply", func(w http.ResponseWriter, _ *http.Request) {
+		if err := u.StartHubUpdate(); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("POST /api/updates/stack/retry", func(w http.ResponseWriter, _ *http.Request) {
+		if !stack.State().Managed {
+			writeError(w, fmt.Errorf("%w: this hub does not manage its containers", ErrConflict))
+			return
+		}
+		stack.Kick()
+		w.WriteHeader(http.StatusAccepted)
 	})
 	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, networkViews()) })
 	mux.HandleFunc("GET /api/networks/{id}", func(w http.ResponseWriter, req *http.Request) {
@@ -388,7 +403,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	registerSettings(mux, r, cfg, net)
+	registerSettings(mux, r, cfg, net, stack)
 	return setupGuard(cfg, mux)
 }
 

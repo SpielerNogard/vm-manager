@@ -62,7 +62,13 @@ jobs:
           cache: false
       - run: go vet ./...
       - run: make test
-      - run: make dist-darwin
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: make web dist-darwin
       - run: codesign -d --entitlements - dist/vm-manager-node-darwin-arm64 | grep -q com.apple.security.virtualization
       # macOS keeps the Local Network grant across releases only for a fixed identifier.
       - run: codesign -dv dist/vm-manager-node-darwin-arm64 2>&1 | grep -qx 'Identifier=dev.vm-manager.node'
+      - run: codesign -dv dist/vm-manager-hub-darwin-arm64 2>&1 | grep -qx 'Identifier=dev.vm-manager.hub'
+      # A hub built without the GUI would serve an empty page.
+      - run: test -n "$(ls web/dist/assets 2>/dev/null)"

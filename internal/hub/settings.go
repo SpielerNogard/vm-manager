@@ -19,6 +19,8 @@ type settingsView struct {
 	// StorageEndpoint is the effective storage.endpoint; VMsWithDisks restart when it changes.
 	StorageEndpoint string `json:"storageEndpoint"`
 	VMsWithDisks    int    `json:"vmsWithDisks"`
+	// StackManaged is whether this hub runs gateway and storage itself (-stack); only then storage.local can be set.
+	StackManaged bool `json:"stackManaged"`
 }
 
 type settingsPatch struct {
@@ -29,6 +31,7 @@ type settingsPatch struct {
 	GuestMTU *int    `json:"guestMTU"`
 	Storage  *struct {
 		Endpoint *string `json:"endpoint"`
+		Local    *bool   `json:"local"`
 	} `json:"storage"`
 }
 
@@ -48,9 +51,9 @@ func validToken(s string) error {
 	return nil
 }
 
-func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *NetModel) {
+func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *NetModel, stack *Stack) {
 	respond := func(w http.ResponseWriter, c Config) {
-		writeJSON(w, http.StatusOK, settingsView{c, c.Clients.Endpoint != "", len(nm.Devices()), c.StorageEndpoint(), r.vmsWithDisks()})
+		writeJSON(w, http.StatusOK, settingsView{c, c.Clients.Endpoint != "", len(nm.Devices()), c.StorageEndpoint(), r.vmsWithDisks(), stack.State().Managed})
 	}
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, _ *http.Request) { respond(w, cfg.Get()) })
 	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, req *http.Request) {
@@ -65,6 +68,8 @@ func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *Net
 			writeError(w, fmt.Errorf("%w: unexpected data after JSON object", ErrInvalid))
 			return
 		}
+		// Read before cfg.Update: a registering node holds the registry and then reads the config.
+		withDisks := r.vmsWithDisks()
 		c, err := cfg.Update(func(c *Config) error {
 			if p.Clients != nil && p.Clients.Endpoint != nil {
 				if err := validEndpoint(*p.Clients.Endpoint); err != nil {
@@ -84,6 +89,15 @@ func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *Net
 				}
 				c.Storage.Endpoint = *p.Storage.Endpoint
 			}
+			if p.Storage != nil && p.Storage.Local != nil && *p.Storage.Local != c.Storage.Local {
+				switch {
+				case !stack.State().Managed:
+					return fmt.Errorf("%w: this hub does not manage its containers; in Docker Compose the storage server is the compose profile storage", ErrConflict)
+				case !*p.Storage.Local && withDisks > 0:
+					return fmt.Errorf("%w: %d VMs have a disk attached; detach the disks before switching the storage server off", ErrConflict, withDisks)
+				}
+				c.Storage.Local = *p.Storage.Local
+			}
 			if p.GuestMTU != nil {
 				if *p.GuestMTU < 576 || *p.GuestMTU > 9000 {
 					return fmt.Errorf("%w: guestMTU must be between 576 and 9000", ErrInvalid)
@@ -97,6 +111,9 @@ func registerSettings(mux *http.ServeMux, r *Registry, cfg *ConfigStore, nm *Net
 			return
 		}
 		r.SyncStorageEndpoint()
+		if p.Storage != nil && p.Storage.Local != nil {
+			stack.Kick()
+		}
 		respond(w, c)
 	})
 	mux.HandleFunc("POST /api/settings/token", func(w http.ResponseWriter, _ *http.Request) {

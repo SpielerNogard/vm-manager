@@ -2,7 +2,7 @@
 
 ## Releases
 
-Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`vm-manager-hub`, `vm-manager-node`, `gateway`, `storage`, `netagent` per OS/arch, plus `SHA256SUMS`) on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version. Every pull request checks its commits with `cz check`, so a message that is not a conventional commit fails CI. The release workflow runs the tests before tagging. If a release build still fails after the tag was pushed, re-run the failed jobs of that workflow run; if the code needs a fix, delete the orphan tag (`git push origin :refs/tags/vX.Y.Z`) and the next release-worthy commit on `main` releases a new version.
+Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`vm-manager-hub` for Linux and Apple Silicon, `vm-manager-node`, `gateway`, `storage`, `netagent` per OS/arch), the hub installer `install-hub.sh` and `SHA256SUMS` on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version. Every pull request checks its commits with `cz check`, so a message that is not a conventional commit fails CI. The release workflow runs the tests before tagging. If a release build still fails after the tag was pushed, re-run the failed jobs of that workflow run; if the code needs a fix, delete the orphan tag (`git push origin :refs/tags/vX.Y.Z`) and the next release-worthy commit on `main` releases a new version.
 
 ## Build
 
@@ -20,6 +20,41 @@ Builds outside a release report version `dev`; `GET /api/version` shows the hub'
 
 ## Run
 
+There are two ways to run the hub:
+
+| | On the host | In Docker Compose |
+|---|---|---|
+| Hub | binary on the host, run as a service | container |
+| Gateway | container, started and rebuilt by the hub | container |
+| Storage server (optional) | container, started and rebuilt by the hub (**Settings › Networking**) | container, compose profile `storage` |
+| Data | directory on the host | Docker volume `data` |
+| Hub update | one click in **Settings › Updates** | by hand, see [Upgrading](#upgrading) |
+| Node update | one click per node | one click per node |
+
+### On the host
+
+The machine needs Docker with Compose v2 (Linux amd64/arm64, or an Apple Silicon Mac). Run:
+
+```sh
+curl -fsSL https://github.com/SpielerNogard/vm-manager/releases/latest/download/install-hub.sh | sh
+```
+
+The installer downloads the hub of the latest release (verified against `SHA256SUMS`; `--version vX.Y.Z` picks another one), installs it as a service and starts it. On Linux it runs as root or with sudo. Running it again updates the hub and keeps all data.
+
+| | Linux | macOS |
+|---|---|---|
+| Binary | `/usr/local/bin/vm-manager-hub` | `~/.vm-manager-hub/bin/vm-manager-hub` |
+| Data | `/var/lib/vm-manager-hub` | `~/.vm-manager-hub` |
+| Service | systemd `vm-manager-hub` (`journalctl -u vm-manager-hub`) | launchd agent `dev.vm-manager.hub` (log `~/.vm-manager-hub/hub.log`) |
+
+On its first start the hub builds the gateway image from the binaries of its own release and starts it; **Settings › Updates** shows whether the containers run, and the error with a **Retry** if not (the hub also retries every minute, for example when Docker starts after the hub). The hub controls Docker, which amounts to root on the host.
+
+The hub listens on port 8080; to change it, set `"listen"` in `hub.json` in the data directory and restart the service. The published WireGuard and storage ports come from `hub.json` as well (`underlay.port`, `clients.port`, `storage.port`). The containers reach the hub on the host: on a Linux host whose firewall drops incoming traffic, allow the hub port for the Docker bridge. The hub's default SSH keys are those of the user who ran the installer.
+
+Everything below about setup, settings and nodes applies to both ways.
+
+### In Docker Compose
+
 Hub and gateway run as a compose stack (netns holder, OVN/WireGuard gateway, hub). The images are built from the binaries of the release named in `deploy/.env`:
 
 ```sh
@@ -29,7 +64,7 @@ docker compose -f deploy/compose.yaml up -d --build
 
 For development, `make stack` builds the same images from the working tree instead (`VMM_BIN=source`, version `dev`). The image build needs BuildKit (default since Docker 23).
 
-On a Linux Docker host, load the kernel modules the gateway needs first: `modprobe -a openvswitch wireguard` (persist them in `/etc/modules-load.d/`); Docker Desktop on the Mac has them.
+The gateway needs the kernel modules `openvswitch` and `wireguard` on the Docker host. Both ways of running load them before the gateway starts, with a small privileged container (`modules`), so nothing has to be loaded by hand, also not after an OrbStack restart. If the host kernel has neither the modules nor built-in support, the gateway container restarts in a loop with "the Docker host kernel lacks the openvswitch module".
 
 No config is needed. On first start the hub creates `/data/hub.json` in the `data` volume with a random node token and an empty client endpoint. Open `http://<hub>:8080`: every page except **Settings** redirects there until the client endpoint is set (the API answers POST/PUT/DELETE with 409 meanwhile, except settings, node transport and gateway routes).
 
@@ -49,6 +84,7 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 | Variable | Default | |
 |---|---|---|
 | `VMM_VERSION` | none, required to build the images | Release whose binaries the images use, e.g. `v0.1.0` |
+| `VMM_RELEASE_URL` | the GitHub release of `VMM_VERSION` | URL of the directory that holds this release's files, for a mirror; the version is not appended |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
@@ -168,11 +204,43 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 The hub works with older nodes, so upgrade the hub first and each node afterwards. **Settings › Updates** shows the latest release and the versions of hub, gateway and storage.
 
-1. Hub: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
+1. Hub on the host: click **Update hub** in **Settings › Updates**, or re-run `install-hub.sh`. The hub downloads and verifies the new binary, restarts in place and rebuilds its containers. Nodes reconnect; the VM network and attached disks are interrupted briefly while gateway and storage are replaced; VMs keep running. A hub update restarts the storage server on the hub: linux nodes up to v0.5.0 lose disk writes when the storage server restarts, without an error. If such a node has a VM with a disk attached, update that node first (or stop those VMs) before anything restarts the storage server. The old binary stays next to the new one as `vm-manager-hub.previous`: if the new hub does not start, move it back and restart the service. A release that changes the service file needs `install-hub.sh` re-run. A storage server on another machine is upgraded by hand.
+
+   Hub in Docker Compose: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
 2. Nodes: every node older than the hub shows **update available**. Click **Update node** on its page, or re-run its install command. The node's VMs restart. A node is never newer than its hub.
 
 A node that was started by hand, without the installer, has no **Update node**; install it with its install command once. Linux nodes newer than v0.5.0 need `qemu-utils` (the installer adds it; on a host set up by hand run `apt-get install qemu-utils` before replacing the binary).
 
 Upgrading to v0.5.0 from an older release is still one joint upgrade: older versions do not work with newer ones and have no **Update node**. Upgrade the hub as above, then re-run the install command on every node. The release assets were renamed (`vm-manager-node-*`, `vm-manager-hub-*`), so the checkout must be updated before the build, and a macOS node asks for Local Network access once more, now as `vm-manager-node`.
+
+### Moving from Compose to the host
+
+A Compose installation can become a hub on the host without losing VMs or disks. The nodes keep their config: the hub keeps its token and ports.
+
+Before you start: the move stops the storage server. Linux nodes up to v0.5.0 lose disk writes when the storage server restarts, without an error. If such a node has a VM with a disk attached, update that node first (or stop those VMs) before anything restarts the storage server. To get there, upgrade the Compose stack to this release and update the nodes from their pages.
+
+```sh
+# 1. Stop the stack; the volumes stay.
+docker compose -f deploy/compose.yaml --profile storage down
+
+# 2. Copy the hub's data into the new data directory.
+#    Linux:
+sudo mkdir -p /var/lib/vm-manager-hub
+docker run --rm -v deploy_data:/from -v /var/lib/vm-manager-hub:/to debian:trixie-slim cp -a /from/. /to/
+#    macOS (no sudo, the hub runs as you):
+mkdir -p ~/.vm-manager-hub
+docker run --rm -v deploy_data:/from -v ~/.vm-manager-hub:/to debian:trixie-slim cp -a /from/. /to/
+
+#    If HUB_PORT in deploy/.env was not 8080: the hub on the host listens on the port itself,
+#    so set "listen": ":<HUB_PORT>" in the copied hub.json. Otherwise the nodes no longer find it.
+
+# 3. Only if the storage server ran in the stack: copy the disks into the new volume (GNU cp keeps them sparse).
+docker run --rm -v deploy_disks:/from -v vm-manager-disks:/to debian:trixie-slim cp -a --sparse=always /from/. /to/
+
+# 4. Install the hub.
+curl -fsSL https://github.com/SpielerNogard/vm-manager/releases/latest/download/install-hub.sh | sh
+```
+
+Then switch on **Run the storage server on this hub** in **Settings › Networking** if it ran before, and check that nodes, VMs and disks are back. Remove the old volumes (`docker volume rm deploy_data deploy_disks deploy_ovn deploy_ovs`) only after that. The OVN volumes are not copied: the gateway rebuilds its state from the hub. The volume names start with the directory of the compose file (`deploy`).
 
 Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).

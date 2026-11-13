@@ -40,7 +40,7 @@ func TestCheckFindsNewer(t *testing.T) {
 	if err := u.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	st := u.Status(r)
+	st := u.Status(r, nil)
 	if st.Version != "v0.4.0" || st.Latest != "v0.5.0" || !st.UpdateAvailable || st.CheckedAt == nil || st.CheckError != "" || st.HubUpdate != "manual" {
 		t.Errorf("status = %+v", st)
 	}
@@ -58,7 +58,7 @@ func TestCheckNotNewer(t *testing.T) {
 		if err := u.Check(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if st := u.Status(r); st.UpdateAvailable || st.Latest != tag {
+		if st := u.Status(r, nil); st.UpdateAvailable || st.Latest != tag {
 			t.Errorf("latest %s: status = %+v", tag, st)
 		}
 	}
@@ -77,7 +77,7 @@ func TestCheckErrorKeepsLatest(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("err = %v, want one naming status 403", err)
 	}
-	if st := u.Status(r); st.Latest != "v0.5.0" || st.CheckError == "" || !st.UpdateAvailable {
+	if st := u.Status(r, nil); st.Latest != "v0.5.0" || st.CheckError == "" || !st.UpdateAvailable {
 		t.Errorf("status = %+v", st)
 	}
 }
@@ -91,7 +91,7 @@ func TestCheckRejectsBadTag(t *testing.T) {
 		if err := u.Check(context.Background()); err == nil {
 			t.Errorf("%s: no error", body)
 		}
-		if st := u.Status(r); st.Latest != "" || st.CheckError == "" || st.UpdateAvailable {
+		if st := u.Status(r, nil); st.Latest != "" || st.CheckError == "" || st.UpdateAvailable {
 			t.Errorf("%s: status = %+v", body, st)
 		}
 	}
@@ -106,7 +106,7 @@ func updatesServer(t *testing.T, c Config, u *Updates) (*httptest.Server, *Regis
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, u))
+	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, u, nil))
 	t.Cleanup(srv.Close)
 	return srv, r
 }
@@ -117,7 +117,7 @@ func TestDevBuild(t *testing.T) {
 	u, calls, _ := releaseServer(t, &status, &answer)
 	u.Run(context.Background())
 	srv, r := updatesServer(t, testAPIConfig(), u)
-	if st := u.Status(r); st.HubUpdate != "none" || st.UpdateAvailable {
+	if st := u.Status(r, nil); st.HubUpdate != "none" || st.UpdateAvailable {
 		t.Errorf("status = %+v", st)
 	}
 	resp, err := http.Post(srv.URL+"/api/updates/check", "application/json", nil)

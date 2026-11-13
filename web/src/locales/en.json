@@ -309,8 +309,24 @@
       "devBuild": "Development build: no update check.",
       "manual": "Update available. Set VMM_VERSION={version} in deploy/.env and run in the checkout:",
       "upToDate": "The hub is up to date.",
-      "unavailable": "The hub did not answer with its update status."
-    }
+      "unavailable": "The hub did not answer with its update status.",
+      "updateHub": "Update hub to {version}",
+      "updatingHub": "Updating the hub…",
+      "updateHubTitle": "Update the hub to {version}?",
+      "updateHubBody": "The hub restarts and rebuilds its containers. Nodes reconnect; the VM network and attached disks are interrupted briefly. VMs keep running. Update Linux nodes that are on v0.5.0 or older first: they lose disk writes when the storage server restarts.",
+      "hubUpdateFailed": "The hub update failed: {error}",
+      "containers": "Containers",
+      "stack": {
+        "building": "building",
+        "running": "running",
+        "failed": "failed"
+      },
+      "stackFailed": "The hub could not build or start its containers. The containers that were running keep running.",
+      "retry": "Retry"
+    },
+    "storageLocal": "Run the storage server on this hub",
+    "storageLocalHint": "The hub starts it in Docker; disks live in the Docker volume vm-manager-disks.",
+    "portsHintHost": "set in hub.json in the hub's data directory; restart the hub service afterwards"
   },
   "disks": {
     "add": "Add disk",

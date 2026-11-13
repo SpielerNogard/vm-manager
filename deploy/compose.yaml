@@ -9,14 +9,25 @@ services:
       - "${HUB_PORT:-8080}:8080/tcp"
       - "${UNDERLAY_PORT:-51820}:51820/udp"
       - "${CLIENTS_PORT:-51821}:51821/udp"
+  # Loads the kernel modules the gateway needs (OrbStack ships openvswitch unloaded); a host that has them built in fails here and passes the gateway's own check.
+  modules:
+    image: alpine:3.22
+    privileged: true
+    volumes:
+      - /lib/modules:/lib/modules:ro
+    command: ["sh", "-c", "modprobe -a openvswitch wireguard || true"]
   gateway:
     build:
       context: ..
       dockerfile: deploy/gateway.Dockerfile
       args:
         VMM_VERSION: ${VMM_VERSION:-}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
         VMM_BIN: ${VMM_BIN:-release}
     restart: unless-stopped
+    depends_on:
+      modules:
+        condition: service_completed_successfully
     network_mode: service:netns
     cap_add: [NET_ADMIN]
     devices: [/dev/net/tun]
@@ -30,6 +41,7 @@ services:
       dockerfile: deploy/hub.Dockerfile
       args:
         VMM_VERSION: ${VMM_VERSION:-}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
         VMM_BIN: ${VMM_BIN:-release}
     restart: unless-stopped
     network_mode: service:netns
@@ -48,6 +60,7 @@ services:
       dockerfile: deploy/storage.Dockerfile
       args:
         VMM_VERSION: ${VMM_VERSION:-}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
         VMM_BIN: ${VMM_BIN:-release}
     profiles: [storage]
     restart: unless-stopped
