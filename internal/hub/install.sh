@@ -130,7 +130,9 @@ install_linux() {
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvswitch-switch ovn-host wireguard-tools nbd-client nftables >/dev/null
 
 	if [ "$PROVIDER" = cloud-hypervisor ]; then
-		if [ "$(cloud-hypervisor --version 2>/dev/null | head -1)" != "cloud-hypervisor $CLOUD_HYPERVISOR_VERSION" ]; then
+		fwfile=/usr/local/share/cloud-hypervisor/CLOUDHV.fd
+		if [ "$(cloud-hypervisor --version 2>/dev/null | head -1)" != "cloud-hypervisor $CLOUD_HYPERVISOR_VERSION" ] ||
+			! echo "$CLOUDHV_SHA256  $fwfile" | sha256_check - >/dev/null 2>&1; then
 			say "installing Cloud Hypervisor $CLOUD_HYPERVISOR_VERSION"
 			ch=https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CLOUD_HYPERVISOR_VERSION/cloud-hypervisor-static
 			fw=https://github.com/cloud-hypervisor/edk2/releases/download/$CLOUDHV_EDK2_TAG/CLOUDHV.fd
@@ -140,7 +142,7 @@ install_linux() {
 			printf '%s  cloud-hypervisor-static\n%s  CLOUDHV.fd\n' "$CLOUD_HYPERVISOR_SHA256" "$CLOUDHV_SHA256" >"$TMP/ch.sha256"
 			(cd "$TMP" && sha256_check ch.sha256 >/dev/null) || die "Cloud Hypervisor checksum mismatch"
 			$SUDO install -m 0755 "$TMP/cloud-hypervisor-static" /usr/local/bin/cloud-hypervisor
-			$SUDO install -D -m 0644 "$TMP/CLOUDHV.fd" /usr/local/share/cloud-hypervisor/CLOUDHV.fd
+			$SUDO install -D -m 0644 "$TMP/CLOUDHV.fd" "$fwfile"
 		fi
 	elif [ "$(firecracker --version 2>/dev/null | head -1)" != "Firecracker $FIRECRACKER_VERSION" ]; then
 		say "installing Firecracker $FIRECRACKER_VERSION"
