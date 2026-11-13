@@ -12,10 +12,11 @@ RUN CGO_ENABLED=0 go build -ldflags "-X vm-manager/internal/version.Version=$VER
 # Release binaries are checked against the release's SHA256SUMS; curl -f fails on a missing version.
 FROM alpine:3.22 AS bin-release
 ARG VMM_VERSION
+ARG VMM_RELEASE_URL
 ARG TARGETARCH
 RUN { [ -n "$VMM_VERSION" ] || { echo "VMM_VERSION is not set: put the release to run into deploy/.env" >&2; exit 1; }; } \
     && apk add --no-cache curl \
-    && base=https://github.com/SpielerNogard/vm-manager/releases/download/$VMM_VERSION \
+    && base=${VMM_RELEASE_URL:-https://github.com/SpielerNogard/vm-manager/releases/download/$VMM_VERSION} \
     && curl -fsSLO "$base/gateway-linux-$TARGETARCH" && curl -fsSLO "$base/SHA256SUMS" \
     && grep "  gateway-linux-$TARGETARCH\$" SHA256SUMS | sha256sum -c - \
     && install -m 0755 "gateway-linux-$TARGETARCH" /gateway

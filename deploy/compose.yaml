@@ -15,6 +15,7 @@ services:
       dockerfile: deploy/gateway.Dockerfile
       args:
         VMM_VERSION: ${VMM_VERSION:-}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
         VMM_BIN: ${VMM_BIN:-release}
     restart: unless-stopped
     network_mode: service:netns
@@ -30,6 +31,7 @@ services:
       dockerfile: deploy/hub.Dockerfile
       args:
         VMM_VERSION: ${VMM_VERSION:-}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
         VMM_BIN: ${VMM_BIN:-release}
     restart: unless-stopped
     network_mode: service:netns
@@ -48,6 +50,7 @@ services:
       dockerfile: deploy/storage.Dockerfile
       args:
         VMM_VERSION: ${VMM_VERSION:-}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
         VMM_BIN: ${VMM_BIN:-release}
     profiles: [storage]
     restart: unless-stopped

@@ -62,4 +62,4 @@ rule FORWARD -i wg-clients ! -o gw0 -j DROP
 rule FORWARD -i gw0 -o wg-clients -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 rule FORWARD -i gw0 -j DROP
 
-exec gateway -hub http://127.0.0.1:8080 -token-file /data/hub.json -nb unix:/var/run/ovn/ovnnb_db.sock
+exec gateway -hub "${HUB_URL:-http://127.0.0.1:8080}" -token-file /data/hub.json -nb unix:/var/run/ovn/ovnnb_db.sock

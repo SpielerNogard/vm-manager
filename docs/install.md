@@ -49,6 +49,7 @@ Changes apply without a restart; the gateway re-reads the token automatically.
 | Variable | Default | |
 |---|---|---|
 | `VMM_VERSION` | none, required to build the images | Release whose binaries the images use, e.g. `v0.1.0` |
+| `VMM_RELEASE_URL` | the GitHub release of `VMM_VERSION` | Base URL of the release files, for a mirror |
 | `HUB_PORT` | `8080` | Published hub API/GUI port (tcp) |
 | `UNDERLAY_PORT` | `51820` | Published WireGuard port for nodes (udp) |
 | `CLIENTS_PORT` | `51821` | Published WireGuard port for devices (udp) |
