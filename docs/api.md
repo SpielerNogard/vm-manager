@@ -5,13 +5,13 @@
 | GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, their config file without the hub token, `version` (absent for nodes that report none), `updatable` (installed by the installer), `updateAvailable` (older than the hub), `updating` and `updateError` (why the last update failed, with the end of the installer output) |
 | POST | `/api/nodes` | Add a node (`{"id", "provider"}`, provider `vz`, `firecracker` or `cloud-hypervisor`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
-| POST | `/api/nodes/{id}/update` | Update the node to the hub's version; its VMs restart with it. 204 once the node has the command. 409 if the node is offline, reports no version, is not older than the hub, was not installed by the installer, has an update running, or the hub is a development build |
+| POST | `/api/nodes/{id}/update` | Update the node to the hub's version; its VMs restart with it. 204 once the node has the command. 404 for an unknown node. 409 if the node is offline, reports no version, is not older than the hub, was not installed by the installer, has an update running, or the hub is a development build. An update the node does not answer within 15 minutes counts as failed and can be started again |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
 | GET | `/api/nodes/{id}/install-command?host=` | The one-line install command for the node (text); `host` as above |
 | GET | `/api/version` | The hub's version (`{"version"}`), no token needed |
 | GET | `/node/install.sh` | The node installer script, no token needed |
 | GET | `/api/updates` | Update status: `version` (hub), `gateway`, `storage`, `latest` (latest release), `checkedAt`, `checkError`, `updateAvailable`, and `hubUpdate` (`manual`: upgrade the stack by hand; `none`: development build, no check) |
-| POST | `/api/updates/check` | Ask GitHub for the latest release now; returns the update status, with a failed check in `checkError`. 409 on a development build |
+| POST | `/api/updates/check` | Ask GitHub for the latest release now; returns the update status, with a failed check in `checkError`. Within 30 seconds of the last check it returns that result without asking again. 409 on a development build |
 | GET | `/api/settings` | Client endpoint, storage endpoint, ports, listen address, guest MTU, node token, plus `setupComplete`, `devices` (device count), `storageEndpoint` (effective) and `vmsWithDisks` |
 | PUT | `/api/settings` | Partial update of `clients.endpoint`, `storage.endpoint` (`host:port` or empty), `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |

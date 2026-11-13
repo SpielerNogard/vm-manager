@@ -21,8 +21,10 @@ const (
 
 // Updates remembers the latest release GitHub reports; it lives in memory only.
 type Updates struct {
-	URL    string
-	client *http.Client
+	URL string
+	// MinInterval is how soon after a check an on-demand check asks again; GitHub allows 60 requests an hour.
+	MinInterval time.Duration
+	client      *http.Client
 
 	mu        sync.Mutex
 	latest    string
@@ -43,7 +45,7 @@ type UpdateStatus struct {
 }
 
 func NewUpdates() *Updates {
-	return &Updates{URL: releaseAPI, client: &http.Client{Timeout: 15 * time.Second}}
+	return &Updates{URL: releaseAPI, MinInterval: 30 * time.Second, client: &http.Client{Timeout: 15 * time.Second}}
 }
 
 // Check asks for the latest release once; a failure is recorded and keeps the last known release.
@@ -58,6 +60,16 @@ func (u *Updates) Check(ctx context.Context) error {
 	}
 	u.latest = latest
 	return nil
+}
+
+// CheckNow is Check for a click: it does not ask again within MinInterval of the last check.
+func (u *Updates) CheckNow(ctx context.Context) {
+	u.mu.Lock()
+	recent := !u.checkedAt.IsZero() && time.Since(u.checkedAt) < u.MinInterval
+	u.mu.Unlock()
+	if !recent {
+		u.Check(ctx)
+	}
 }
 
 func (u *Updates) fetch(ctx context.Context) (string, error) {

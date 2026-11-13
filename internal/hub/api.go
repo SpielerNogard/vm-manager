@@ -66,7 +66,7 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 			return
 		}
 		// A failed check is part of the status, not a failed request.
-		u.Check(req.Context())
+		u.CheckNow(req.Context())
 		writeJSON(w, http.StatusOK, u.Status(r))
 	})
 	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, networkViews()) })

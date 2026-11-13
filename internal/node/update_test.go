@@ -147,7 +147,7 @@ func TestUpdateNotUpdatable(t *testing.T) {
 }
 
 func TestUpdateOnlyOnce(t *testing.T) {
-	a, _, requests, _ := updateAgent(t, http.StatusOK, "sleep 1")
+	a, sent, requests, _ := updateAgent(t, http.StatusOK, "sleep 1")
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Add(1)
@@ -156,6 +156,9 @@ func TestUpdateOnlyOnce(t *testing.T) {
 	wg.Wait()
 	if n := requests.Load(); n != 1 {
 		t.Errorf("installer downloaded %d times, want 1", n)
+	}
+	if len(*sent) != 1 || !strings.Contains((*sent)[0].Error, "already running") {
+		t.Errorf("the second update was dropped without a report: %+v", *sent)
 	}
 }
 
@@ -167,5 +170,23 @@ func TestUpdateSilentWhenNodeStops(t *testing.T) {
 	a.update(ctx)
 	if len(*sent) != 0 {
 		t.Errorf("a stopping node reported %+v", *sent)
+	}
+}
+
+func TestRemoveStaleUpdateDirs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	stale, other := filepath.Join(tmp, "vm-manager-update-123"), filepath.Join(tmp, "something-else")
+	for _, d := range []string{stale, other} {
+		if err := os.MkdirAll(filepath.Join(d, "sub"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removeStaleUpdateDirs()
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale update directory still there: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("unrelated directory removed: %v", err)
 	}
 }

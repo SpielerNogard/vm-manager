@@ -216,3 +216,23 @@ func TestNodeUpdateFailedFromOldConnection(t *testing.T) {
 		t.Errorf("stale report shown: %q", node.UpdateError)
 	}
 }
+
+func TestUpdateNodeExpires(t *testing.T) {
+	r, n := updatableNode(t)
+	if err := r.UpdateNode("n1"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.nodes["n1"].updatingSince = time.Now().Add(-updateTimeout - time.Second)
+	r.mu.Unlock()
+	node, _ := nodeByID(r, "n1")
+	if node.Updating || !strings.Contains(node.UpdateError, "did not finish") {
+		t.Errorf("an update without an answer still shows as running: %+v", node)
+	}
+	if err := r.UpdateNode("n1"); err != nil {
+		t.Fatalf("retry after the timeout refused: %v", err)
+	}
+	if c := updatesSent(n); c != 2 {
+		t.Errorf("update messages sent = %d, want 2", c)
+	}
+}

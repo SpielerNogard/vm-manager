@@ -82,7 +82,9 @@ BASE=${VMM_RELEASE_URL:-$RELEASES/$VERSION}
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-fetch() { curl -fsSL -o "$TMP/$1" "$BASE/$1" || die "downloading $1 of $VERSION failed"; }
+# A stalled download must end: a node update started from the hub waits for this script.
+dl() { curl -fsSL --connect-timeout 10 --max-time 600 "$@"; }
+fetch() { dl -o "$TMP/$1" "$BASE/$1" || die "downloading $1 of $VERSION failed"; }
 sha256_check() {
 	if command -v sha256sum >/dev/null; then sha256sum -c "$@"; else shasum -a 256 -c "$@"; fi
 }
@@ -141,7 +143,7 @@ install_linux() {
 			say "installing Cloud Hypervisor $CLOUD_HYPERVISOR_VERSION"
 			ch=https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CLOUD_HYPERVISOR_VERSION/cloud-hypervisor-static
 			fw=https://github.com/cloud-hypervisor/edk2/releases/download/$CLOUDHV_EDK2_TAG/CLOUDHV.fd
-			if ! { curl -fsSL -o "$TMP/cloud-hypervisor-static" "$ch" && curl -fsSL -o "$TMP/CLOUDHV.fd" "$fw"; }; then
+			if ! { dl -o "$TMP/cloud-hypervisor-static" "$ch" && dl -o "$TMP/CLOUDHV.fd" "$fw"; }; then
 				die "downloading Cloud Hypervisor failed"
 			fi
 			printf '%s  cloud-hypervisor-static\n%s  CLOUDHV.fd\n' "$CLOUD_HYPERVISOR_SHA256" "$CLOUDHV_SHA256" >"$TMP/ch.sha256"
@@ -154,7 +156,7 @@ install_linux() {
 		say "installing Firecracker $FIRECRACKER_VERSION"
 		fc=firecracker-$FIRECRACKER_VERSION-x86_64.tgz
 		url=https://github.com/firecracker-microvm/firecracker/releases/download/$FIRECRACKER_VERSION
-		if ! { curl -fsSL -o "$TMP/$fc" "$url/$fc" && curl -fsSL -o "$TMP/$fc.sha256.txt" "$url/$fc.sha256.txt"; }; then
+		if ! { dl -o "$TMP/$fc" "$url/$fc" && dl -o "$TMP/$fc.sha256.txt" "$url/$fc.sha256.txt"; }; then
 			die "downloading Firecracker failed"
 		fi
 		(cd "$TMP" && sha256_check "$fc.sha256.txt" >/dev/null) || die "Firecracker checksum mismatch"

@@ -308,7 +308,8 @@
       "checkFailed": "The last check failed: {error}",
       "devBuild": "Development build: no update check.",
       "manual": "Update available. Set VMM_VERSION={version} in deploy/.env and run in the checkout:",
-      "upToDate": "The hub is up to date."
+      "upToDate": "The hub is up to date.",
+      "unavailable": "The hub did not answer with its update status."
     }
   },
   "disks": {

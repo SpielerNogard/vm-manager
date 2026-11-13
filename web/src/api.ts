@@ -164,8 +164,8 @@ export interface Updates {
   checkedAt?: string
   checkError?: string
   updateAvailable: boolean
-  /** none: development build, no check. manual: the operator upgrades the stack. self: the hub updates itself. */
-  hubUpdate: 'none' | 'manual' | 'self'
+  /** none: development build, no check. manual: the operator upgrades the stack. */
+  hubUpdate: 'none' | 'manual'
 }
 
 export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string }; storage?: { endpoint?: string } }

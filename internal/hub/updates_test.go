@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"vm-manager/internal/proto"
 )
@@ -27,7 +28,7 @@ func releaseServer(t *testing.T, status *int, answer *string) (*Updates, *atomic
 	}))
 	t.Cleanup(srv.Close)
 	u := NewUpdates()
-	u.URL = srv.URL
+	u.URL, u.MinInterval = srv.URL, 0
 	return u, &calls, &header
 }
 
@@ -169,5 +170,26 @@ func TestUpdatesAPI(t *testing.T) {
 	status = http.StatusInternalServerError
 	if st := get("POST", "/api/updates/check"); st.CheckError == "" || st.Latest != "v0.5.0" {
 		t.Errorf("after a failed check: %+v", st)
+	}
+}
+
+func TestCheckNowIsThrottled(t *testing.T) {
+	setHubVersion(t, "v0.4.0")
+	status, answer := 0, `{"tag_name":"v0.5.0"}`
+	u, calls, _ := releaseServer(t, &status, &answer)
+	u.MinInterval = time.Minute
+	srv, _ := updatesServer(t, testAPIConfig(), u)
+	for range 3 {
+		resp, err := http.Post(srv.URL+"/api/updates/check", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d", resp.StatusCode)
+		}
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("three clicks asked GitHub %d times, want 1", n)
 	}
 }

@@ -89,6 +89,7 @@ type vmEntry struct {
 
 func (a *Agent) Run(ctx context.Context) error {
 	a.vms = map[string]*vmEntry{}
+	removeStaleUpdateDirs()
 	if err := a.restoreAll(ctx); err != nil {
 		return err
 	}

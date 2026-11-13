@@ -44,11 +44,11 @@ func hubHTTPURL(wsURL string) (string, error) {
 
 // update runs the hub's installer, which replaces and restarts this node; only a failure comes back to report.
 func (a *Agent) update(ctx context.Context) {
-	if !a.updateMu.TryLock() {
-		return
+	err := errors.New("an update is already running on this node")
+	if a.updateMu.TryLock() {
+		defer a.updateMu.Unlock()
+		err = a.runInstaller(ctx)
 	}
-	defer a.updateMu.Unlock()
-	err := a.runInstaller(ctx)
 	// A node that is stopping was most likely stopped by the installer; its client process dies with it.
 	if err != nil && ctx.Err() == nil {
 		log.Printf("update: %v", err)
@@ -107,6 +107,14 @@ func (a *Agent) runInstaller(ctx context.Context) error {
 		return fmt.Errorf("installer: %w\n%s", err, tail(out.Name(), updateOutputTail))
 	}
 	return nil
+}
+
+// removeStaleUpdateDirs clears what earlier updates left: the installer stops the node before its directory can be removed.
+func removeStaleUpdateDirs() {
+	dirs, _ := filepath.Glob(filepath.Join(os.TempDir(), "vm-manager-update-*"))
+	for _, d := range dirs {
+		os.RemoveAll(d)
+	}
 }
 
 func download(ctx context.Context, from, to string) error {

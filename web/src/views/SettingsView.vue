@@ -324,6 +324,7 @@ async function copyCommand() {
             </template>
             <p v-else-if="updates.latest" class="text-base-content/60">{{ t('settings.updates.upToDate') }}</p>
           </div>
+          <p v-else class="text-base-content/60 text-sm">{{ t('settings.updates.unavailable') }}</p>
         </div>
       </div>
     </DataState>

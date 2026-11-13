@@ -136,8 +136,18 @@ type AttachRequest struct {
 
 type nodeEntry struct {
 	Node
-	conn NodeConn
-	seq  uint64 // of the last desired list sent
+	conn          NodeConn
+	updatingSince time.Time
+	seq           uint64 // of the last desired list sent
+}
+
+// updateTimeout is how long an update may stay unanswered before the node can be updated again.
+const updateTimeout = 15 * time.Minute
+
+func (n *nodeEntry) expireUpdate() {
+	if n.Updating && time.Since(n.updatingSince) > updateTimeout {
+		n.Updating, n.UpdateError = false, "the node did not finish the update within 15 minutes"
+	}
 }
 
 func (n *nodeEntry) stored() StoredNode {
@@ -315,6 +325,9 @@ func (r *Registry) startUpdate(id string) (NodeConn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n, ok := r.nodes[id]
+	if ok {
+		n.expireUpdate()
+	}
 	refuse := func(why string) error { return fmt.Errorf("%w: node %q %s", ErrConflict, id, why) }
 	switch {
 	case !ok:
@@ -332,7 +345,7 @@ func (r *Registry) startUpdate(id string) (NodeConn, error) {
 	case n.Updating:
 		return nil, refuse("has an update already running")
 	}
-	n.Updating, n.UpdateError = true, ""
+	n.Updating, n.UpdateError, n.updatingSince = true, "", time.Now()
 	return n.conn, nil
 }
 
@@ -869,6 +882,7 @@ func (r *Registry) Nodes() []Node {
 	defer r.mu.Unlock()
 	out := make([]Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
+		n.expireUpdate()
 		node := n.Node
 		node.FreeCPUs, node.FreeMemoryMB = r.free(n)
 		node.UpdateAvailable = version.Older(n.Version, version.Version)
