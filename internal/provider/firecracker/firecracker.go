@@ -36,7 +36,7 @@ func New(c node.Config) (*Provider, error) {
 	if err := c.ProviderSection(&s); err != nil {
 		return nil, fmt.Errorf("config firecracker section: %w", err)
 	}
-	if err := linuxvm.CheckHost("firecracker", "jailer"); err != nil {
+	if err := linuxvm.CheckHost("firecracker", "jailer", "qemu-nbd"); err != nil {
 		return nil, err
 	}
 	p := &Provider{VMsDir: c.Paths.VMs, ImagesDir: c.Paths.Images, ImageURL: s.ImageURL}

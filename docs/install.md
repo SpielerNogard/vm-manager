@@ -102,7 +102,7 @@ curl -X POST http://<hub>:8080/api/vms -d '{
 Linux nodes are amd64 hosts with KVM (Debian 13 or Ubuntu 24.04) using the `firecracker` or `cloud-hypervisor` provider; both share the host setup below and differ only in the VMM. OVS and OVN run on the host itself, there is no helper VM. The installer does all of this. To set the host up by hand instead, as root:
 
 ```sh
-apt-get install -y openvswitch-switch ovn-host wireguard-tools nbd-client nftables
+apt-get install -y openvswitch-switch ovn-host wireguard-tools qemu-utils nftables
 curl -fsSL https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-x86_64.tgz | tar -xz -C /tmp
 install /tmp/release-v1.18.0-x86_64/firecracker-v1.18.0-x86_64 /usr/local/bin/firecracker
 install /tmp/release-v1.18.0-x86_64/jailer-v1.18.0-x86_64 /usr/local/bin/jailer
@@ -154,7 +154,7 @@ grep -qs 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf || echo 'include 
 systemctl enable nftables && nft -f /etc/nftables.d/vm-manager.nft   # restarting nftables would flush Docker's rules
 ```
 
-Copy `bin/vm-manager-node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM (for `firecracker` also its `jailer`), `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
+Copy `bin/vm-manager-node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM (for `firecracker` also its `jailer`), `qemu-nbd`, `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
 
 Differences to vz nodes: a VM's NAT NIC gets a static address on `vmm0` instead of DHCP. On `firecracker` nodes, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, .... Firecracker has no ACPI power-off, so after a `poweroff` inside the guest the node ends the halted Firecracker process. Each Firecracker runs under the jailer: chrooted into a jail below `<paths.vms>/<vm>/jail` and as its own unprivileged UID and GID (70000 plus the last octet of the VM's NAT address, so 70002 to 70254 must be unused on the host), not as root. `paths.vms` must not be on a filesystem mounted `nodev`, and the node sets each VM directory to mode 0700.
 
@@ -171,7 +171,7 @@ The hub works with older nodes, so upgrade the hub first and each node afterward
 1. Hub: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
 2. Nodes: every node older than the hub shows **update available**. Click **Update node** on its page, or re-run its install command. The node's VMs restart. A node is never newer than its hub.
 
-A node that was started by hand, without the installer, has no **Update node**; install it with its install command once.
+A node that was started by hand, without the installer, has no **Update node**; install it with its install command once. Linux nodes newer than v0.5.0 need `qemu-utils` (the installer adds it; on a host set up by hand run `apt-get install qemu-utils` before replacing the binary).
 
 Upgrading to v0.5.0 from an older release is still one joint upgrade: older versions do not work with newer ones and have no **Update node**. Upgrade the hub as above, then re-run the install command on every node. The release assets were renamed (`vm-manager-node-*`, `vm-manager-hub-*`), so the checkout must be updated before the build, and a macOS node asks for Local Network access once more, now as `vm-manager-node`.
 

@@ -134,7 +134,7 @@ install_linux() {
 
 	say "installing packages"
 	$SUDO apt-get update -qq
-	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvswitch-switch ovn-host wireguard-tools nbd-client nftables >/dev/null
+	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvswitch-switch ovn-host wireguard-tools qemu-utils nftables >/dev/null
 
 	if [ "$PROVIDER" = cloud-hypervisor ]; then
 		fwfile=/usr/local/share/cloud-hypervisor/CLOUDHV.fd

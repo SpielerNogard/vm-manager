@@ -30,7 +30,7 @@ func New(c node.Config) (*Provider, error) {
 	if err := checkFirmware(s.Firmware); err != nil {
 		return nil, err
 	}
-	if err := linuxvm.CheckHost("cloud-hypervisor"); err != nil {
+	if err := linuxvm.CheckHost("cloud-hypervisor", "qemu-nbd"); err != nil {
 		return nil, err
 	}
 	return &Provider{VMsDir: c.Paths.VMs, ImagesDir: c.Paths.Images, ImageURL: s.ImageURL, Firmware: s.Firmware}, nil
