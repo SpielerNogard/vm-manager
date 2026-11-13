@@ -1,12 +1,12 @@
 # Disks
 
-Standalone disks hold data that outlives VMs. They live on a storage server and nodes attach them to VMs over NBD, so a disk can move between VMs and nodes. The storage server is optional and runs as a compose profile (an nbdkit server plus an agent that connects to the hub), usually on the hub host:
+Standalone disks hold data that outlives VMs. They live on a storage server and nodes attach them to VMs over NBD, so a disk can move between VMs and nodes. The storage server is optional (an nbdkit server plus an agent that connects to the hub) and usually runs on the hub host. A hub on the host starts it itself: switch on **Run the storage server on this hub** in **Settings › Networking**; its disks live in the Docker volume `vm-manager-disks`, and it cannot be switched off while a VM has a disk attached. In Docker Compose it is a compose profile:
 
 ```sh
 docker compose -f deploy/compose.yaml --profile storage up -d --build
 ```
 
-The compose `storage` service reads the hub token from `/data/hub.json` on every connect, so a token changed in Settings is picked up after a reconnect. To run the storage server on another host, build and run it there with the token from Settings (update it there after changing the token):
+In both cases the storage container reads the hub token from `/data/hub.json` on every connect, so a token changed in Settings is picked up after a reconnect. To run the storage server on another host, build and run it there with the token from Settings (update it there after changing the token):
 
 ```sh
 docker build -f deploy/storage.Dockerfile -t vm-manager-storage .

@@ -204,11 +204,34 @@ On first use, the node downloads the Ubuntu cloud image into `paths.images`, whi
 
 The hub works with older nodes, so upgrade the hub first and each node afterwards. **Settings › Updates** shows the latest release and the versions of hub, gateway and storage.
 
-1. Hub: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
+1. Hub on the host: click **Update hub** in **Settings › Updates**, or re-run `install-hub.sh`. The hub downloads and verifies the new binary, restarts in place and rebuilds its containers. Nodes reconnect; the VM network and attached disks are interrupted briefly while gateway and storage are replaced; VMs keep running. The old binary stays next to the new one as `vm-manager-hub.previous`: if the new hub does not start, move it back and restart the service. A release that changes the service file needs `install-hub.sh` re-run. A storage server on another machine is upgraded by hand.
+
+   Hub in Docker Compose: update the checkout to the release (`git fetch --tags && git checkout vX.Y.Z`; the images are built from its `deploy/` files), set `VMM_VERSION` in `deploy/.env` to the same release and run `docker compose -f deploy/compose.yaml up -d --build`.
 2. Nodes: every node older than the hub shows **update available**. Click **Update node** on its page, or re-run its install command. The node's VMs restart. A node is never newer than its hub.
 
 A node that was started by hand, without the installer, has no **Update node**; install it with its install command once. Linux nodes newer than v0.5.0 need `qemu-utils` (the installer adds it; on a host set up by hand run `apt-get install qemu-utils` before replacing the binary).
 
 Upgrading to v0.5.0 from an older release is still one joint upgrade: older versions do not work with newer ones and have no **Update node**. Upgrade the hub as above, then re-run the install command on every node. The release assets were renamed (`vm-manager-node-*`, `vm-manager-hub-*`), so the checkout must be updated before the build, and a macOS node asks for Local Network access once more, now as `vm-manager-node`.
+
+### Moving from Compose to the host
+
+A Compose installation can become a hub on the host without losing VMs or disks. The nodes keep their config: the hub keeps its token and ports.
+
+```sh
+# 1. Stop the stack; the volumes stay.
+docker compose -f deploy/compose.yaml --profile storage down
+
+# 2. Copy the hub's data into the new data directory (macOS: ~/.vm-manager-hub).
+sudo mkdir -p /var/lib/vm-manager-hub
+docker run --rm -v deploy_data:/from -v /var/lib/vm-manager-hub:/to alpine cp -a /from/. /to/
+
+# 3. Only if the storage server ran in the stack: copy the disks into the new volume.
+docker run --rm -v deploy_disks:/from -v vm-manager-disks:/to alpine cp -a --sparse=always /from/. /to/
+
+# 4. Install the hub.
+curl -fsSL https://github.com/SpielerNogard/vm-manager/releases/latest/download/install-hub.sh | sh
+```
+
+Then switch on **Run the storage server on this hub** in **Settings › Networking** if it ran before, and check that nodes, VMs and disks are back. Remove the old volumes (`docker volume rm deploy_data deploy_disks deploy_ovn deploy_ovs`) only after that. The OVN volumes are not copied: the gateway rebuilds its state from the hub. The volume names start with the directory of the compose file (`deploy`).
 
 Local data disks (`dataDisks`) were removed without migration: recreate the affected VMs and move their data to standalone disks. VMs created before the hub became the source of truth are deleted when their node first connects; recreate them. VMs created before network support may need one extra reboot after their first network change before the new NIC comes up (cloud-init applies the boot-time network update only from the next boot).
