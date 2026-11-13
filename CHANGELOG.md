@@ -1,3 +1,10 @@
+## v0.5.1 (2026-11-13)
+
+### Fix
+
+- **vz**: restart a VM whose disk stays failed after the storage server is back (#22)
+- **node**: keep disk writes across a storage server restart (#20)
+
 ## v0.5.0 (2026-11-13)
 
 ### BREAKING CHANGE
