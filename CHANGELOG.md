@@ -1,3 +1,15 @@
+## v0.5.0 (2026-11-13)
+
+### BREAKING CHANGE
+
+- release assets are now vm-manager-node-* and vm-manager-hub-*. A Compose
+installation must update its checkout before building this release, and a macOS node asks
+for Local Network access once more.
+
+### Feat
+
+- show versions and updates, update nodes on one click (#19)
+
 ## v0.4.0 (2026-11-13)
 
 ### Feat
