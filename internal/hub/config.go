@@ -156,3 +156,17 @@ func MigrateStorageEndpoint(cfg *ConfigStore, disks *DiskStore) error {
 	_, err := cfg.Update(func(c *Config) error { c.Storage.Endpoint = old; return nil })
 	return err
 }
+
+// HubPortFromListen makes hub.port the port of listen: a hub on the host publishes nothing, so its containers and nodes reach it there.
+func (s *ConfigStore) HubPortFromListen() error {
+	_, p, err := net.SplitHostPort(s.Get().Listen)
+	port, convErr := strconv.Atoi(p)
+	if err != nil || convErr != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("hub.json: listen %q has no usable port", s.Get().Listen)
+	}
+	if s.Get().Hub.Port == port {
+		return nil
+	}
+	_, err = s.Update(func(c *Config) error { c.Hub.Port = port; return nil })
+	return err
+}

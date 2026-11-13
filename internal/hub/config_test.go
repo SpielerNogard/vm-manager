@@ -239,3 +239,25 @@ func TestMigrateStorageEndpointKeepsAdvertisedOne(t *testing.T) {
 		}
 	}
 }
+
+func TestHubPortFollowsListen(t *testing.T) {
+	var c Config
+	c.Listen, c.Hub.Port = ":18080", 8080
+	cfg := newTestConfig(t, c)
+	if err := cfg.HubPortFromListen(); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Get().Hub.Port; got != 18080 {
+		t.Errorf("hub.port = %d, want the port of listen", got)
+	}
+	b, _ := os.ReadFile(cfg.path)
+	if !strings.Contains(string(b), "18080") || strings.Contains(string(b), `"port": 8080`) {
+		t.Errorf("hub.json not updated: %s", b)
+	}
+	if _, err := cfg.Update(func(c *Config) error { c.Listen = "nonsense"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.HubPortFromListen(); err == nil {
+		t.Error("a listen address without a port was accepted")
+	}
+}

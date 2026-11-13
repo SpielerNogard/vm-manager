@@ -81,6 +81,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		if err := cfg.HubPortFromListen(); err != nil {
+			log.Fatal(err)
+		}
 		stack = hub.NewStack(dataDir, cfg)
 		stack.Storage = func() bool { return cfg.Get().Storage.Local }
 		stack.ReleaseURL = os.Getenv("VMM_RELEASE_URL")
