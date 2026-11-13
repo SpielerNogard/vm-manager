@@ -223,10 +223,10 @@ docker compose -f deploy/compose.yaml --profile storage down
 
 # 2. Copy the hub's data into the new data directory (macOS: ~/.vm-manager-hub).
 sudo mkdir -p /var/lib/vm-manager-hub
-docker run --rm -v deploy_data:/from -v /var/lib/vm-manager-hub:/to alpine cp -a /from/. /to/
+docker run --rm -v deploy_data:/from -v /var/lib/vm-manager-hub:/to debian:trixie-slim cp -a /from/. /to/
 
-# 3. Only if the storage server ran in the stack: copy the disks into the new volume.
-docker run --rm -v deploy_disks:/from -v vm-manager-disks:/to alpine cp -a --sparse=always /from/. /to/
+# 3. Only if the storage server ran in the stack: copy the disks into the new volume (GNU cp keeps them sparse).
+docker run --rm -v deploy_disks:/from -v vm-manager-disks:/to debian:trixie-slim cp -a --sparse=always /from/. /to/
 
 # 4. Install the hub.
 curl -fsSL https://github.com/SpielerNogard/vm-manager/releases/latest/download/install-hub.sh | sh
