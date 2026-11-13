@@ -30,6 +30,6 @@ Networks are standalone objects (they can be empty) that give VMs private connec
 | Addresses | VMs get stable addresses from `.10` |
 | Isolation | VMs reach each other only via shared networks. No router, no internet, no device (WireGuard) access, no routing between networks |
 | DNS | `<vm>.<network>.internal` resolves to the VM's IP in that network. Devices resolve these names too but cannot reach the addresses. VMs can also resolve all networks' names but reach only their own |
-| Guest | Each network is an extra NIC configured by a netplan entry matched by MAC, DHCP from OVN, no default route. Guest interface names stay kernel names like `enp0s3` |
+| Guest | Each network is an extra NIC configured by a netplan entry matched by MAC, DHCP from OVN, no default route. Guest interface names stay kernel names, e.g. `enp0s3` (vz), `ens4` (cloud-hypervisor) or `eth1` (firecracker) |
 
 Guests send only `*.internal` queries to the gateway (`10.201.0.1`, via the management NIC). The management network is built in and cannot be deleted; a network with members cannot be deleted either.

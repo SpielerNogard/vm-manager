@@ -120,7 +120,7 @@ Then, for both:
 ```sh
 modprobe nbd && echo nbd > /etc/modules-load.d/nbd.conf
 
-# NAT bridge for the VMs' eth0 (internet); the node assigns 192.168.64.2-254 statically
+# NAT bridge for the VMs' first NIC (internet); the node assigns 192.168.64.2-254 statically
 cat > /etc/systemd/network/vmm0.netdev <<'EOT'
 [NetDev]
 Name=vmm0
@@ -154,9 +154,9 @@ systemctl enable nftables && nft -f /etc/nftables.d/vm-manager.nft   # restartin
 
 Copy `bin/node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM, `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
 
-Differences to vz nodes: a VM's `eth0` gets a static address on `vmm0` instead of DHCP, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, ..., and a VM halted from inside the guest (`poweroff`) is stopped by the node because Firecracker has no ACPI power-off.
+Differences to vz nodes: a VM's NAT NIC gets a static address on `vmm0` instead of DHCP. On `firecracker` nodes, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, .... Firecracker has no ACPI power-off, so after a `poweroff` inside the guest the node ends the halted Firecracker process.
 
-Differences of `cloud-hypervisor` nodes to Firecracker nodes: guest NICs are named `enp0s1`, ... like on vz, `poweroff` in the guest works through ACPI, a reboot inside the guest keeps the VM running (the VMM resets in place), and a kernel panic restarts the VM (the node watches the console). Switching an existing Firecracker host to `cloud-hypervisor` is unsupported: use a fresh host or delete its VMs first.
+Differences of `cloud-hypervisor` nodes to Firecracker nodes: guest NICs get PCI names such as `ens3`, `ens4` instead of `eth0`, `eth1`, ...; **Shut down** reaches the guest as an ACPI power-button press; and a reboot inside the guest keeps the VM running (the VMM resets in place) instead of restarting its process. As on Firecracker, a kernel panic restarts the VM (here the node watches the console for it). Switching an existing Firecracker host to `cloud-hypervisor` is unsupported: use a fresh host or delete its VMs first.
 
 ## First start
 
