@@ -962,12 +962,15 @@ func TestNewRegistryReleasesOrphanChassis(t *testing.T) {
 func TestCreateNodeRequiresProvider(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	for _, p := range []string{"", "qemu"} {
-		if _, err := r.CreateNode("fc-x", p); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "firecracker") {
+		if _, err := r.CreateNode("fc-x", p); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "cloud-hypervisor") {
 			t.Fatalf("provider %q: err = %v", p, err)
 		}
 	}
 	n, err := r.CreateNode("fc-x", "firecracker")
 	if err != nil || n.Provider != "firecracker" {
+		t.Fatalf("node = %+v, %v", n, err)
+	}
+	if n, err := r.CreateNode("ch-x", "cloud-hypervisor"); err != nil || n.Provider != "cloud-hypervisor" {
 		t.Fatalf("node = %+v, %v", n, err)
 	}
 	store, err := LoadVMStore(r.store.path)
@@ -1010,22 +1013,24 @@ func TestInstallCommand(t *testing.T) {
 	}
 }
 
-func TestNodeConfigFirecrackerPaths(t *testing.T) {
-	var c Config
-	c.Token, c.Hub.Port, c.Clients.Endpoint = "tok", 8080, "vmm.lan"
-	r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, c))
-	r.CreateNode("n2", "firecracker")
-	b, err := r.NodeConfig("n2", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got struct {
-		Provider string
-		Paths    struct{ VMs, Images string }
-	}
-	json.Unmarshal(b, &got)
-	if got.Provider != "firecracker" || got.Paths.VMs != "/var/lib/vm-manager/vms" || got.Paths.Images != "/var/lib/vm-manager/images" {
-		t.Fatalf("config = %s", b)
+func TestNodeConfigLinuxPaths(t *testing.T) {
+	for _, provider := range []string{"firecracker", "cloud-hypervisor"} {
+		var c Config
+		c.Token, c.Hub.Port, c.Clients.Endpoint = "tok", 8080, "vmm.lan"
+		r := NewRegistry(newTestNet(t), newTestStore(t), newTestDisks(t), newTestConfig(t, c))
+		r.CreateNode("n2", provider)
+		b, err := r.NodeConfig("n2", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Provider string
+			Paths    struct{ VMs, Images string }
+		}
+		json.Unmarshal(b, &got)
+		if got.Provider != provider || got.Paths.VMs != "/var/lib/vm-manager/vms" || got.Paths.Images != "/var/lib/vm-manager/images" {
+			t.Fatalf("config = %s", b)
+		}
 	}
 }
 

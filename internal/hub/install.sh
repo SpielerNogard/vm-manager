@@ -3,12 +3,16 @@
 set -eu
 
 FIRECRACKER_VERSION=v1.18.0
+CLOUD_HYPERVISOR_VERSION=v54.1
+CLOUD_HYPERVISOR_SHA256=f9ffb9646783233d1f0fb09e77db1fca66499d1041e63bc011b90683c0d49933
+CLOUDHV_EDK2_TAG=ch-97eeb7b09
+CLOUDHV_SHA256=dc2fc8f0e43b96712d9fccc52a3a590769606412b3e1bc911d217addd3bef624
 RELEASES=https://github.com/SpielerNogard/vm-manager/releases/download
 LABEL=dev.vm-manager.node
 
 usage() {
 	cat >&2 <<'EOF'
-usage: install.sh --hub http://HOST:PORT --token TOKEN --name NAME --provider vz|firecracker
+usage: install.sh --hub http://HOST:PORT --token TOKEN --name NAME --provider vz|firecracker|cloud-hypervisor
                   [--version vX.Y.Z] [--underlay-endpoint HOST:PORT] [--underlay-mtu N] [--memory-mb N]
 EOF
 	exit 2
@@ -56,11 +60,11 @@ esac
 OS=$(uname -s)
 ARCH=$(uname -m)
 case "$OS/$ARCH/$PROVIDER" in
-Linux/x86_64/firecracker) PLATFORM=linux-amd64 ;;
+Linux/x86_64/firecracker | Linux/x86_64/cloud-hypervisor) PLATFORM=linux-amd64 ;;
 Darwin/arm64/vz) PLATFORM=darwin-arm64 ;;
-Linux/*/firecracker) die "firecracker nodes need an amd64 (x86_64) Linux host, this one is $ARCH" ;;
+Linux/*/firecracker | Linux/*/cloud-hypervisor) die "$PROVIDER nodes need an amd64 (x86_64) Linux host, this one is $ARCH" ;;
 Darwin/*/vz) die "vz nodes need an Apple Silicon Mac, this one is $ARCH" ;;
-*) die "provider '$PROVIDER' is not supported on $OS (Linux: firecracker, macOS: vz)" ;;
+*) die "provider '$PROVIDER' is not supported on $OS (Linux: firecracker or cloud-hypervisor, macOS: vz)" ;;
 esac
 
 if [ -z "$VERSION" ]; then
@@ -119,13 +123,26 @@ node_journal() {
 install_linux() {
 	SUDO=''
 	[ "$(id -u)" = 0 ] || SUDO=sudo
-	[ -c /dev/kvm ] || die "/dev/kvm is missing: firecracker needs KVM (enable virtualization or nested virtualization)"
+	[ -c /dev/kvm ] || die "/dev/kvm is missing: $PROVIDER needs KVM (enable virtualization or nested virtualization)"
 
 	say "installing packages"
 	$SUDO apt-get update -qq
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvswitch-switch ovn-host wireguard-tools nbd-client nftables >/dev/null
 
-	if [ "$(firecracker --version 2>/dev/null | head -1)" != "Firecracker $FIRECRACKER_VERSION" ]; then
+	if [ "$PROVIDER" = cloud-hypervisor ]; then
+		if [ "$(cloud-hypervisor --version 2>/dev/null | head -1)" != "cloud-hypervisor $CLOUD_HYPERVISOR_VERSION" ]; then
+			say "installing Cloud Hypervisor $CLOUD_HYPERVISOR_VERSION"
+			ch=https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CLOUD_HYPERVISOR_VERSION/cloud-hypervisor-static
+			fw=https://github.com/cloud-hypervisor/edk2/releases/download/$CLOUDHV_EDK2_TAG/CLOUDHV.fd
+			if ! { curl -fsSL -o "$TMP/cloud-hypervisor-static" "$ch" && curl -fsSL -o "$TMP/CLOUDHV.fd" "$fw"; }; then
+				die "downloading Cloud Hypervisor failed"
+			fi
+			printf '%s  cloud-hypervisor-static\n%s  CLOUDHV.fd\n' "$CLOUD_HYPERVISOR_SHA256" "$CLOUDHV_SHA256" >"$TMP/ch.sha256"
+			(cd "$TMP" && sha256_check ch.sha256 >/dev/null) || die "Cloud Hypervisor checksum mismatch"
+			$SUDO install -m 0755 "$TMP/cloud-hypervisor-static" /usr/local/bin/cloud-hypervisor
+			$SUDO install -D -m 0644 "$TMP/CLOUDHV.fd" /usr/local/share/cloud-hypervisor/CLOUDHV.fd
+		fi
+	elif [ "$(firecracker --version 2>/dev/null | head -1)" != "Firecracker $FIRECRACKER_VERSION" ]; then
 		say "installing Firecracker $FIRECRACKER_VERSION"
 		fc=firecracker-$FIRECRACKER_VERSION-x86_64.tgz
 		url=https://github.com/firecracker-microvm/firecracker/releases/download/$FIRECRACKER_VERSION

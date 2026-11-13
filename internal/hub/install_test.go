@@ -56,6 +56,9 @@ func TestInstallScriptRejects(t *testing.T) {
 		{"vz on linux", "Linux", "x86_64", `{"version":"v1.0.0"}`, append(full, "--provider", "vz"), 1, "not supported on Linux"},
 		{"arm64 linux", "Linux", "aarch64", `{"version":"v1.0.0"}`, append(full, "--provider", "firecracker"), 1, "amd64"},
 		{"firecracker on mac", "Darwin", "arm64", `{"version":"v1.0.0"}`, append(full, "--provider", "firecracker"), 1, "not supported on Darwin"},
+		{"arm64 linux ch", "Linux", "aarch64", `{"version":"v1.0.0"}`, append(full, "--provider", "cloud-hypervisor"), 1, "amd64"},
+		{"ch on mac", "Darwin", "arm64", `{"version":"v1.0.0"}`, append(full, "--provider", "cloud-hypervisor"), 1, "not supported on Darwin"},
+		{"unsupported lists ch", "Linux", "x86_64", `{"version":"v1.0.0"}`, append(full, "--provider", "vz"), 1, "cloud-hypervisor"},
 		{"dev hub", "Linux", "x86_64", `{"version":"dev"}`, append(full, "--provider", "firecracker"), 1, "--version"},
 		{"unreachable hub", "Linux", "x86_64", "", append(full, "--provider", "firecracker"), 1, "cannot reach the hub at http://hub.lan:8080"},
 	}

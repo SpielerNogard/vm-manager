@@ -3,7 +3,7 @@
 | Method | Path | |
 |---|---|---|
 | GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, and their config file without the hub token |
-| POST | `/api/nodes` | Add a node (`{"id", "provider"}`, provider `vz` or `firecracker`), state `pending` |
+| POST | `/api/nodes` | Add a node (`{"id", "provider"}`, provider `vz`, `firecracker` or `cloud-hypervisor`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
 | GET | `/api/nodes/{id}/install-command?host=` | The one-line install command for the node (text); `host` as above |
