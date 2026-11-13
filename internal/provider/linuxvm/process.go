@@ -28,12 +28,8 @@ type Process struct {
 }
 
 // AttachDisks returns the host path of each node.AttachOrder disk; on error it detaches the NBDs already attached.
-func AttachDisks(f node.VMFile, dir string) (paths []string, nbdIDs []string, err error) {
-	defer func() {
-		if err != nil {
-			DetachAll(f.Spec.ID, dir, nbdIDs)
-		}
-	}()
+func AttachDisks(f node.VMFile, dir string) ([]string, []string, error) {
+	var paths, nbdIDs []string
 	for _, d := range node.AttachOrder(f) {
 		if !d.NBD {
 			paths = append(paths, filepath.Join(dir, d.File))
@@ -41,7 +37,8 @@ func AttachDisks(f node.VMFile, dir string) (paths []string, nbdIDs []string, er
 		}
 		dev, err := AttachNBD(dir, d.Name, d.File)
 		if err != nil {
-			return nil, nbdIDs, err
+			DetachAll(f.Spec.ID, dir, nbdIDs)
+			return nil, nil, err
 		}
 		nbdIDs = append(nbdIDs, d.Name)
 		paths = append(paths, dev)
