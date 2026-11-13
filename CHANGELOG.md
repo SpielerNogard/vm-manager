@@ -1,3 +1,9 @@
+## v0.4.0 (2026-11-13)
+
+### Feat
+
+- **firecracker**: run VMs under the jailer with a per-VM uid (#18)
+
 ## v0.3.0 (2026-11-13)
 
 ### Feat
