@@ -15,4 +15,4 @@
 - The storage server's NBD port is unauthenticated: anyone who can reach `STORAGE_PORT` can read and write every disk. Changing the effective storage endpoint (also the client endpoint while the storage endpoint is empty) restarts every VM with disks, as their NBD URLs change.
 - WireGuard devices can only reach the VMs' management IPs and the gateway DNS. The hub API and the OVN databases are firewalled from them.
 - The hub stores device private keys, so configs can be downloaded again.
-- VMs cannot reach each other on the management network; they talk only via shared networks (see [Networks](networking.md#networks)). The vz NAT NIC (`eth0`, internet) is still shared.
+- VMs cannot reach each other on the management network; they talk only via shared networks (see [Networks](networking.md#networks)). The NAT NIC (the first NIC, for internet: vz NAT on Macs, the `vmm0` bridge on Linux nodes) is still shared.
