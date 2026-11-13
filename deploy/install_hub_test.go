@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,12 @@ func runHubInstaller(t *testing.T, osName, arch string, without []string, env []
 		}
 	}
 	cmd := exec.Command("sh", append([]string{"install-hub.sh"}, args...)...)
-	cmd.Env = append(append(os.Environ(), "PATH="+dir+":/usr/bin:/bin", "STUB_LOG="+log, "STUB_OS="+osName, "STUB_ARCH="+arch, "HOME="+dir), env...)
+	// Without a docker stub the system's own docker must not be found either; the script only needs builtins up to that check.
+	path := dir + ":/usr/bin:/bin"
+	if slices.Contains(without, "docker") {
+		path = dir
+	}
+	cmd.Env = append(append(os.Environ(), "PATH="+path, "STUB_LOG="+log, "STUB_OS="+osName, "STUB_ARCH="+arch, "HOME="+dir), env...)
 	b, err := cmd.CombinedOutput()
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
