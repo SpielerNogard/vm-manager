@@ -118,15 +118,18 @@ func (p *Process) WaitIP(ctx context.Context) (string, error) {
 	return p.IP, nil
 }
 
-// KillOnConsole kills the process when the guest prints text; meant for VMMs that idle forever after a halt. Run it as a goroutine.
+// KillOnConsole kills the process when the guest prints text (a halt or panic marker the VMM would otherwise idle on). Run it as a goroutine.
 func (p *Process) KillOnConsole(text string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-p.done
 		cancel()
 	}()
-	if node.WaitConsole(ctx, p.Console, p.Offset, time.Second, text) == nil {
+	err := node.WaitConsole(ctx, p.Console, p.Offset, time.Second, text)
+	if err == nil {
 		p.Cmd.Process.Kill()
+	} else if !errors.Is(err, context.Canceled) {
+		log.Printf("watching console %s: %v", p.Console, err)
 	}
 }
 

@@ -36,7 +36,7 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		return nil, err
 	}
 	// A panicked guest hangs with the VMM still running; ending it lets the node restart the VM.
-	go proc.KillOnConsole("Kernel panic")
+	go proc.KillOnConsole("Kernel panic - not syncing")
 	for _, id := range nbds {
 		go p.nbd.Watch(f.Spec.ID, dir, id, proc.Done())
 	}
