@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/version"
 	"vm-manager/internal/wgkey"
 )
 
@@ -75,6 +76,13 @@ type Node struct {
 	Config      json.RawMessage `json:"config,omitempty"`
 	Machine     *proto.Machine  `json:"machine,omitempty"`
 	Chassis     *ChassisState   `json:"chassis,omitempty"`
+	Version     string          `json:"version,omitempty"`
+	// Updatable is whether the node was installed by the installer; UpdateAvailable whether it is older than the hub.
+	Updatable       bool `json:"updatable"`
+	UpdateAvailable bool `json:"updateAvailable"`
+	// Updating is set from an accepted update until the node reports a failure or registers again.
+	Updating    bool   `json:"updating,omitempty"`
+	UpdateError string `json:"updateError,omitempty"`
 }
 
 type ChassisState struct {
@@ -128,13 +136,23 @@ type AttachRequest struct {
 
 type nodeEntry struct {
 	Node
-	conn NodeConn
-	seq  uint64 // of the last desired list sent
+	conn          NodeConn
+	updatingSince time.Time
+	seq           uint64 // of the last desired list sent
+}
+
+// updateTimeout is how long an update may stay unanswered before the node can be updated again.
+const updateTimeout = 15 * time.Minute
+
+func (n *nodeEntry) expireUpdate() {
+	if n.Updating && time.Since(n.updatingSince) > updateTimeout {
+		n.Updating, n.UpdateError = false, "the node did not finish the update within 15 minutes"
+	}
 }
 
 func (n *nodeEntry) stored() StoredNode {
 	return StoredNode{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, DesiredSeq: n.seq,
-		Pending: n.State == NodePending}
+		Pending: n.State == NodePending, Version: n.Version}
 }
 
 type Registry struct {
@@ -153,6 +171,8 @@ type Registry struct {
 	// storageReported is whether storageFiles came from the current connection, so an absent file means missing.
 	storageReported bool
 	storageSendMu   sync.Mutex
+	storageVersion  string
+	gatewayVersion  string
 }
 
 func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigStore) *Registry {
@@ -163,7 +183,7 @@ func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigSto
 		if n.Pending {
 			state = NodePending
 		}
-		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state},
+		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state, Version: n.Version},
 			seq: n.DesiredSeq}
 	}
 	for _, s := range store.VMs() {
@@ -227,7 +247,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	prev := r.nodes[reg.NodeID]
 	n := &nodeEntry{
 		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, State: NodeOnline,
-			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
+			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine, Version: reg.Version, Updatable: reg.Updatable},
 		conn: c,
 	}
 	if prev != nil {
@@ -280,6 +300,61 @@ func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 		if vm.NodeID == nodeID {
 			vm.State, vm.IP = proto.StateUnknown, ""
 		}
+	}
+}
+
+// UpdateNode tells an online node to update itself to the hub's version by running the hub's installer.
+func (r *Registry) UpdateNode(id string) error {
+	c, err := r.startUpdate(id)
+	if err != nil {
+		return err
+	}
+	// Sent without r.mu, like every other message: a stalled connection must not block the registry.
+	if err := c.Send(proto.Message{Type: "update"}); err != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if n, ok := r.nodes[id]; ok && n.conn == c {
+			n.Updating = false
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *Registry) startUpdate(id string) (NodeConn, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.nodes[id]
+	if ok {
+		n.expireUpdate()
+	}
+	refuse := func(why string) error { return fmt.Errorf("%w: node %q %s", ErrConflict, id, why) }
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("%w: node %q", ErrNotFound, id)
+	case n.conn == nil:
+		return nil, refuse("is offline")
+	case !version.Released(version.Version):
+		return nil, refuse("cannot be updated by a hub that is a development build")
+	case n.Version == "":
+		return nil, refuse("reports no version; re-run its install command")
+	case !version.Older(n.Version, version.Version):
+		return nil, refuse("is not older than the hub")
+	case !n.Updatable:
+		return nil, refuse("was not installed by the installer; re-run its install command")
+	case n.Updating:
+		return nil, refuse("has an update already running")
+	}
+	n.Updating, n.UpdateError, n.updatingSince = true, "", time.Now()
+	return n.conn, nil
+}
+
+// NodeUpdateFailed ignores c if the node has already registered again: that report is from the process the update replaced.
+func (r *Registry) NodeUpdateFailed(id string, c NodeConn, msg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n, ok := r.nodes[id]; ok && n.conn == c {
+		n.Updating, n.UpdateError = false, msg
 	}
 }
 
@@ -807,8 +882,10 @@ func (r *Registry) Nodes() []Node {
 	defer r.mu.Unlock()
 	out := make([]Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
+		n.expireUpdate()
 		node := n.Node
 		node.FreeCPUs, node.FreeMemoryMB = r.free(n)
+		node.UpdateAvailable = version.Older(n.Version, version.Version)
 		out = append(out, node)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

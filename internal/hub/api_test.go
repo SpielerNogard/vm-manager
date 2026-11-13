@@ -43,7 +43,7 @@ func apiServerWith(t *testing.T, c Config) (*httptest.Server, *Registry, *NetMod
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg))
+	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, NewUpdates()))
 	t.Cleanup(srv.Close)
 	return srv, r, nm
 }

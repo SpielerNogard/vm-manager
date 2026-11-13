@@ -17,7 +17,7 @@ import { downloadText, flatten, formatMB } from '@/lib/format'
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const { nodes, vms, settings, loaded, refresh } = useFleet()
+const { nodes, vms, settings, updates, loaded, refresh } = useFleet()
 
 const node = computed(() => nodes.value.find((n) => n.id === route.params.id))
 const nodeVMs = computed(() => vms.value.filter((vm) => vm.nodeId === route.params.id))
@@ -37,6 +37,9 @@ const copyError = ref('')
 const copied = ref<'' | 'install' | 'config'>('')
 const confirmDelete = ref(false)
 const deleteError = ref('')
+const confirmUpdate = ref(false)
+const updateRequestError = ref('')
+const runningVMs = computed(() => nodeVMs.value.filter((vm) => vm.state === 'running').length)
 
 watch(
   () => settings.value?.clients.endpoint,
@@ -93,6 +96,17 @@ async function copyText(which: 'install' | 'config') {
   }
 }
 
+async function updateNode() {
+  confirmUpdate.value = false
+  updateRequestError.value = ''
+  try {
+    await api.updateNode(String(route.params.id))
+    await refresh()
+  } catch (e) {
+    updateRequestError.value = (e as Error).message
+  }
+}
+
 async function deleteNode() {
   confirmDelete.value = false
   deleteError.value = ''
@@ -131,6 +145,28 @@ async function deleteNode() {
           <span class="font-token">{{ node.hostname }}</span>
           <template v-if="connectedAt"> · {{ t('node.connectedSince', { time: connectedAt }) }}</template>
         </p>
+        <div v-if="node.state !== 'pending'" class="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          <span>
+            {{ t('node.version') }} <span class="font-token">{{ node.version || t('nodes.versionUnknown') }}</span>
+            <template v-if="updates"> · {{ t('node.hubVersion') }} <span class="font-token">{{ updates.version }}</span></template>
+          </span>
+          <button
+            v-if="node.updateAvailable && node.updatable && node.state === 'online'"
+            type="button"
+            class="btn btn-sm btn-primary"
+            :disabled="node.updating"
+            @click="confirmUpdate = true"
+          >
+            <span v-if="node.updating" class="loading loading-spinner loading-xs"></span>
+            {{ node.updating ? t('node.updating') : t('node.update') }}
+          </button>
+          <span v-else-if="node.updateAvailable && !node.updatable" class="text-base-content/60">{{ t('node.updateByHand') }}</span>
+        </div>
+        <div v-if="updateRequestError" role="alert" class="alert alert-error alert-soft mt-3 text-sm">{{ updateRequestError }}</div>
+        <div v-if="node.updateError" role="alert" class="alert alert-error alert-soft mt-3 flex-col items-start text-sm">
+          <span>{{ t('node.updateFailed') }}</span>
+          <pre class="font-token w-full text-xs break-all whitespace-pre-wrap">{{ node.updateError }}</pre>
+        </div>
       </header>
 
       <div class="mb-6 grid gap-4 lg:grid-cols-2">
@@ -246,6 +282,14 @@ async function deleteNode() {
         :confirm-label="t('node.deleteConfirm')"
         @confirm="deleteNode"
         @cancel="confirmDelete = false"
+      />
+      <ConfirmDialog
+        :open="confirmUpdate"
+        :title="t('node.updateTitle', { name: node.id, version: updates?.version ?? '' })"
+        :body="runningVMs ? t('node.updateBody', { count: runningVMs }, runningVMs) : t('node.updateBodyIdle')"
+        :confirm-label="t('node.update')"
+        @confirm="updateNode"
+        @cancel="confirmUpdate = false"
       />
     </template>
   </div>

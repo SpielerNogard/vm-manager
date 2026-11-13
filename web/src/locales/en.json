@@ -72,7 +72,10 @@
     "create": "Create node",
     "pendingLabel": "waiting for first connection",
     "providerPlaceholder": "Choose a hypervisor",
-    "providerHint": "vz for a Mac (Apple Silicon), firecracker or cloud-hypervisor for a Linux host (amd64 with KVM)."
+    "providerHint": "vz for a Mac (Apple Silicon), firecracker or cloud-hypervisor for a Linux host (amd64 with KVM).",
+    "version": "Version",
+    "versionUnknown": "unknown",
+    "updateAvailable": "update available"
   },
   "vms": {
     "new": "New VM",
@@ -162,7 +165,7 @@
     "hubAddress": "Hub address for this node",
     "hubAddressHint": "Use localhost for the hub's own Mac, or a LAN IP when nodes reach the hub differently.",
     "download": "Download node.json",
-    "saveHint": "Save as ~/.vm-manager/node.json on the node and start ./bin/node",
+    "saveHint": "Save as ~/.vm-manager/node.json on the node and start ./bin/vm-manager-node",
     "copyFailed": "Copy failed; select the text manually.",
     "delete": "Delete node",
     "deleteBlocked": "This node still has VMs",
@@ -173,7 +176,16 @@
     "install": "Install",
     "installHint": "Run this on the machine (on Linux as a user with sudo). Running it again updates the node and keeps its VMs; they restart with the node.",
     "manualConfig": "Manual setup (node.json)",
-    "providerMismatch": "Hypervisor differs from the one chosen when adding the node: {error}."
+    "providerMismatch": "Hypervisor differs from the one chosen when adding the node: {error}.",
+    "version": "Version",
+    "hubVersion": "Hub",
+    "update": "Update node",
+    "updating": "Updating…",
+    "updateTitle": "Update {name} to {version}?",
+    "updateBody": "{count} running VM will restart. Continue? | {count} running VMs will restart. Continue?",
+    "updateBodyIdle": "The node restarts. Continue?",
+    "updateByHand": "This node was started by hand. Run the install command below to update it.",
+    "updateFailed": "The last update failed:"
   },
   "vm": {
     "notFound": "No VM with ID {id}.",
@@ -256,7 +268,8 @@
     "tabs": {
       "networking": "Networking",
       "security": "Security",
-      "guests": "Guests"
+      "guests": "Guests",
+      "updates": "Updates"
     },
     "save": "Save",
     "saved": "Saved",
@@ -284,7 +297,20 @@
     "tokenChangeBody": "Nodes need the new token in their node.json the next time they connect.",
     "tokenChangeConfirm": "Change token",
     "guestMTU": "Guest MTU",
-    "guestMTUHint": "applied to VMs on their next DHCP lease or reboot (576–9000)"
+    "guestMTUHint": "applied to VMs on their next DHCP lease or reboot (576–9000)",
+    "updates": {
+      "hubVersion": "Hub version",
+      "gateway": "Gateway",
+      "storage": "Storage",
+      "latest": "Latest release",
+      "checked": "checked {ago}",
+      "checkNow": "Check now",
+      "checkFailed": "The last check failed: {error}",
+      "devBuild": "Development build: no update check.",
+      "manual": "Update available. Set VMM_VERSION={version} in deploy/.env and run in the checkout:",
+      "upToDate": "The hub is up to date.",
+      "unavailable": "The hub did not answer with its update status."
+    }
   },
   "disks": {
     "add": "Add disk",

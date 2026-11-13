@@ -24,6 +24,7 @@ type StorageView struct {
 	Online   bool                `json:"online"`
 	Endpoint string              `json:"endpoint"`
 	Orphans  []proto.StorageFile `json:"orphans"`
+	Version  string              `json:"version,omitempty"`
 }
 
 type wsStorage struct {
@@ -55,6 +56,7 @@ func StorageHandler(r *Registry, token func() string) http.Handler {
 		}
 		conn := &wsStorage{ctx: ctx, c: c}
 		r.StorageConnected(conn)
+		r.SetStorageVersion(m.Version)
 		log.Printf("storage connected")
 		defer func() {
 			r.StorageDisconnected(conn)
@@ -120,12 +122,18 @@ func (r *Registry) vmsWithDisks() int {
 	return n
 }
 
+func (r *Registry) SetStorageVersion(v string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.storageVersion = v
+}
+
 // StorageDisconnected ignores c if the agent has already reconnected with a newer connection.
 func (r *Registry) StorageDisconnected(c StorageConn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.storage == c {
-		r.storage, r.storageReported = nil, false
+		r.storage, r.storageReported, r.storageVersion = nil, false, ""
 	}
 }
 
@@ -257,5 +265,5 @@ func (r *Registry) Storage() StorageView {
 			orphans = append(orphans, f)
 		}
 	}
-	return StorageView{Online: r.storage != nil, Endpoint: r.disks.Endpoint(), Orphans: orphans}
+	return StorageView{Online: r.storage != nil, Endpoint: r.disks.Endpoint(), Orphans: orphans, Version: r.storageVersion}
 }

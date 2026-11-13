@@ -117,7 +117,7 @@ func apply(run runner, st hub.GatewayState) error {
 }
 
 func observe(run runner) hub.GatewayStatus {
-	s := hub.GatewayStatus{Handshakes: map[string]time.Time{}, Chassis: []string{}}
+	s := hub.GatewayStatus{Handshakes: map[string]time.Time{}, Chassis: []string{}, Version: version.Version}
 	for _, iface := range []string{"wg-underlay", "wg-clients"} {
 		hs, err := handshakes(run, iface)
 		if err != nil {

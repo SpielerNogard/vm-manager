@@ -12,7 +12,7 @@ LABEL=dev.vm-manager.node
 
 usage() {
 	cat >&2 <<'EOF'
-usage: install.sh --hub http://HOST:PORT --token TOKEN --name NAME --provider vz|firecracker|cloud-hypervisor
+usage: install.sh --hub http://HOST:PORT --token TOKEN|--token-stdin --name NAME --provider vz|firecracker|cloud-hypervisor
                   [--version vX.Y.Z] [--underlay-endpoint HOST:PORT] [--underlay-mtu N] [--memory-mb N]
 EOF
 	exit 2
@@ -39,6 +39,11 @@ while [ $# -gt 0 ]; do
 		--memory-mb) MEMORY_MB=$2 ;;
 		esac
 		shift 2
+		;;
+	--token-stdin)
+		# The node updates itself this way: a token on the command line would show in process lists.
+		IFS= read -r TOKEN || true
+		shift
 		;;
 	*) usage ;;
 	esac
@@ -77,13 +82,15 @@ BASE=${VMM_RELEASE_URL:-$RELEASES/$VERSION}
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-fetch() { curl -fsSL -o "$TMP/$1" "$BASE/$1" || die "downloading $1 of $VERSION failed"; }
+# A stalled download must end: a node update started from the hub waits for this script.
+dl() { curl -fsSL --connect-timeout 10 --max-time 600 "$@"; }
+fetch() { dl -o "$TMP/$1" "$BASE/$1" || die "downloading $1 of $VERSION failed"; }
 sha256_check() {
 	if command -v sha256sum >/dev/null; then sha256sum -c "$@"; else shasum -a 256 -c "$@"; fi
 }
 
 say "downloading node $VERSION for $PLATFORM"
-FILES="node-$PLATFORM"
+FILES="vm-manager-node-$PLATFORM"
 [ "$PLATFORM" = linux-amd64 ] || FILES="$FILES netagent-linux-arm64"
 fetch SHA256SUMS
 for f in $FILES; do
@@ -136,7 +143,7 @@ install_linux() {
 			say "installing Cloud Hypervisor $CLOUD_HYPERVISOR_VERSION"
 			ch=https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CLOUD_HYPERVISOR_VERSION/cloud-hypervisor-static
 			fw=https://github.com/cloud-hypervisor/edk2/releases/download/$CLOUDHV_EDK2_TAG/CLOUDHV.fd
-			if ! { curl -fsSL -o "$TMP/cloud-hypervisor-static" "$ch" && curl -fsSL -o "$TMP/CLOUDHV.fd" "$fw"; }; then
+			if ! { dl -o "$TMP/cloud-hypervisor-static" "$ch" && dl -o "$TMP/CLOUDHV.fd" "$fw"; }; then
 				die "downloading Cloud Hypervisor failed"
 			fi
 			printf '%s  cloud-hypervisor-static\n%s  CLOUDHV.fd\n' "$CLOUD_HYPERVISOR_SHA256" "$CLOUDHV_SHA256" >"$TMP/ch.sha256"
@@ -149,7 +156,7 @@ install_linux() {
 		say "installing Firecracker $FIRECRACKER_VERSION"
 		fc=firecracker-$FIRECRACKER_VERSION-x86_64.tgz
 		url=https://github.com/firecracker-microvm/firecracker/releases/download/$FIRECRACKER_VERSION
-		if ! { curl -fsSL -o "$TMP/$fc" "$url/$fc" && curl -fsSL -o "$TMP/$fc.sha256.txt" "$url/$fc.sha256.txt"; }; then
+		if ! { dl -o "$TMP/$fc" "$url/$fc" && dl -o "$TMP/$fc.sha256.txt" "$url/$fc.sha256.txt"; }; then
 			die "downloading Firecracker failed"
 		fi
 		(cd "$TMP" && sha256_check "$fc.sha256.txt" >/dev/null) || die "Firecracker checksum mismatch"
@@ -186,7 +193,7 @@ EOF
 	$SUDO nft -f /etc/nftables.d/vm-manager.nft
 
 	say "installing the node"
-	$SUDO install -m 0755 "$TMP/node-linux-amd64" /usr/local/bin/vm-manager-node
+	$SUDO install -m 0755 "$TMP/vm-manager-node-linux-amd64" /usr/local/bin/vm-manager-node
 	node_init $SUDO /usr/local/bin/vm-manager-node init -config /etc/vm-manager/node.json
 	$SUDO tee /etc/systemd/system/vm-manager-node.service >/dev/null <<'EOF'
 [Unit]
@@ -224,9 +231,9 @@ install_macos() {
 	dir=$HOME/.vm-manager
 	mkdir -p "$dir/bin" "$HOME/Library/LaunchAgents"
 	say "installing the node to $dir/bin"
-	install -m 0755 "$TMP/node-darwin-arm64" "$dir/bin/node"
+	install -m 0755 "$TMP/vm-manager-node-darwin-arm64" "$dir/bin/vm-manager-node"
 	install -m 0755 "$TMP/netagent-linux-arm64" "$dir/bin/netagent-linux-arm64"
-	node_init "$dir/bin/node" init -config "$dir/node.json"
+	node_init "$dir/bin/vm-manager-node" init -config "$dir/node.json"
 	plist=$HOME/Library/LaunchAgents/$LABEL.plist
 	cat >"$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -235,7 +242,7 @@ install_macos() {
 <dict>
 	<key>Label</key><string>$LABEL</string>
 	<key>ProgramArguments</key>
-	<array><string>$dir/bin/node</string><string>-config</string><string>$dir/node.json</string></array>
+	<array><string>$dir/bin/vm-manager-node</string><string>-config</string><string>$dir/node.json</string></array>
 	<key>RunAtLoad</key><true/>
 	<key>KeepAlive</key><true/>
 	<key>StandardOutPath</key><string>$dir/node.log</string>
@@ -253,9 +260,11 @@ EOF
 		[ $i -lt 10 ] || die "launchctl bootstrap $plist failed"
 		sleep 1
 	done
+	# Releases before the rename installed bin/node; launchd now runs the new binary.
+	rm -f "$dir/bin/node"
 	wait_connected "$dir/node.log" "$offset" || {
 		tail -n 20 "$dir/node.log" >&2
-		die "the node did not connect to $HUB within 30 s (log: $dir/node.log); for a hub in the LAN, allow Local Network access for 'node' in System Settings"
+		die "the node did not connect to $HUB within 30 s (log: $dir/node.log); for a hub in the LAN, allow Local Network access for 'vm-manager-node' in System Settings"
 	}
 }
 

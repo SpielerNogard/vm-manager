@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/version"
 	"vm-manager/internal/wgkey"
 )
 
@@ -1043,5 +1044,35 @@ func TestInstallCommandQuotesToken(t *testing.T) {
 	// Settings accept any token without whitespace, so it must survive being pasted into a shell.
 	if err != nil || !strings.Contains(got, `--token 'abc&def'\''0123456789' --name n2`) {
 		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
+func setHubVersion(t *testing.T, v string) {
+	t.Helper()
+	old := version.Version
+	version.Version = v
+	t.Cleanup(func() { version.Version = old })
+}
+
+func TestNodeVersion(t *testing.T) {
+	setHubVersion(t, "v0.5.0")
+	var cfg Config
+	store := newTestStore(t)
+	r := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, cfg))
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", Version: "v0.4.0", Updatable: true}, &fakeNode{})
+	r.NodeConnected(proto.Register{NodeID: "n2", Provider: "vz"}, &fakeNode{})
+	r.NodeConnected(proto.Register{NodeID: "n3", Provider: "vz", Version: "v0.5.0"}, &fakeNode{})
+	if n, _ := nodeByID(r, "n1"); n.Version != "v0.4.0" || !n.UpdateAvailable || !n.Updatable {
+		t.Errorf("n1 = %+v", n)
+	}
+	if n, _ := nodeByID(r, "n2"); n.Version != "" || n.UpdateAvailable {
+		t.Errorf("n2 = %+v", n)
+	}
+	if n, _ := nodeByID(r, "n3"); n.UpdateAvailable {
+		t.Errorf("n3 = %+v", n)
+	}
+	r2 := NewRegistry(newTestNet(t), store, newTestDisks(t), newTestConfig(t, cfg))
+	if n, _ := nodeByID(r2, "n1"); n.State != NodeOffline || n.Version != "v0.4.0" {
+		t.Errorf("after restart n1 = %+v", n)
 	}
 }

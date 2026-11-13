@@ -103,6 +103,9 @@ type Register struct {
 	ChassisKey string          `json:"chassisKey,omitempty"`
 	DisksInUse []string        `json:"disksInUse,omitempty"`
 	AppliedSeq uint64          `json:"appliedSeq,omitempty"` // seq of the last desired list the node fully reconciled
+	Version    string          `json:"version,omitempty"`
+	// Updatable is whether the node runs from the installer's location, so the installer can update it.
+	Updatable bool `json:"updatable,omitempty"`
 }
 
 // Underlay tells a node how to join the hub's WireGuard underlay and reach the OVN southbound DB.
@@ -122,7 +125,7 @@ type Machine struct {
 	MemoryMB  int    `json:"memoryMB,omitempty"`
 }
 
-// Message types: "register" (node→hub), "desired"/"underlay" (hub→node), "status" and "disks" (node→hub).
+// Message types: "register" (node→hub), "desired"/"underlay"/"update" (hub→node), "status", "disks" and "updateFailed" (node→hub).
 type Message struct {
 	Type     string    `json:"type"`
 	Register *Register `json:"register,omitempty"`
@@ -133,6 +136,7 @@ type Message struct {
 	DisksInUse []string    `json:"disksInUse,omitempty"` // type "disks": every disk ID a local VM still uses
 	Seq        uint64      `json:"seq,omitempty"`        // type "desired": increases with every list sent to the node
 	AppliedSeq uint64      `json:"appliedSeq,omitempty"` // type "disks": seq of the last desired list the node fully reconciled
+	Error      string      `json:"error,omitempty"`      // type "updateFailed": why, with the end of the installer output
 }
 
 func NewEncoder(w io.Writer) *json.Encoder { return json.NewEncoder(w) }
@@ -159,6 +163,7 @@ type StorageMessage struct {
 	Files   []StorageFile `json:"files,omitempty"`
 	Disks   []StorageDisk `json:"disks,omitempty"`
 	Deleted []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
+	Version string        `json:"version,omitempty"` // type "register": the storage server's version
 }
 
 // ValidEndpoint reports whether s is host:port with a non-empty host and a port in 1-65535.

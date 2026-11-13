@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,5 +40,15 @@ func TestNICJSONAndNoSSHPort(t *testing.T) {
 	}
 	if !bytes.Contains(b, []byte(`"nics"`)) || bytes.Contains(b, []byte("sshPort")) {
 		t.Fatalf("unexpected JSON: %s", b)
+	}
+}
+
+func TestRegisterOmitsEmptyVersion(t *testing.T) {
+	b, err := json.Marshal(Register{NodeID: "n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(b); strings.Contains(s, "version") || strings.Contains(s, "updatable") {
+		t.Errorf("empty fields are sent: %s", s)
 	}
 }

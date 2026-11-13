@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io/fs"
 	"log"
@@ -66,7 +67,9 @@ func main() {
 	token := func() string { return cfg.Get().Token }
 	mux.Handle("/api/nodes/connect", hub.NodeHandler(r, token))
 	mux.Handle("/api/storage/connect", hub.StorageHandler(r, token))
-	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg))
+	updates := hub.NewUpdates()
+	go updates.Run(context.Background())
+	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg, updates))
 	mux.Handle("/node/install.sh", hub.InstallScriptHandler())
 	mux.Handle("/", spa(dist))
 

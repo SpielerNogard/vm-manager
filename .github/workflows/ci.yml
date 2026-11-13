@@ -63,4 +63,6 @@ jobs:
       - run: go vet ./...
       - run: make test
       - run: make dist-darwin
-      - run: codesign -d --entitlements - dist/node-darwin-arm64 | grep -q com.apple.security.virtualization
+      - run: codesign -d --entitlements - dist/vm-manager-node-darwin-arm64 | grep -q com.apple.security.virtualization
+      # macOS keeps the Local Network grant across releases only for a fixed identifier.
+      - run: codesign -dv dist/vm-manager-node-darwin-arm64 2>&1 | grep -qx 'Identifier=dev.vm-manager.node'

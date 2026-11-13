@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"sync"
@@ -48,6 +49,8 @@ type Agent struct {
 	ChassisPrivateKey             string
 	UnderlayEndpoint              string // host:port override of the hub's underlay address
 	UnderlayMTU                   int
+	Version                       string
+	Updatable                     bool // installed by the installer
 
 	diskRefresh time.Duration // zero means defaultDiskRefresh
 
@@ -58,6 +61,9 @@ type Agent struct {
 	chassisWG       sync.WaitGroup
 
 	reconcileMu sync.Mutex
+
+	updateMu     sync.Mutex                                   // held while the installer runs
+	installerCmd func(script string, args []string) *exec.Cmd // nil means installerCommand; tests set it
 
 	mu       sync.Mutex
 	vms      map[string]*vmEntry
@@ -83,6 +89,7 @@ type vmEntry struct {
 
 func (a *Agent) Run(ctx context.Context) error {
 	a.vms = map[string]*vmEntry{}
+	removeStaleUpdateDirs()
 	if err := a.restoreAll(ctx); err != nil {
 		return err
 	}
@@ -173,6 +180,8 @@ func (a *Agent) connect(ctx context.Context) error {
 			a.reconcile(ctx, m.Seq, m.Desired)
 		case m.Type == "underlay" && m.Underlay != nil:
 			go a.startChassis(ctx, *m.Underlay)
+		case m.Type == "update":
+			go a.update(ctx)
 		}
 	}
 }
@@ -223,7 +232,7 @@ func (a *Agent) startChassis(ctx context.Context, u proto.Underlay) {
 
 func (a *Agent) registerMsg() *proto.Register {
 	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine,
-		DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq}
+		DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq, Version: a.Version, Updatable: a.Updatable}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
 		st := e.status

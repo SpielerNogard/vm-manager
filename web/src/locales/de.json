@@ -72,7 +72,10 @@
     "create": "Node anlegen",
     "pendingLabel": "wartet auf erste Verbindung",
     "providerPlaceholder": "Hypervisor wählen",
-    "providerHint": "vz für einen Mac (Apple Silicon), firecracker oder cloud-hypervisor für einen Linux-Rechner (amd64 mit KVM)."
+    "providerHint": "vz für einen Mac (Apple Silicon), firecracker oder cloud-hypervisor für einen Linux-Rechner (amd64 mit KVM).",
+    "version": "Version",
+    "versionUnknown": "unbekannt",
+    "updateAvailable": "Update verfügbar"
   },
   "vms": {
     "new": "Neue VM",
@@ -162,7 +165,7 @@
     "hubAddress": "Hub-Adresse für diese Node",
     "hubAddressHint": "localhost für den eigenen Mac des Hubs, oder eine LAN-IP, wenn Nodes den Hub anders erreichen.",
     "download": "node.json herunterladen",
-    "saveHint": "Als ~/.vm-manager/node.json auf der Node speichern und ./bin/node starten",
+    "saveHint": "Als ~/.vm-manager/node.json auf der Node speichern und ./bin/vm-manager-node starten",
     "copyFailed": "Kopieren fehlgeschlagen; Text manuell markieren.",
     "delete": "Node löschen",
     "deleteBlocked": "Diese Node hat noch VMs",
@@ -173,7 +176,16 @@
     "install": "Installation",
     "installHint": "Auf der Maschine ausführen (unter Linux als Benutzer mit sudo). Erneutes Ausführen aktualisiert den Node und behält seine VMs; sie starten mit dem Node neu.",
     "manualConfig": "Manuelle Einrichtung (node.json)",
-    "providerMismatch": "Hypervisor weicht von dem beim Anlegen gewählten ab: {error}."
+    "providerMismatch": "Hypervisor weicht von dem beim Anlegen gewählten ab: {error}.",
+    "version": "Version",
+    "hubVersion": "Hub",
+    "update": "Node aktualisieren",
+    "updating": "Wird aktualisiert…",
+    "updateTitle": "{name} auf {version} aktualisieren?",
+    "updateBody": "{count} laufende VM wird neu gestartet. Fortfahren? | {count} laufende VMs werden neu gestartet. Fortfahren?",
+    "updateBodyIdle": "Die Node startet neu. Fortfahren?",
+    "updateByHand": "Diese Node wurde von Hand gestartet. Zum Aktualisieren den Installationsbefehl unten ausführen.",
+    "updateFailed": "Das letzte Update ist fehlgeschlagen:"
   },
   "vm": {
     "notFound": "Keine VM mit der ID {id}.",
@@ -256,7 +268,8 @@
     "tabs": {
       "networking": "Netzwerk",
       "security": "Sicherheit",
-      "guests": "Gäste"
+      "guests": "Gäste",
+      "updates": "Updates"
     },
     "save": "Speichern",
     "saved": "Gespeichert",
@@ -284,7 +297,20 @@
     "tokenChangeBody": "Nodes brauchen den neuen Token in ihrer node.json, wenn sie sich das nächste Mal verbinden.",
     "tokenChangeConfirm": "Token ändern",
     "guestMTU": "Gast-MTU",
-    "guestMTUHint": "wird auf VMs bei der nächsten DHCP-Lease oder beim Neustart angewendet (576–9000)"
+    "guestMTUHint": "wird auf VMs bei der nächsten DHCP-Lease oder beim Neustart angewendet (576–9000)",
+    "updates": {
+      "hubVersion": "Hub-Version",
+      "gateway": "Gateway",
+      "storage": "Storage",
+      "latest": "Neuestes Release",
+      "checked": "geprüft {ago}",
+      "checkNow": "Jetzt prüfen",
+      "checkFailed": "Die letzte Prüfung ist fehlgeschlagen: {error}",
+      "devBuild": "Entwicklungs-Build: keine Update-Prüfung.",
+      "manual": "Update verfügbar. VMM_VERSION={version} in deploy/.env setzen und im Checkout ausführen:",
+      "upToDate": "Der Hub ist aktuell.",
+      "unavailable": "Der Hub hat seinen Update-Status nicht geliefert."
+    }
   },
   "disks": {
     "add": "Disk hinzufügen",
