@@ -48,6 +48,7 @@ type GatewayState struct {
 type GatewayStatus struct {
 	Handshakes map[string]time.Time `json:"handshakes"`
 	Chassis    []string             `json:"chassis"`
+	Version    string               `json:"version,omitempty"`
 }
 
 func (r *Registry) GatewayState() GatewayState {
@@ -89,6 +90,7 @@ func (r *Registry) SetGatewayStatus(s GatewayStatus) {
 	chassis := r.net.Chassis()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.gatewayVersion = s.Version
 	for _, c := range chassis {
 		n, ok := r.nodes[c.NodeID]
 		if !ok {
@@ -100,6 +102,12 @@ func (r *Registry) SetGatewayStatus(s GatewayStatus) {
 		}
 		n.Chassis = cs
 	}
+}
+
+func (r *Registry) GatewayVersion() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gatewayVersion
 }
 
 func DeviceConfig(d Device, clientsPub, endpoint string, port, mtu int) string {

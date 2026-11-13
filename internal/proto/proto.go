@@ -103,6 +103,9 @@ type Register struct {
 	ChassisKey string          `json:"chassisKey,omitempty"`
 	DisksInUse []string        `json:"disksInUse,omitempty"`
 	AppliedSeq uint64          `json:"appliedSeq,omitempty"` // seq of the last desired list the node fully reconciled
+	Version    string          `json:"version,omitempty"`
+	// Updatable is whether the node runs from the installer's location, so the installer can update it.
+	Updatable bool `json:"updatable,omitempty"`
 }
 
 // Underlay tells a node how to join the hub's WireGuard underlay and reach the OVN southbound DB.
@@ -159,6 +162,7 @@ type StorageMessage struct {
 	Files   []StorageFile `json:"files,omitempty"`
 	Disks   []StorageDisk `json:"disks,omitempty"`
 	Deleted []string      `json:"deleted,omitempty"` // disk IDs whose files must be removed
+	Version string        `json:"version,omitempty"` // type "register": the storage server's version
 }
 
 // ValidEndpoint reports whether s is host:port with a non-empty host and a port in 1-65535.

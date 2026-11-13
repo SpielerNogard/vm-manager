@@ -141,3 +141,15 @@ func TestGatewayStateReflectsGuestMTUChange(t *testing.T) {
 		t.Fatalf("GuestMTU = %d", got)
 	}
 }
+
+func TestGatewayVersion(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	r.SetGatewayStatus(GatewayStatus{Version: "v0.5.0"})
+	if v := r.GatewayVersion(); v != "v0.5.0" {
+		t.Errorf("version = %q", v)
+	}
+	r.SetGatewayStatus(GatewayStatus{})
+	if v := r.GatewayVersion(); v != "" {
+		t.Errorf("version of an older gateway = %q", v)
+	}
+}

@@ -48,6 +48,8 @@ type Agent struct {
 	ChassisPrivateKey             string
 	UnderlayEndpoint              string // host:port override of the hub's underlay address
 	UnderlayMTU                   int
+	Version                       string
+	Updatable                     bool // installed by the installer
 
 	diskRefresh time.Duration // zero means defaultDiskRefresh
 
@@ -223,7 +225,7 @@ func (a *Agent) startChassis(ctx context.Context, u proto.Underlay) {
 
 func (a *Agent) registerMsg() *proto.Register {
 	reg := &proto.Register{NodeID: a.NodeID, ChassisKey: a.ChassisKey, Provider: a.Provider.Name(), CPUs: a.CPUs, MemoryMB: a.MemoryMB, Config: a.Config, Machine: a.Machine,
-		DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq}
+		DisksInUse: a.disksInUse(), AppliedSeq: a.appliedSeq, Version: a.Version, Updatable: a.Updatable}
 	reg.Hostname, _ = os.Hostname()
 	for _, e := range a.vms {
 		st := e.status

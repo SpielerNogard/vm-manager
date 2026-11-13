@@ -126,3 +126,17 @@ func TestStorageHandlerNeedsToken(t *testing.T) {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
 }
+
+func TestStorageVersion(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	fs := &fakeStorage{}
+	r.StorageConnected(fs)
+	r.SetStorageVersion("v0.5.0")
+	if v := r.Storage().Version; v != "v0.5.0" {
+		t.Errorf("version = %q", v)
+	}
+	r.StorageDisconnected(fs)
+	if v := r.Storage().Version; v != "" {
+		t.Errorf("version after disconnect = %q", v)
+	}
+}

@@ -2,7 +2,7 @@
 
 | Method | Path | |
 |---|---|---|
-| GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, and their config file without the hub token |
+| GET | `/api/nodes` | Nodes with provider, capacity, `state` (`pending`/`online`/`offline`), machine info, chassis state, their config file without the hub token, `version` (absent for nodes that report none), `updatable` (installed by the installer) and `updateAvailable` (older than the hub) |
 | POST | `/api/nodes` | Add a node (`{"id", "provider"}`, provider `vz`, `firecracker` or `cloud-hypervisor`), state `pending` |
 | DELETE | `/api/nodes/{id}` | Delete a node without VMs |
 | GET | `/api/nodes/{id}/config?host=` | The node's `node.json`; `host` overrides the hub address (default: client endpoint) |
@@ -34,7 +34,7 @@
 | PATCH | `/api/disks/{id}?restartAllowed=true` | Grow a disk (`sizeGB`, must be larger; no shrinking). An attached running VM is restarted to see the new size and needs `restartAllowed=true`, else 409 |
 | POST | `/api/disks/{id}/release?force=true` | Force-end a release that the node cannot confirm. Only while the node is offline (else 409); `force=true` is required. Anything the node still writes to the disk is lost |
 | DELETE | `/api/disks/{id}` | Delete a disk. 409 while it is attached, releasing, or the source of a pending copy |
-| GET | `/api/storage` | Storage server state: `online`, `endpoint`, and `orphans` (files on the server that no disk refers to) |
+| GET | `/api/storage` | Storage server state: `online`, `endpoint`, `version`, and `orphans` (files on the server that no disk refers to) |
 | GET | `/api/devices` | Client devices |
 | POST | `/api/devices` | Add a device (`name`, optional `onHub` for a device on the hub machine), returns the device and its WireGuard config |
 | DELETE | `/api/devices/{id}` | Remove a device |

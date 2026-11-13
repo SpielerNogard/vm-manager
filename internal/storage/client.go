@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/version"
 )
 
 const (
@@ -49,7 +50,7 @@ func connect(ctx context.Context, hubURL, token string, dir Dir, report time.Dur
 	}
 	defer c.CloseNow()
 	c.SetReadLimit(messageLimit)
-	if err := wsjson.Write(ctx, c, proto.StorageMessage{Type: "register"}); err != nil {
+	if err := wsjson.Write(ctx, c, proto.StorageMessage{Type: "register", Version: version.Version}); err != nil {
 		return err
 	}
 

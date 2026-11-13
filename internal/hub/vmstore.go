@@ -33,7 +33,8 @@ type StoredNode struct {
 	Machine    *proto.Machine `json:"machine,omitempty"`
 	DesiredSeq uint64         `json:"desiredSeq,omitempty"` // persisted so a hub restart never reuses a seq
 	// Pending marks a node created on the hub that has never registered.
-	Pending bool `json:"pending,omitempty"`
+	Pending bool   `json:"pending,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 type vmState struct {

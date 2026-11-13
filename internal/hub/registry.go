@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"vm-manager/internal/proto"
+	"vm-manager/internal/version"
 	"vm-manager/internal/wgkey"
 )
 
@@ -75,6 +76,10 @@ type Node struct {
 	Config      json.RawMessage `json:"config,omitempty"`
 	Machine     *proto.Machine  `json:"machine,omitempty"`
 	Chassis     *ChassisState   `json:"chassis,omitempty"`
+	Version     string          `json:"version,omitempty"`
+	// Updatable is whether the node was installed by the installer; UpdateAvailable whether it is older than the hub.
+	Updatable       bool `json:"updatable"`
+	UpdateAvailable bool `json:"updateAvailable"`
 }
 
 type ChassisState struct {
@@ -134,7 +139,7 @@ type nodeEntry struct {
 
 func (n *nodeEntry) stored() StoredNode {
 	return StoredNode{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, DesiredSeq: n.seq,
-		Pending: n.State == NodePending}
+		Pending: n.State == NodePending, Version: n.Version}
 }
 
 type Registry struct {
@@ -153,6 +158,8 @@ type Registry struct {
 	// storageReported is whether storageFiles came from the current connection, so an absent file means missing.
 	storageReported bool
 	storageSendMu   sync.Mutex
+	storageVersion  string
+	gatewayVersion  string
 }
 
 func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigStore) *Registry {
@@ -163,7 +170,7 @@ func NewRegistry(net *NetModel, store *VMStore, disks *DiskStore, cfg *ConfigSto
 		if n.Pending {
 			state = NodePending
 		}
-		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state},
+		r.nodes[n.ID] = &nodeEntry{Node: Node{ID: n.ID, Hostname: n.Hostname, Provider: n.Provider, CPUs: n.CPUs, MemoryMB: n.MemoryMB, Machine: n.Machine, State: state, Version: n.Version},
 			seq: n.DesiredSeq}
 	}
 	for _, s := range store.VMs() {
@@ -227,7 +234,7 @@ func (r *Registry) nodeConnected(reg proto.Register, c NodeConn) (*proto.Underla
 	prev := r.nodes[reg.NodeID]
 	n := &nodeEntry{
 		Node: Node{ID: reg.NodeID, Hostname: reg.Hostname, Provider: reg.Provider, CPUs: reg.CPUs, MemoryMB: reg.MemoryMB, State: NodeOnline,
-			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine},
+			ConnectedAt: time.Now().UTC(), Config: reg.Config, Machine: reg.Machine, Version: reg.Version, Updatable: reg.Updatable},
 		conn: c,
 	}
 	if prev != nil {
@@ -809,6 +816,7 @@ func (r *Registry) Nodes() []Node {
 	for _, n := range r.nodes {
 		node := n.Node
 		node.FreeCPUs, node.FreeMemoryMB = r.free(n)
+		node.UpdateAvailable = version.Older(n.Version, version.Version)
 		out = append(out, node)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
