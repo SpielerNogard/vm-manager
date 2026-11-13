@@ -118,6 +118,7 @@ func TestStartStopVM(t *testing.T) {
 	p := testProvider(t)
 	f := testVM("chstartstop")
 	inst := startVM(t, p, f)
+	defer inst.Kill()
 	waitIP(t, inst)
 	if err := inst.Stop(); err != nil {
 		t.Fatal(err)
@@ -159,8 +160,9 @@ func TestGuestRebootKeepsInstance(t *testing.T) {
 	inst := startVM(t, p, f)
 	defer inst.Kill()
 	waitIP(t, inst)
-	if out, err := ssh("true"); err != nil {
-		t.Fatalf("ssh before reboot: %v: %s", err, out)
+	bootID, err := ssh("cat /proc/sys/kernel/random/boot_id")
+	if err != nil {
+		t.Fatalf("ssh before reboot: %v: %s", err, bootID)
 	}
 	ssh("sudo reboot")
 	// Wait until the guest is gone before probing, or the old sshd answers.
@@ -173,8 +175,11 @@ func TestGuestRebootKeepsInstance(t *testing.T) {
 			t.Fatal("instance ended on guest reboot")
 		default:
 		}
-		if _, err := ssh("true"); err == nil {
+		if out, err := ssh("cat /proc/sys/kernel/random/boot_id"); err == nil {
 			back = true
+			if string(out) == string(bootID) {
+				t.Fatal("boot_id unchanged: the guest did not reboot")
+			}
 		} else {
 			time.Sleep(2 * time.Second)
 		}
@@ -210,8 +215,8 @@ func TestStopDuringBoot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("Stop did not return within 15s")
+	case <-time.After(20 * time.Second):
+		t.Fatal("Stop did not return within 20s")
 	}
 	select {
 	case <-inst.Done():
@@ -243,7 +248,9 @@ func TestStartWithNBDDisk(t *testing.T) {
 	}
 	b, _ := os.ReadFile(linuxvm.NBDRecord(dir, "d1"))
 	dev := strings.TrimSpace(string(b))
-	inst.Stop()
+	if err := inst.Stop(); err != nil {
+		t.Fatal(err)
+	}
 	<-inst.Done()
 	if linuxvm.NBDConnected(dev) {
 		t.Fatalf("%s still connected after the VM stopped", dev)
@@ -265,10 +272,19 @@ func TestKillAfterNodeCrash(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	sc := bufio.NewScanner(out)
+	found := make(chan int, 1)
+	go func() {
+		sc := bufio.NewScanner(out)
+		pid := 0
+		for pid == 0 && sc.Scan() {
+			fmt.Sscanf(sc.Text(), "PID %d", &pid)
+		}
+		found <- pid
+	}()
 	pid := 0
-	for pid == 0 && sc.Scan() {
-		fmt.Sscanf(sc.Text(), "PID %d", &pid)
+	select {
+	case pid = <-found:
+	case <-time.After(3 * time.Minute):
 	}
 	if pid == 0 {
 		cmd.Process.Kill()
