@@ -2,21 +2,21 @@
 
 ## Releases
 
-Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`hub`, `gateway`, `storage`, `node`, `netagent` per OS/arch, plus `SHA256SUMS`) on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version. Every pull request checks its commits with `cz check`, so a message that is not a conventional commit fails CI. The release workflow runs the tests before tagging. If a release build still fails after the tag was pushed, re-run the failed jobs of that workflow run; if the code needs a fix, delete the orphan tag (`git push origin :refs/tags/vX.Y.Z`) and the next release-worthy commit on `main` releases a new version.
+Every push to `main` with `feat`/`fix`/breaking commits gets a release: CI bumps the version with Commitizen, updates `CHANGELOG.md`, tags `vX.Y.Z` and publishes all binaries (`vm-manager-hub`, `vm-manager-node`, `gateway`, `storage`, `netagent` per OS/arch, plus `SHA256SUMS`) on the [releases page](https://github.com/SpielerNogard/vm-manager/releases). Before 1.0, breaking changes bump the minor version. Every pull request checks its commits with `cz check`, so a message that is not a conventional commit fails CI. The release workflow runs the tests before tagging. If a release build still fails after the tag was pushed, re-run the failed jobs of that workflow run; if the code needs a fix, delete the orphan tag (`git push origin :refs/tags/vX.Y.Z`) and the next release-worthy commit on `main` releases a new version.
 
 ## Build
 
 ```sh
-make web hub node   # node binary is ad-hoc signed with the virtualization entitlement
+make web hub node   # bin/hub and bin/vm-manager-node; the node is ad-hoc signed with the virtualization entitlement
 make test
 make web dist dist-darwin checksums VERSION=v0.0.0   # all release binaries into dist/, as CI does
 ```
 
 Builds outside a release report version `dev`; `GET /api/version` shows the hub's.
 
-`make node-linux` builds `bin/node-linux-amd64` for Linux nodes (Firecracker or Cloud Hypervisor).
+`make node-linux` builds `bin/vm-manager-node-linux-amd64` for Linux nodes (Firecracker or Cloud Hypervisor).
 
-`make node` also builds `bin/netagent-linux-arm64`, which must stay next to the `node` binary: the node boots a small helper VM (`<paths.vms>/_netvm`) that runs it.
+`make node` also builds `bin/netagent-linux-arm64`, which must stay next to the `vm-manager-node` binary: the node boots a small helper VM (`<paths.vms>/_netvm`) that runs it.
 
 ## Run
 
@@ -68,17 +68,17 @@ The installer downloads the node of the hub's release (verified against `SHA256S
 
 | | Linux (`firecracker`, `cloud-hypervisor`) | macOS (`vz`) |
 |---|---|---|
-| Binary | `/usr/local/bin/vm-manager-node` | `~/.vm-manager/bin/node` |
+| Binary | `/usr/local/bin/vm-manager-node` | `~/.vm-manager/bin/vm-manager-node` |
 | Config | `/etc/vm-manager/node.json` | `~/.vm-manager/node.json` |
 | Data | `/var/lib/vm-manager/{vms,images}` | `~/.vm-manager/{vms,images}` |
 | Service | systemd `vm-manager-node` (`journalctl -u vm-manager-node`) | launchd agent `dev.vm-manager.node` (log `~/.vm-manager/node.log`) |
 
-On macOS, a hub in the LAN needs Local Network access for `node` (System Settings → Privacy & Security → Local Network); macOS asks on the first connection.
+On macOS, a hub in the LAN needs Local Network access for `vm-manager-node` (System Settings → Privacy & Security → Local Network); macOS asks on the first connection. Later updates keep the access, because the binary carries a fixed signing identifier; the first update from v0.4.0 or older asks once more.
 
 The detail page also shows the plain `node.json` under **Manual setup**. Save it as `~/.vm-manager/node.json` on the node and start it:
 
 ```sh
-./bin/node   # config defaults to ~/.vm-manager/node.json
+./bin/vm-manager-node   # config defaults to ~/.vm-manager/node.json
 ```
 
 Node states are `pending` (added, never connected), `online` and `offline`. Nodes without VMs can be deleted in any state; a deleted node that keeps running reconnects and appears again. Unknown nodes can also register themselves with the token. For a manual config copy `node.example.json` and set `hub.url` (`ws://<hub>:<HUB_PORT>/api/nodes/connect`), the same token and paths.
@@ -153,7 +153,7 @@ grep -qs 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf || echo 'include 
 systemctl enable nftables && nft -f /etc/nftables.d/vm-manager.nft   # restarting nftables would flush Docker's rules
 ```
 
-Copy `bin/node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM (for `firecracker` also its `jailer`), `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
+Copy `bin/vm-manager-node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM (for `firecracker` also its `jailer`), `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
 
 Differences to vz nodes: a VM's NAT NIC gets a static address on `vmm0` instead of DHCP. On `firecracker` nodes, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, .... Firecracker has no ACPI power-off, so after a `poweroff` inside the guest the node ends the halted Firecracker process. Each Firecracker runs under the jailer: chrooted into a jail below `<paths.vms>/<vm>/jail` and as its own unprivileged UID and GID (70000 plus the last octet of the VM's NAT address, so 70002 to 70254 must be unused on the host), not as root. `paths.vms` must not be on a filesystem mounted `nodev`, and the node sets each VM directory to mode 0700.
 

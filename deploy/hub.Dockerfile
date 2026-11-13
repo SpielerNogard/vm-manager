@@ -24,9 +24,9 @@ ARG TARGETARCH
 RUN { [ -n "$VMM_VERSION" ] || { echo "VMM_VERSION is not set: put the release to run into deploy/.env" >&2; exit 1; }; } \
     && apk add --no-cache curl \
     && base=https://github.com/SpielerNogard/vm-manager/releases/download/$VMM_VERSION \
-    && curl -fsSLO "$base/hub-linux-$TARGETARCH" && curl -fsSLO "$base/SHA256SUMS" \
-    && grep "  hub-linux-$TARGETARCH\$" SHA256SUMS | sha256sum -c - \
-    && install -m 0755 "hub-linux-$TARGETARCH" /hub
+    && curl -fsSLO "$base/vm-manager-hub-linux-$TARGETARCH" && curl -fsSLO "$base/SHA256SUMS" \
+    && grep "  vm-manager-hub-linux-$TARGETARCH\$" SHA256SUMS | sha256sum -c - \
+    && install -m 0755 "vm-manager-hub-linux-$TARGETARCH" /hub
 
 FROM bin-${VMM_BIN} AS bin
 

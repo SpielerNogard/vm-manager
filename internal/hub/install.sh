@@ -83,7 +83,7 @@ sha256_check() {
 }
 
 say "downloading node $VERSION for $PLATFORM"
-FILES="node-$PLATFORM"
+FILES="vm-manager-node-$PLATFORM"
 [ "$PLATFORM" = linux-amd64 ] || FILES="$FILES netagent-linux-arm64"
 fetch SHA256SUMS
 for f in $FILES; do
@@ -186,7 +186,7 @@ EOF
 	$SUDO nft -f /etc/nftables.d/vm-manager.nft
 
 	say "installing the node"
-	$SUDO install -m 0755 "$TMP/node-linux-amd64" /usr/local/bin/vm-manager-node
+	$SUDO install -m 0755 "$TMP/vm-manager-node-linux-amd64" /usr/local/bin/vm-manager-node
 	node_init $SUDO /usr/local/bin/vm-manager-node init -config /etc/vm-manager/node.json
 	$SUDO tee /etc/systemd/system/vm-manager-node.service >/dev/null <<'EOF'
 [Unit]
@@ -224,9 +224,10 @@ install_macos() {
 	dir=$HOME/.vm-manager
 	mkdir -p "$dir/bin" "$HOME/Library/LaunchAgents"
 	say "installing the node to $dir/bin"
-	install -m 0755 "$TMP/node-darwin-arm64" "$dir/bin/node"
+	install -m 0755 "$TMP/vm-manager-node-darwin-arm64" "$dir/bin/vm-manager-node"
+	rm -f "$dir/bin/node"
 	install -m 0755 "$TMP/netagent-linux-arm64" "$dir/bin/netagent-linux-arm64"
-	node_init "$dir/bin/node" init -config "$dir/node.json"
+	node_init "$dir/bin/vm-manager-node" init -config "$dir/node.json"
 	plist=$HOME/Library/LaunchAgents/$LABEL.plist
 	cat >"$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -235,7 +236,7 @@ install_macos() {
 <dict>
 	<key>Label</key><string>$LABEL</string>
 	<key>ProgramArguments</key>
-	<array><string>$dir/bin/node</string><string>-config</string><string>$dir/node.json</string></array>
+	<array><string>$dir/bin/vm-manager-node</string><string>-config</string><string>$dir/node.json</string></array>
 	<key>RunAtLoad</key><true/>
 	<key>KeepAlive</key><true/>
 	<key>StandardOutPath</key><string>$dir/node.log</string>
@@ -255,7 +256,7 @@ EOF
 	done
 	wait_connected "$dir/node.log" "$offset" || {
 		tail -n 20 "$dir/node.log" >&2
-		die "the node did not connect to $HUB within 30 s (log: $dir/node.log); for a hub in the LAN, allow Local Network access for 'node' in System Settings"
+		die "the node did not connect to $HUB within 30 s (log: $dir/node.log); for a hub in the LAN, allow Local Network access for 'vm-manager-node' in System Settings"
 	}
 }
 

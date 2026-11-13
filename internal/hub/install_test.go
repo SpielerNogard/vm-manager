@@ -110,3 +110,26 @@ func TestInstallScriptHostSafety(t *testing.T) {
 		t.Error("node start is not tracked by journal cursor")
 	}
 }
+
+func TestInstallScriptBinaryNames(t *testing.T) {
+	s, err := os.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(s)
+	for _, want := range []string{
+		`FILES="vm-manager-node-$PLATFORM"`,
+		`"$TMP/vm-manager-node-linux-amd64" /usr/local/bin/vm-manager-node`,
+		`"$TMP/vm-manager-node-darwin-arm64" "$dir/bin/vm-manager-node"`,
+		`rm -f "$dir/bin/node"`,
+		`<string>$dir/bin/vm-manager-node</string>`,
+		`Local Network access for 'vm-manager-node'`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("install.sh lacks %q", want)
+		}
+	}
+	if strings.Contains(script, `"$dir/bin/node" init`) {
+		t.Error("old macOS binary path still used")
+	}
+}

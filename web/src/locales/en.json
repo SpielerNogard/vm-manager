@@ -162,7 +162,7 @@
     "hubAddress": "Hub address for this node",
     "hubAddressHint": "Use localhost for the hub's own Mac, or a LAN IP when nodes reach the hub differently.",
     "download": "Download node.json",
-    "saveHint": "Save as ~/.vm-manager/node.json on the node and start ./bin/node",
+    "saveHint": "Save as ~/.vm-manager/node.json on the node and start ./bin/vm-manager-node",
     "copyFailed": "Copy failed; select the text manually.",
     "delete": "Delete node",
     "deleteBlocked": "This node still has VMs",

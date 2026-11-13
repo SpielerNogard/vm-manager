@@ -98,7 +98,9 @@ jobs:
         env:
           VERSION: v${{ needs.bump.outputs.version }}
       # Without the entitlement vz refuses to start VMs.
-      - run: codesign -d --entitlements - dist/node-darwin-arm64 | grep -q com.apple.security.virtualization
+      - run: codesign -d --entitlements - dist/vm-manager-node-darwin-arm64 | grep -q com.apple.security.virtualization
+      # macOS keeps the Local Network grant across releases only for a fixed identifier.
+      - run: codesign -dv dist/vm-manager-node-darwin-arm64 2>&1 | grep -qx 'Identifier=dev.vm-manager.node'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: darwin
