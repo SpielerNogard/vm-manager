@@ -72,7 +72,7 @@
     "create": "Create node",
     "pendingLabel": "waiting for first connection",
     "providerPlaceholder": "Choose a hypervisor",
-    "providerHint": "vz for a Mac (Apple Silicon), firecracker for a Linux host (amd64 with KVM)."
+    "providerHint": "vz for a Mac (Apple Silicon), firecracker or cloud-hypervisor for a Linux host (amd64 with KVM)."
   },
   "vms": {
     "new": "New VM",

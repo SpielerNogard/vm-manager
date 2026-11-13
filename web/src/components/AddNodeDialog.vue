@@ -64,6 +64,7 @@ async function submit() {
             <option value="" disabled>{{ t('nodes.providerPlaceholder') }}</option>
             <option value="vz">vz</option>
             <option value="firecracker">firecracker</option>
+            <option value="cloud-hypervisor">cloud-hypervisor</option>
           </select>
           <span class="text-base-content/60 mt-1 block text-xs">{{ t('nodes.providerHint') }}</span>
         </label>

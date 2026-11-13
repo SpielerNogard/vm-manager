@@ -1,0 +1,14 @@
+{
+  "nodeId": "linux-ch-1",
+  "hub": { "url": "ws://hub.example:8080/api/nodes/connect", "token": "change-me" },
+  "provider": "cloud-hypervisor",
+  "paths": {
+    "vms": "/var/lib/vm-manager/vms",
+    "images": "/var/lib/vm-manager/images"
+  },
+  "underlay": { "mtu": 1420 },
+  "cloud-hypervisor": {
+    "firmware": "/usr/local/share/cloud-hypervisor/CLOUDHV.fd",
+    "imageURL": "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
+  }
+}

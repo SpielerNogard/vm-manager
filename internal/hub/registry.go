@@ -283,7 +283,7 @@ func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 	}
 }
 
-var providers = []string{"vz", "firecracker"}
+var providers = []string{"vz", "firecracker", "cloud-hypervisor"}
 
 func (r *Registry) CreateNode(id, provider string) (Node, error) {
 	if !slices.Contains(providers, provider) {
@@ -390,7 +390,7 @@ func (r *Registry) NodeConfig(id, host string) ([]byte, error) {
 		return nil, err
 	}
 	paths := "~/.vm-manager"
-	if provider == "firecracker" {
+	if provider == "firecracker" || provider == "cloud-hypervisor" {
 		paths = "/var/lib/vm-manager"
 	} else if provider == "" {
 		provider = "vz"

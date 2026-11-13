@@ -1,4 +1,4 @@
-// Package chassisconf joins a host to the hub's underlay and OVN; netagent runs it in the Mac netvm, the firecracker provider on the Linux host.
+// Package chassisconf joins a host to the hub's underlay and OVN; netagent runs it in the Mac netvm, the Linux providers on the host.
 package chassisconf
 
 import (
