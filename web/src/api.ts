@@ -16,6 +16,14 @@ export interface Node {
   chassis?: Chassis
   /** Set when the node registered with another hypervisor than it was created for. */
   error?: string
+  /** Absent for nodes that report none (older than the update feature). */
+  version?: string
+  /** Installed by the installer, so the hub can update it. */
+  updatable: boolean
+  updateAvailable: boolean
+  updating?: boolean
+  /** Why the last update failed, with the end of the installer output. */
+  updateError?: string
 }
 
 export interface Chassis {
@@ -69,6 +77,7 @@ export interface StorageFile {
 export interface Storage {
   online: boolean
   endpoint: string
+  version?: string
   orphans: StorageFile[]
 }
 
@@ -147,6 +156,18 @@ export interface Settings {
   vmsWithDisks: number
 }
 
+export interface Updates {
+  version: string
+  gateway?: string
+  storage?: string
+  latest?: string
+  checkedAt?: string
+  checkError?: string
+  updateAvailable: boolean
+  /** none: development build, no check. manual: the operator upgrades the stack. self: the hub updates itself. */
+  hubUpdate: 'none' | 'manual' | 'self'
+}
+
 export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string }; storage?: { endpoint?: string } }
 
 export interface CreateVMRequest {
@@ -182,6 +203,9 @@ export const api = {
   nodes: () => request<Node[]>('GET', '/api/nodes'),
   createNode: (id: string, provider: string) => request<Node>('POST', '/api/nodes', { id, provider }),
   deleteNode: (id: string) => request<void>('DELETE', `/api/nodes/${id}`),
+  updateNode: (id: string) => request<void>('POST', `/api/nodes/${id}/update`),
+  updates: () => request<Updates>('GET', '/api/updates'),
+  checkUpdates: () => request<Updates>('POST', '/api/updates/check'),
   nodeConfig: (id: string, host?: string) =>
     text(`/api/nodes/${id}/config${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   installCommand: (id: string, host?: string) =>

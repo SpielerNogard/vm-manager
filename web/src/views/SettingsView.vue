@@ -9,11 +9,11 @@ import DataState from '@/components/DataState.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useFleet } from '@/composables/useFleet'
 
-type Tab = 'networking' | 'security' | 'guests'
+type Tab = 'networking' | 'security' | 'guests' | 'updates'
 type Pending = 'endpoint' | 'token' | 'regenerate'
 
-const { t } = useI18n()
-const { settings, loaded, refresh } = useFleet()
+const { t, locale } = useI18n()
+const { settings, updates, loaded, refresh } = useFleet()
 
 const tab = ref<Tab>('networking')
 const endpoint = ref('')
@@ -41,7 +41,7 @@ else {
   })
 }
 
-const tabs: Tab[] = ['networking', 'security', 'guests']
+const tabs: Tab[] = ['networking', 'security', 'guests', 'updates']
 const setupPending = computed(() => settings.value?.setupComplete === false)
 const ports = computed(() => [
   { key: 'listen', value: settings.value?.listen },
@@ -140,6 +140,39 @@ watch(tab, () => {
   error.value = ''
   savedTab.value = null
 })
+
+const COMPOSE_UPGRADE = 'docker compose -f deploy/compose.yaml up -d --build'
+const checking = ref(false)
+const copiedCommand = ref(false)
+const checkedAgo = computed(() => {
+  const at = updates.value?.checkedAt
+  if (!at) return ''
+  const minutes = Math.round((new Date(at).getTime() - Date.now()) / 60000)
+  const rtf = new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' })
+  return Math.abs(minutes) < 60 ? rtf.format(minutes, 'minute') : rtf.format(Math.round(minutes / 60), 'hour')
+})
+
+async function checkNow() {
+  checking.value = true
+  error.value = ''
+  try {
+    updates.value = await api.checkUpdates()
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    checking.value = false
+  }
+}
+
+async function copyCommand() {
+  try {
+    await navigator.clipboard.writeText(COMPOSE_UPGRADE)
+    copiedCommand.value = true
+    setTimeout(() => (copiedCommand.value = false), 1500)
+  } catch {
+    error.value = t('node.copyFailed')
+  }
+}
 </script>
 
 <template>
@@ -235,7 +268,7 @@ watch(tab, () => {
           </form>
 
           <form
-            v-else
+            v-else-if="tab === 'guests'"
             class="flex flex-col gap-4"
             @submit.prevent="apply('guests', patch({ guestMTU: mtu }))"
           >
@@ -249,6 +282,45 @@ watch(tab, () => {
               <span v-if="savedTab === 'guests'" class="text-success text-sm">{{ t('settings.saved') }}</span>
             </div>
           </form>
+
+          <div v-else-if="updates" class="flex flex-col gap-4 text-sm">
+            <dl class="grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2">
+              <dt class="text-base-content/60">{{ t('settings.updates.hubVersion') }}</dt>
+              <dd>
+                <span class="font-token">{{ updates.version }}</span>
+                <span class="text-base-content/60">
+                  · {{ t('settings.updates.gateway') }} <span class="font-token">{{ updates.gateway || '—' }}</span> ·
+                  {{ t('settings.updates.storage') }} <span class="font-token">{{ updates.storage || '—' }}</span>
+                </span>
+              </dd>
+              <template v-if="updates.hubUpdate !== 'none'">
+                <dt class="text-base-content/60">{{ t('settings.updates.latest') }}</dt>
+                <dd class="flex flex-wrap items-center gap-3">
+                  <span class="font-token">{{ updates.latest || '—' }}</span>
+                  <span v-if="checkedAgo" class="text-base-content/60 text-xs">{{ t('settings.updates.checked', { ago: checkedAgo }) }}</span>
+                  <button type="button" class="btn btn-sm" :disabled="checking" @click="checkNow">
+                    <span v-if="checking" class="loading loading-spinner loading-xs"></span>
+                    {{ t('settings.updates.checkNow') }}
+                  </button>
+                </dd>
+              </template>
+            </dl>
+            <div v-if="updates.checkError" role="alert" class="alert alert-error alert-soft text-sm">
+              {{ t('settings.updates.checkFailed', { error: updates.checkError }) }}
+            </div>
+            <p v-if="updates.hubUpdate === 'none'" class="text-base-content/60">{{ t('settings.updates.devBuild') }}</p>
+            <template v-else-if="updates.updateAvailable">
+              <p>{{ t('settings.updates.manual', { version: updates.latest }) }}</p>
+              <pre class="bg-base-200 rounded-box font-token p-3 text-xs break-all whitespace-pre-wrap">{{ COMPOSE_UPGRADE }}</pre>
+              <div>
+                <button type="button" class="btn btn-sm" @click="copyCommand">
+                  <AppIcon :name="copiedCommand ? 'check' : 'copy'" />
+                  {{ copiedCommand ? t('vms.copied') : t('vms.copy') }}
+                </button>
+              </div>
+            </template>
+            <p v-else-if="updates.latest" class="text-base-content/60">{{ t('settings.updates.upToDate') }}</p>
+          </div>
         </div>
       </div>
     </DataState>

@@ -40,6 +40,7 @@ const addOpen = ref(false)
             <th>{{ t('common.status') }}</th>
             <th>{{ t('nodes.chassis') }}</th>
             <th>{{ t('nodes.provider') }}</th>
+            <th>{{ t('nodes.version') }}</th>
             <th class="text-right">{{ t('nodes.capacity') }}</th>
             <th class="text-right">{{ t('nodes.free') }}</th>
           </tr>
@@ -79,6 +80,14 @@ const addOpen = ref(false)
             <td>
               <span v-if="n.provider" class="badge badge-sm badge-outline font-token">{{ n.provider }}</span>
               <span v-else class="text-base-content/50 text-xs">—</span>
+            </td>
+            <td class="text-sm">
+              <span v-if="n.state === 'pending'" class="text-base-content/50 text-xs">—</span>
+              <template v-else>
+                <span v-if="n.version" class="font-token">{{ n.version }}</span>
+                <span v-else class="text-base-content/60">{{ t('nodes.versionUnknown') }}</span>
+                <div v-if="n.updateAvailable" class="text-xs"><StateBadge :label="t('nodes.updateAvailable')" tone="warning" /></div>
+              </template>
             </td>
             <td class="text-right text-sm tabular-nums">
               <span v-if="n.state === 'pending'" class="text-base-content/50">—</span>

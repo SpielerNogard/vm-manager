@@ -40,6 +40,7 @@ Settings page:
 | Networking | Client endpoint (host name or IP, no scheme or port) that devices connect to. Storage endpoint (`host:port`) nodes use for disks; empty means the client endpoint with the storage port. Ports and listen address are shown read-only |
 | Security | Node token: show, copy, regenerate or set (at least 16 characters) |
 | Guests | Guest mgmt MTU (576-9000), delivered by OVN DHCP |
+| Updates | Versions of hub, gateway and storage, the latest release, and how to update |
 
 Changes apply without a restart; the gateway re-reads the token automatically.
 
