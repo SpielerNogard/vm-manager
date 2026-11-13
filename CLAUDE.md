@@ -1,8 +1,12 @@
-## Documentation
+# CLAUDE.md
 
-Treat docs as living code that decays. When a change touches behaviour, a command, a config key, a provider or the install path, update the docs that describe it (`README.md`, `docs/*.md`, example configs, doc comments) in the same change.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-If you come across a section that no longer matches reality (wrong command, renamed file, removed flag, stale platform or architecture description), say so explicitly and fix it in the same change. Never leave incorrect docs behind because they are "outside the ticket scope".
+## Rules
+
+Follow these conventions:
+@.agents/rules/maintenance.md
+@.agents/rules/commits.md
 
 ## Testing on real machines
 
