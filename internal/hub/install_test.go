@@ -98,6 +98,10 @@ func TestInstallScriptHostSafety(t *testing.T) {
 	if !strings.Contains(script, "DOCKER-USER") {
 		t.Error("no DOCKER-USER rule for vmm0")
 	}
+	// A host with the right Firecracker but no or another jailer (installed before the jailer was used) must still get it.
+	if !strings.Contains(script, `"$(jailer --version 2>/dev/null | head -1)" != "Jailer $FIRECRACKER_VERSION"`) || !strings.Contains(script, "/usr/local/bin/jailer") {
+		t.Error("jailer is not installed alongside firecracker")
+	}
 	if !strings.Contains(script, "--connect-timeout") {
 		t.Error("hub requests have no connect timeout")
 	}

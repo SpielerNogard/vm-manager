@@ -54,8 +54,9 @@ func DetachAll(vmID, dir string, nbdIDs []string) {
 	}
 }
 
-// Spawn starts cmd with the VM's taps and console; once it exits, the taps and the NBD disks are released.
-func Spawn(f node.VMFile, dir string, cmd *exec.Cmd, nbdIDs []string) (*Process, error) {
+// Spawn starts cmd with the VM's taps (owned by tapOwner if > 0) and console; once it exits, the taps and the NBD disks are released.
+// onExit, if set, runs when cmd is gone (or did not start) and before Done reports it.
+func Spawn(f node.VMFile, dir string, cmd *exec.Cmd, nbdIDs []string, tapOwner int, onExit func()) (*Process, error) {
 	console := filepath.Join(dir, node.ConsoleLog)
 	offset, err := node.ConsoleOffset(console)
 	if err != nil {
@@ -65,14 +66,17 @@ func Spawn(f node.VMFile, dir string, cmd *exec.Cmd, nbdIDs []string) (*Process,
 	if err != nil {
 		return nil, err
 	}
-	if err := SetupTaps(f); err != nil {
+	if err := SetupTaps(f, tapOwner); err != nil {
 		out.Close()
 		RemoveTaps(f)
 		return nil, fmt.Errorf("taps: %w", err)
 	}
 	cmd.Stdout, cmd.Stderr = out, out
 	// The node's death must take its VMs along, as with vz; see the LockOSThread below.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 	p := &Process{Cmd: cmd, Console: console, Offset: offset, IP: node.MgmtIP(f), done: make(chan struct{})}
 	started := make(chan error, 1)
 	go func() {
@@ -85,6 +89,9 @@ func Spawn(f node.VMFile, dir string, cmd *exec.Cmd, nbdIDs []string) (*Process,
 		}
 		out.Close()
 		RemoveTaps(f)
+		if onExit != nil {
+			onExit()
+		}
 		if err == nil {
 			DetachAll(f.Spec.ID, dir, nbdIDs)
 			close(p.done)

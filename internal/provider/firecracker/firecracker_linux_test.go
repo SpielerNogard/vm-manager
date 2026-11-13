@@ -140,7 +140,17 @@ func TestKillAfterNodeCrash(t *testing.T) {
 	if os.Getenv("VMM_FC_HELPER") == "1" {
 		p := testProvider(t)
 		inst := startVM(t, p, testVM("fccrash"))
-		fmt.Println("PID", inst.(*instance).Cmd.Process.Pid)
+		// The direct child is the PID namespace's shell; its only child is the jailer that becomes Firecracker.
+		sh := strconv.Itoa(inst.(*instance).Cmd.Process.Pid)
+		var kid string
+		for deadline := time.Now().Add(5 * time.Second); kid == "" && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			b, _ := os.ReadFile("/proc/" + sh + "/task/" + sh + "/children")
+			kid = strings.TrimSpace(string(b))
+		}
+		if kid == "" {
+			t.Fatal("no jailer under the VM's shell")
+		}
+		fmt.Println("PID", kid)
 		time.Sleep(time.Hour)
 		return
 	}
@@ -169,5 +179,70 @@ func TestKillAfterNodeCrash(t *testing.T) {
 			t.Fatalf("firecracker %s survived its node", strconv.Itoa(pid))
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestStartRunsJailed(t *testing.T) {
+	p := testProvider(t)
+	f := testVM("fcjailed")
+	inst := startVM(t, p, f)
+	defer inst.Kill()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	if _, err := inst.WaitIP(ctx); err != nil {
+		t.Fatalf("WaitIP: %v", err)
+	}
+	ip, err := linuxvm.AllocNATIP(p.VMsDir, f.Spec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, err := jailUID(ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Firecracker creates the API socket itself, so its owner is the UID the VMM runs as.
+	st, err := os.Stat(inst.(*instance).sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := int(st.Sys().(*syscall.Stat_t).Uid); got != uid {
+		t.Fatalf("socket owner uid %d, want %d", got, uid)
+	}
+}
+
+func TestRestartVM(t *testing.T) {
+	p := testProvider(t)
+	f := testVM("fcrestart")
+	inst := startVM(t, p, f)
+	inst.Kill()
+	<-inst.Done()
+	// A stopped VM must not leave device nodes owned by its UID behind.
+	if _, err := os.Stat(jailBase(node.VMDir(p.VMsDir, f.Spec.ID))); !os.IsNotExist(err) {
+		t.Fatalf("jail still exists after the VM stopped: %v", err)
+	}
+	inst, err := p.Start(f, node.VMDir(p.VMsDir, f.Spec.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inst.Kill()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	if _, err := inst.WaitIP(ctx); err != nil {
+		t.Fatalf("WaitIP after restart: %v", err)
+	}
+}
+
+// A deep paths.vms pushes the API socket beyond the 107-byte unix socket limit; the node must still reach it.
+func TestCtrlAltDelWithLongSocketPath(t *testing.T) {
+	p := testProvider(t)
+	inst := startVM(t, p, testVM("fclong"+strings.Repeat("x", 44)))
+	defer inst.Kill()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	if _, err := inst.WaitIP(ctx); err != nil {
+		t.Fatalf("WaitIP: %v", err)
+	}
+	if err := inst.(*instance).sendCtrlAltDel(); err != nil {
+		t.Fatal(err)
 	}
 }

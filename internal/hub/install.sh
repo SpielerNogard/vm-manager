@@ -144,7 +144,8 @@ install_linux() {
 			$SUDO install -m 0755 "$TMP/cloud-hypervisor-static" /usr/local/bin/cloud-hypervisor
 			$SUDO install -D -m 0644 "$TMP/CLOUDHV.fd" "$fwfile"
 		fi
-	elif [ "$(firecracker --version 2>/dev/null | head -1)" != "Firecracker $FIRECRACKER_VERSION" ]; then
+	elif [ "$(firecracker --version 2>/dev/null | head -1)" != "Firecracker $FIRECRACKER_VERSION" ] ||
+		[ "$(jailer --version 2>/dev/null | head -1)" != "Jailer $FIRECRACKER_VERSION" ]; then
 		say "installing Firecracker $FIRECRACKER_VERSION"
 		fc=firecracker-$FIRECRACKER_VERSION-x86_64.tgz
 		url=https://github.com/firecracker-microvm/firecracker/releases/download/$FIRECRACKER_VERSION
@@ -154,6 +155,7 @@ install_linux() {
 		(cd "$TMP" && sha256_check "$fc.sha256.txt" >/dev/null) || die "Firecracker checksum mismatch"
 		tar -xzf "$TMP/$fc" -C "$TMP"
 		$SUDO install -m 0755 "$TMP/release-$FIRECRACKER_VERSION-x86_64/firecracker-$FIRECRACKER_VERSION-x86_64" /usr/local/bin/firecracker
+		$SUDO install -m 0755 "$TMP/release-$FIRECRACKER_VERSION-x86_64/jailer-$FIRECRACKER_VERSION-x86_64" /usr/local/bin/jailer
 	fi
 
 	say "preparing the host network (bridge vmm0, NAT for 192.168.64.0/24)"

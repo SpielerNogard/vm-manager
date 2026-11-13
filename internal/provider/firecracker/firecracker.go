@@ -36,7 +36,7 @@ func New(c node.Config) (*Provider, error) {
 	if err := c.ProviderSection(&s); err != nil {
 		return nil, fmt.Errorf("config firecracker section: %w", err)
 	}
-	if err := linuxvm.CheckHost("firecracker"); err != nil {
+	if err := linuxvm.CheckHost("firecracker", "jailer"); err != nil {
 		return nil, err
 	}
 	p := &Provider{VMsDir: c.Paths.VMs, ImagesDir: c.Paths.Images, ImageURL: s.ImageURL}
@@ -87,18 +87,11 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := vmConfig(f, kernel, initrd, drives)
-	if err != nil {
-		linuxvm.DetachAll(f.Spec.ID, dir, nbds)
-		return nil, err
+	files := []jailFile{{path: kernel, readOnly: true}, {path: initrd, readOnly: true}}
+	for i, d := range node.AttachOrder(f) {
+		files = append(files, jailFile{path: drives[i], readOnly: d.ReadOnly})
 	}
-	cfgPath, sock := filepath.Join(dir, "fc.json"), filepath.Join(dir, "fc.sock")
-	if err := os.WriteFile(cfgPath, cfg, 0o644); err != nil {
-		linuxvm.DetachAll(f.Spec.ID, dir, nbds)
-		return nil, err
-	}
-	os.Remove(sock)
-	proc, err := linuxvm.Spawn(f, dir, exec.Command("firecracker", "--api-sock", sock, "--config-file", cfgPath), nbds)
+	proc, sock, err := p.spawnJailed(f, dir, files, nbds)
 	if err != nil {
 		linuxvm.DetachAll(f.Spec.ID, dir, nbds)
 		return nil, err
@@ -109,6 +102,42 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		go p.nbd.Watch(f.Spec.ID, dir, id, proc.Done())
 	}
 	return &instance{Process: proc, sock: sock}, nil
+}
+
+// spawnJailed starts Firecracker under the jailer; files holds the kernel, the initrd and then the drives.
+func (p *Provider) spawnJailed(f node.VMFile, dir string, files []jailFile, nbds []string) (*linuxvm.Process, string, error) {
+	p.mu.Lock()
+	ip, err := linuxvm.AllocNATIP(p.VMsDir, f.Spec.ID)
+	p.mu.Unlock()
+	if err != nil {
+		return nil, "", err
+	}
+	uid, err := jailUID(ip)
+	if err != nil {
+		return nil, "", err
+	}
+	fcPath, err := exec.LookPath("firecracker")
+	if err != nil {
+		return nil, "", err
+	}
+	// The jail holds device nodes owned by the VM's UID; they must not outlive the VM.
+	removeJail := func() { os.RemoveAll(jailBase(dir)) }
+	inJail, err := buildJail(dir, uid, files)
+	if err != nil {
+		removeJail()
+		return nil, "", fmt.Errorf("jail: %w", err)
+	}
+	cfg, err := vmConfig(f, inJail[0], inJail[1], inJail[2:])
+	if err != nil {
+		removeJail()
+		return nil, "", err
+	}
+	if err := os.WriteFile(filepath.Join(jailRoot(dir), "fc.json"), cfg, 0o644); err != nil {
+		removeJail()
+		return nil, "", err
+	}
+	proc, err := linuxvm.Spawn(f, dir, jailerCmd(fcPath, dir, uid), nbds, uid, removeJail)
+	return proc, filepath.Join(jailRoot(dir), "fc.sock"), err
 }
 
 func (p *Provider) StartChassis(_ context.Context, c node.Chassis) error {
@@ -141,7 +170,13 @@ func (i *instance) sendCtrlAltDel() error {
 	if err != nil {
 		return err
 	}
-	resp, err := linuxvm.DialSocket(i.sock).Do(req)
+	// The jail path can exceed the 107-byte unix socket limit, so the socket is reached through its directory's fd.
+	d, err := os.Open(filepath.Dir(i.sock))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	resp, err := linuxvm.DialSocket(fmt.Sprintf("/proc/self/fd/%d/%s", d.Fd(), filepath.Base(i.sock))).Do(req)
 	if err != nil {
 		return err
 	}
