@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 
 	"vm-manager/internal/chassisconf"
 	"vm-manager/internal/node"
@@ -18,9 +19,11 @@ const (
 )
 
 // CheckHost fails early with what is missing; install.sh (or the manual setup docs) provides it.
-func CheckHost(binary string) error {
-	if _, err := exec.LookPath(binary); err != nil {
-		return fmt.Errorf("%s binary not in PATH: %w", binary, err)
+func CheckHost(binaries ...string) error {
+	for _, binary := range binaries {
+		if _, err := exec.LookPath(binary); err != nil {
+			return fmt.Errorf("%s binary not in PATH: %w", binary, err)
+		}
 	}
 	if f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0); err != nil {
 		return fmt.Errorf("KVM not usable: %w", err)
@@ -36,12 +39,16 @@ func CheckHost(binary string) error {
 	return nil
 }
 
-// SetupTaps recreates the VM's taps: eth0 on the NAT bridge, OVN NICs on br-int.
-func SetupTaps(f node.VMFile) error {
+// SetupTaps recreates the VM's taps: eth0 on the NAT bridge, OVN NICs on br-int. An owner > 0 may open them without root.
+func SetupTaps(f node.VMFile, owner int) error {
 	RemoveTaps(f)
+	add := []string{"tuntap", "add", "mode", "tap"}
+	if owner > 0 {
+		add = append(add, "user", strconv.Itoa(owner))
+	}
 	for i := 0; i <= len(f.Spec.NICs); i++ {
 		tap := TapName(f.Spec.ID, i)
-		if err := chassisconf.Run("ip", "tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
+		if err := chassisconf.Run("ip", append(add, "dev", tap)...); err != nil {
 			return err
 		}
 		if err := chassisconf.Run("ip", "link", "set", tap, "mtu", "1500", "up"); err != nil {

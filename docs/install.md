@@ -104,6 +104,7 @@ Linux nodes are amd64 hosts with KVM (Debian 13 or Ubuntu 24.04) using the `fire
 apt-get install -y openvswitch-switch ovn-host wireguard-tools nbd-client nftables
 curl -fsSL https://github.com/firecracker-microvm/firecracker/releases/download/v1.18.0/firecracker-v1.18.0-x86_64.tgz | tar -xz -C /tmp
 install /tmp/release-v1.18.0-x86_64/firecracker-v1.18.0-x86_64 /usr/local/bin/firecracker
+install /tmp/release-v1.18.0-x86_64/jailer-v1.18.0-x86_64 /usr/local/bin/jailer
 ```
 
 For `cloud-hypervisor` install the VMM and its edk2 firmware instead of Firecracker:
@@ -152,9 +153,9 @@ grep -qs 'include "/etc/nftables.d/\*.nft"' /etc/nftables.conf || echo 'include 
 systemctl enable nftables && nft -f /etc/nftables.d/vm-manager.nft   # restarting nftables would flush Docker's rules
 ```
 
-Copy `bin/node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM, `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
+Copy `bin/node-linux-amd64` to `/usr/local/bin/vm-manager-node` and use a `node.json` with `"provider": "firecracker"` or `"cloud-hypervisor"` (see `node.firecracker.example.json` and `node.cloud-hypervisor.example.json`; `capacity.memoryMB` defaults to the host memory minus 4 GB). The node runs as root because it creates taps, NBD devices and the OVN chassis. It refuses to start if the VMM (for `firecracker` also its `jailer`), `/dev/kvm`, the `vmm0` bridge or Open vSwitch are missing.
 
-Differences to vz nodes: a VM's NAT NIC gets a static address on `vmm0` instead of DHCP. On `firecracker` nodes, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, .... Firecracker has no ACPI power-off, so after a `poweroff` inside the guest the node ends the halted Firecracker process.
+Differences to vz nodes: a VM's NAT NIC gets a static address on `vmm0` instead of DHCP. On `firecracker` nodes, guest NICs are named `eth0`, `eth1`, ... instead of `enp0s1`, .... Firecracker has no ACPI power-off, so after a `poweroff` inside the guest the node ends the halted Firecracker process. Each Firecracker runs under the jailer: chrooted into a jail below `<paths.vms>/<vm>/jail` and as its own unprivileged UID and GID (70000 plus the last octet of the VM's NAT address, so 70002 to 70254 must be unused on the host), not as root. `paths.vms` must not be on a filesystem mounted `nodev`, and the node sets each VM directory to mode 0700.
 
 Differences of `cloud-hypervisor` nodes to Firecracker nodes: guest NICs get PCI names such as `ens3`, `ens4` instead of `eth0`, `eth1`, ...; **Shut down** reaches the guest as an ACPI power-button press; and a reboot inside the guest keeps the VM running (the VMM resets in place) instead of restarting its process. As on Firecracker, a kernel panic restarts the VM (here the node watches the console for it). Switching an existing Firecracker host to `cloud-hypervisor` is unsupported: use a fresh host or delete its VMs first.
 

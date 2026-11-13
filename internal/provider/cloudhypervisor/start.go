@@ -30,7 +30,7 @@ func (p *Provider) Start(f node.VMFile, dir string) (node.Instance, error) {
 		return nil, err
 	}
 	os.Remove(sock)
-	proc, err := linuxvm.Spawn(f, dir, exec.Command("cloud-hypervisor", a...), nbds)
+	proc, err := linuxvm.Spawn(f, dir, exec.Command("cloud-hypervisor", a...), nbds, 0, nil)
 	if err != nil {
 		linuxvm.DetachAll(f.Spec.ID, dir, nbds)
 		return nil, err
