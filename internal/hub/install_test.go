@@ -136,6 +136,10 @@ func TestInstallScriptBinaryNames(t *testing.T) {
 			t.Errorf("install.sh lacks %q", want)
 		}
 	}
+	// Until launchd runs the new binary, the old plist still points at the old one.
+	if strings.Index(script, `rm -f "$dir/bin/node"`) < strings.Index(script, `until launchctl bootstrap`) {
+		t.Error("the old macOS binary is removed before the new one is started")
+	}
 	if strings.Contains(script, `"$dir/bin/node" init`) {
 		t.Error("old macOS binary path still used")
 	}

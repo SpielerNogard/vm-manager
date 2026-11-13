@@ -295,37 +295,52 @@ func (r *Registry) NodeDisconnected(nodeID string, c NodeConn) {
 
 // UpdateNode tells an online node to update itself to the hub's version by running the hub's installer.
 func (r *Registry) UpdateNode(id string) error {
+	c, err := r.startUpdate(id)
+	if err != nil {
+		return err
+	}
+	// Sent without r.mu, like every other message: a stalled connection must not block the registry.
+	if err := c.Send(proto.Message{Type: "update"}); err != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if n, ok := r.nodes[id]; ok && n.conn == c {
+			n.Updating = false
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *Registry) startUpdate(id string) (NodeConn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n, ok := r.nodes[id]
 	refuse := func(why string) error { return fmt.Errorf("%w: node %q %s", ErrConflict, id, why) }
 	switch {
 	case !ok:
-		return fmt.Errorf("%w: node %q", ErrNotFound, id)
+		return nil, fmt.Errorf("%w: node %q", ErrNotFound, id)
 	case n.conn == nil:
-		return refuse("is offline")
+		return nil, refuse("is offline")
 	case !version.Released(version.Version):
-		return refuse("cannot be updated by a hub that is a development build")
+		return nil, refuse("cannot be updated by a hub that is a development build")
 	case n.Version == "":
-		return refuse("reports no version; re-run its install command")
+		return nil, refuse("reports no version; re-run its install command")
 	case !version.Older(n.Version, version.Version):
-		return refuse("is not older than the hub")
+		return nil, refuse("is not older than the hub")
 	case !n.Updatable:
-		return refuse("was not installed by the installer; re-run its install command")
+		return nil, refuse("was not installed by the installer; re-run its install command")
 	case n.Updating:
-		return refuse("has an update already running")
-	}
-	if err := n.conn.Send(proto.Message{Type: "update"}); err != nil {
-		return err
+		return nil, refuse("has an update already running")
 	}
 	n.Updating, n.UpdateError = true, ""
-	return nil
+	return n.conn, nil
 }
 
-func (r *Registry) NodeUpdateFailed(id, msg string) {
+// NodeUpdateFailed ignores c if the node has already registered again: that report is from the process the update replaced.
+func (r *Registry) NodeUpdateFailed(id string, c NodeConn, msg string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if n, ok := r.nodes[id]; ok {
+	if n, ok := r.nodes[id]; ok && n.conn == c {
 		n.Updating, n.UpdateError = false, msg
 	}
 }

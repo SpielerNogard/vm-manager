@@ -79,7 +79,7 @@ func NodeHandler(r *Registry, token func() string) http.Handler {
 			case m.Type == "disks":
 				r.DisksInUse(id, m.DisksInUse, m.AppliedSeq)
 			case m.Type == "updateFailed":
-				r.NodeUpdateFailed(id, m.Error)
+				r.NodeUpdateFailed(id, node, m.Error)
 			}
 		}
 	})

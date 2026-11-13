@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"vm-manager/internal/proto"
 )
@@ -87,11 +88,11 @@ func TestUpdateNodeRefused(t *testing.T) {
 }
 
 func TestNodeUpdateFailed(t *testing.T) {
-	r, _ := updatableNode(t)
+	r, n := updatableNode(t)
 	if err := r.UpdateNode("n1"); err != nil {
 		t.Fatal(err)
 	}
-	r.NodeUpdateFailed("n1", "boom")
+	r.NodeUpdateFailed("n1", n, "boom")
 	if node, _ := nodeByID(r, "n1"); node.Updating || node.UpdateError != "boom" {
 		t.Errorf("after a failure: %+v", node)
 	}
@@ -114,7 +115,7 @@ func TestRegisterClearsUpdate(t *testing.T) {
 	reg.Version = "v0.4.0"
 	r.NodeConnected(reg, n)
 	r.UpdateNode("n1")
-	r.NodeUpdateFailed("n1", "boom")
+	r.NodeUpdateFailed("n1", n, "boom")
 	r.NodeConnected(reg, n)
 	if node, _ := nodeByID(r, "n1"); node.Updating || node.UpdateError != "" {
 		t.Errorf("after re-registering with an old error: %+v", node)
@@ -160,5 +161,58 @@ func TestUpdateNodeAPI(t *testing.T) {
 	r.NodeDisconnected("n1", n)
 	if code, body := post("n1"); code != http.StatusConflict || !strings.Contains(body, "offline") {
 		t.Errorf("offline node: status %d %s", code, body)
+	}
+}
+
+// lockingNode reads the registry while sending, as a slow connection would let other requests do.
+type lockingNode struct {
+	fakeNode
+	r    *Registry
+	fail bool
+}
+
+func (n *lockingNode) Send(m proto.Message) error {
+	if m.Type == "update" {
+		n.r.Nodes()
+		if n.fail {
+			return errors.New("connection lost")
+		}
+	}
+	return n.fakeNode.Send(m)
+}
+
+func TestUpdateNodeSendsWithoutRegistryLock(t *testing.T) {
+	setHubVersion(t, "v0.5.0")
+	r, _ := newTestRegistry(t)
+	n := &lockingNode{r: r}
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", Version: "v0.4.0", Updatable: true}, n)
+	done := make(chan error, 1)
+	go func() { done <- r.UpdateNode("n1") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("UpdateNode holds the registry lock while sending")
+	}
+	n.fail = true
+	r.NodeUpdateFailed("n1", n, "boom")
+	if err := r.UpdateNode("n1"); err == nil {
+		t.Fatal("a failed send returned no error")
+	}
+	if node, _ := nodeByID(r, "n1"); node.Updating {
+		t.Error("node is updating although the command never reached it")
+	}
+}
+
+func TestNodeUpdateFailedFromOldConnection(t *testing.T) {
+	r, old := updatableNode(t)
+	r.UpdateNode("n1")
+	// The updated node has registered again; the old process's report must not mark the update as failed.
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", Version: "v0.5.0", Updatable: true}, &fakeNode{})
+	r.NodeUpdateFailed("n1", old, "installer: signal: terminated")
+	if node, _ := nodeByID(r, "n1"); node.UpdateError != "" {
+		t.Errorf("stale report shown: %q", node.UpdateError)
 	}
 }

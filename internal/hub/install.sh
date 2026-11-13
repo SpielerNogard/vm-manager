@@ -230,7 +230,6 @@ install_macos() {
 	mkdir -p "$dir/bin" "$HOME/Library/LaunchAgents"
 	say "installing the node to $dir/bin"
 	install -m 0755 "$TMP/vm-manager-node-darwin-arm64" "$dir/bin/vm-manager-node"
-	rm -f "$dir/bin/node"
 	install -m 0755 "$TMP/netagent-linux-arm64" "$dir/bin/netagent-linux-arm64"
 	node_init "$dir/bin/vm-manager-node" init -config "$dir/node.json"
 	plist=$HOME/Library/LaunchAgents/$LABEL.plist
@@ -259,6 +258,8 @@ EOF
 		[ $i -lt 10 ] || die "launchctl bootstrap $plist failed"
 		sleep 1
 	done
+	# Releases before the rename installed bin/node; launchd now runs the new binary.
+	rm -f "$dir/bin/node"
 	wait_connected "$dir/node.log" "$offset" || {
 		tail -n 20 "$dir/node.log" >&2
 		die "the node did not connect to $HUB within 30 s (log: $dir/node.log); for a hub in the LAN, allow Local Network access for 'vm-manager-node' in System Settings"

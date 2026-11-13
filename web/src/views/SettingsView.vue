@@ -141,7 +141,10 @@ watch(tab, () => {
   savedTab.value = null
 })
 
-const COMPOSE_UPGRADE = 'docker compose -f deploy/compose.yaml up -d --build'
+// The images are built from the checkout's deploy/ files, so it must be on the release as well.
+const upgradeCommand = computed(
+  () => `git fetch --tags && git checkout ${updates.value?.latest ?? ''}\ndocker compose -f deploy/compose.yaml up -d --build`,
+)
 const checking = ref(false)
 const copiedCommand = ref(false)
 const checkedAgo = computed(() => {
@@ -166,7 +169,7 @@ async function checkNow() {
 
 async function copyCommand() {
   try {
-    await navigator.clipboard.writeText(COMPOSE_UPGRADE)
+    await navigator.clipboard.writeText(upgradeCommand.value)
     copiedCommand.value = true
     setTimeout(() => (copiedCommand.value = false), 1500)
   } catch {
@@ -311,7 +314,7 @@ async function copyCommand() {
             <p v-if="updates.hubUpdate === 'none'" class="text-base-content/60">{{ t('settings.updates.devBuild') }}</p>
             <template v-else-if="updates.updateAvailable">
               <p>{{ t('settings.updates.manual', { version: updates.latest }) }}</p>
-              <pre class="bg-base-200 rounded-box font-token p-3 text-xs break-all whitespace-pre-wrap">{{ COMPOSE_UPGRADE }}</pre>
+              <pre class="bg-base-200 rounded-box font-token p-3 text-xs break-all whitespace-pre-wrap">{{ upgradeCommand }}</pre>
               <div>
                 <button type="button" class="btn btn-sm" @click="copyCommand">
                   <AppIcon :name="copiedCommand ? 'check' : 'copy'" />

@@ -307,7 +307,7 @@
       "checkNow": "Jetzt prüfen",
       "checkFailed": "Die letzte Prüfung ist fehlgeschlagen: {error}",
       "devBuild": "Entwicklungs-Build: keine Update-Prüfung.",
-      "manual": "Update verfügbar. VMM_VERSION={version} in deploy/.env setzen und ausführen:",
+      "manual": "Update verfügbar. VMM_VERSION={version} in deploy/.env setzen und im Checkout ausführen:",
       "upToDate": "Der Hub ist aktuell."
     }
   },
