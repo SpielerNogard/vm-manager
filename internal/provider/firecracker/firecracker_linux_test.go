@@ -19,6 +19,7 @@ import (
 
 	"vm-manager/internal/node"
 	"vm-manager/internal/proto"
+	"vm-manager/internal/provider/linuxvm"
 )
 
 const testImageURL = "test://noble"
@@ -87,7 +88,7 @@ func TestStartStopVM(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("not stopped within 15s")
 	}
-	if _, err := net.InterfaceByName(tapName(f.Spec.ID, 0)); err == nil {
+	if _, err := net.InterfaceByName(linuxvm.TapName(f.Spec.ID, 0)); err == nil {
 		t.Error("tap still exists after stop")
 	}
 }
@@ -95,7 +96,7 @@ func TestStartStopVM(t *testing.T) {
 func TestStartCleansStaleTaps(t *testing.T) {
 	p := testProvider(t)
 	f := testVM("fcstaletap")
-	if out, err := exec.Command("ip", "tuntap", "add", "dev", tapName(f.Spec.ID, 0), "mode", "tap").CombinedOutput(); err != nil {
+	if out, err := exec.Command("ip", "tuntap", "add", "dev", linuxvm.TapName(f.Spec.ID, 0), "mode", "tap").CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
 	inst := startVM(t, p, f)
@@ -119,7 +120,7 @@ func TestGuestPoweroffEndsInstance(t *testing.T) {
 	if _, err := inst.WaitIP(ctx); err != nil {
 		t.Fatal(err)
 	}
-	ip, err := allocNATIP(p.VMsDir, f.Spec.ID)
+	ip, err := linuxvm.AllocNATIP(p.VMsDir, f.Spec.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +140,7 @@ func TestKillAfterNodeCrash(t *testing.T) {
 	if os.Getenv("VMM_FC_HELPER") == "1" {
 		p := testProvider(t)
 		inst := startVM(t, p, testVM("fccrash"))
-		fmt.Println("PID", inst.(*instance).cmd.Process.Pid)
+		fmt.Println("PID", inst.(*instance).Cmd.Process.Pid)
 		time.Sleep(time.Hour)
 		return
 	}

@@ -7,6 +7,7 @@ import (
 
 	"vm-manager/internal/node"
 	"vm-manager/internal/proto"
+	"vm-manager/internal/provider/linuxvm"
 )
 
 func TestVMConfig(t *testing.T) {
@@ -51,17 +52,10 @@ func TestVMConfig(t *testing.T) {
 	if len(c.Drives) != 3 || c.Drives[0].ID != "root" || c.Drives[1].ID != "d1" || c.Drives[1].Path != "/dev/nbd0" || c.Drives[2].ID != "seed" || !c.Drives[2].ReadOnly || c.Drives[0].ReadOnly || c.Drives[0].Root {
 		t.Errorf("drives = %+v", c.Drives)
 	}
-	if len(c.NICs) != 2 || c.NICs[0].MAC != f.MAC || c.NICs[0].Dev != tapName("vm1", 0) || c.NICs[1].MAC != "02:0a:c8:00:00:0a" || c.NICs[1].Dev != tapName("vm1", 1) {
+	if len(c.NICs) != 2 || c.NICs[0].MAC != f.MAC || c.NICs[0].Dev != linuxvm.TapName("vm1", 0) || c.NICs[1].MAC != "02:0a:c8:00:00:0a" || c.NICs[1].Dev != linuxvm.TapName("vm1", 1) {
 		t.Errorf("nics = %+v", c.NICs)
 	}
 	if _, err := vmConfig(f, "k", "i", []string{"only-one"}); err == nil {
 		t.Error("accepted a drive list that does not match the attach order")
-	}
-}
-
-func TestTapNameLength(t *testing.T) {
-	a, b := tapName("0123456789abcdef0123456789abcdef0123", 9), tapName("x123456789abcdef0123456789abcdef0123", 9)
-	if len(a) > 15 || a == b || a != tapName("0123456789abcdef0123456789abcdef0123", 9) {
-		t.Fatalf("tap names %q %q", a, b)
 	}
 }

@@ -1,4 +1,4 @@
-package firecracker
+package linuxvm
 
 import "testing"
 

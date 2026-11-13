@@ -1,4 +1,4 @@
-package firecracker
+package linuxvm
 
 import (
 	"errors"
@@ -9,13 +9,15 @@ import (
 	"strings"
 )
 
+const DefaultImageURL = "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
+
 const (
 	natFile    = "nat-ip"
-	natGateway = "192.168.64.1"
+	NATGateway = "192.168.64.1"
 )
 
-// allocNATIP keeps the VM's eth0 address in its VM dir, so deleting the VM frees it; callers serialize calls.
-func allocNATIP(vmsDir, vmID string) (string, error) {
+// AllocNATIP keeps the VM's eth0 address in its VM dir, so deleting the VM frees it; callers serialize calls.
+func AllocNATIP(vmsDir, vmID string) (string, error) {
 	own := filepath.Join(vmsDir, vmID, natFile)
 	if b, err := os.ReadFile(own); err == nil {
 		return strings.TrimSpace(string(b)), nil

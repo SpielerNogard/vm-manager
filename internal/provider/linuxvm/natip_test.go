@@ -1,4 +1,4 @@
-package firecracker
+package linuxvm
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ func TestAllocNATIP(t *testing.T) {
 	vms := t.TempDir()
 	alloc := func(id string) string {
 		t.Helper()
-		ip, err := allocNATIP(vms, id)
+		ip, err := AllocNATIP(vms, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +31,7 @@ func TestAllocNATIP(t *testing.T) {
 	for i := 0; i < 251; i++ {
 		alloc(fmt.Sprintf("fill%d", i))
 	}
-	if _, err := allocNATIP(vms, "overflow"); err == nil || !strings.Contains(err.Error(), "no free NAT address") {
+	if _, err := AllocNATIP(vms, "overflow"); err == nil || !strings.Contains(err.Error(), "no free NAT address") {
 		t.Fatalf("err = %v", err)
 	}
 }

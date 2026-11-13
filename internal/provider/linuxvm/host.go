@@ -1,6 +1,6 @@
 //go:build linux
 
-package firecracker
+package linuxvm
 
 import (
 	"fmt"
@@ -13,22 +13,22 @@ import (
 )
 
 const (
-	natBridge = "vmm0"
-	intBridge = "br-int"
+	NATBridge = "vmm0"
+	IntBridge = "br-int"
 )
 
-// checkHost fails early with what is missing; install.sh (or the manual setup docs) provides it.
-func checkHost() error {
-	if _, err := exec.LookPath("firecracker"); err != nil {
-		return fmt.Errorf("firecracker binary not in PATH: %w", err)
+// CheckHost fails early with what is missing; install.sh (or the manual setup docs) provides it.
+func CheckHost(binary string) error {
+	if _, err := exec.LookPath(binary); err != nil {
+		return fmt.Errorf("%s binary not in PATH: %w", binary, err)
 	}
 	if f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0); err != nil {
 		return fmt.Errorf("KVM not usable: %w", err)
 	} else {
 		f.Close()
 	}
-	if _, err := net.InterfaceByName(natBridge); err != nil {
-		return fmt.Errorf("NAT bridge %s missing (see docs/install.md): %w", natBridge, err)
+	if _, err := net.InterfaceByName(NATBridge); err != nil {
+		return fmt.Errorf("NAT bridge %s missing (see docs/install.md): %w", NATBridge, err)
 	}
 	if err := chassisconf.Run("ovs-vsctl", "--version"); err != nil {
 		return fmt.Errorf("Open vSwitch missing: %w", err)
@@ -36,11 +36,11 @@ func checkHost() error {
 	return nil
 }
 
-// setupTaps recreates the VM's taps: eth0 on the NAT bridge, OVN NICs on br-int.
-func setupTaps(f node.VMFile) error {
-	removeTaps(f)
+// SetupTaps recreates the VM's taps: eth0 on the NAT bridge, OVN NICs on br-int.
+func SetupTaps(f node.VMFile) error {
+	RemoveTaps(f)
 	for i := 0; i <= len(f.Spec.NICs); i++ {
-		tap := tapName(f.Spec.ID, i)
+		tap := TapName(f.Spec.ID, i)
 		if err := chassisconf.Run("ip", "tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
 			return err
 		}
@@ -49,10 +49,10 @@ func setupTaps(f node.VMFile) error {
 		}
 		var err error
 		if i == 0 {
-			err = chassisconf.Run("ip", "link", "set", tap, "master", natBridge)
+			err = chassisconf.Run("ip", "link", "set", tap, "master", NATBridge)
 		} else {
 			// ovn-controller adopts an existing br-int; creating it here keeps a first boot from racing it.
-			err = chassisconf.Run("ovs-vsctl", "--may-exist", "add-br", intBridge, "--", "--may-exist", "add-port", intBridge, tap,
+			err = chassisconf.Run("ovs-vsctl", "--may-exist", "add-br", IntBridge, "--", "--may-exist", "add-port", IntBridge, tap,
 				"--", "set", "interface", tap, "external_ids:iface-id="+f.Spec.NICs[i-1].Port)
 		}
 		if err != nil {
@@ -62,11 +62,11 @@ func setupTaps(f node.VMFile) error {
 	return nil
 }
 
-func removeTaps(f node.VMFile) {
+func RemoveTaps(f node.VMFile) {
 	for i := 0; i <= len(f.Spec.NICs); i++ {
-		tap := tapName(f.Spec.ID, i)
+		tap := TapName(f.Spec.ID, i)
 		if i > 0 {
-			chassisconf.Run("ovs-vsctl", "--if-exists", "del-port", intBridge, tap)
+			chassisconf.Run("ovs-vsctl", "--if-exists", "del-port", IntBridge, tap)
 		}
 		if _, err := net.InterfaceByName(tap); err == nil {
 			chassisconf.Run("ip", "link", "del", tap)
