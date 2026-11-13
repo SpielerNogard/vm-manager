@@ -10,10 +10,11 @@
 | GET | `/api/nodes/{id}/install-command?host=` | The one-line install command for the node (text); `host` as above |
 | GET | `/api/version` | The hub's version (`{"version"}`), no token needed |
 | GET | `/node/install.sh` | The node installer script, no token needed |
-| GET | `/api/updates` | Update status: `version` (hub), `gateway`, `storage`, `latest` (latest release), `checkedAt`, `checkError`, `updateAvailable`, and `hubUpdate` (`manual`: upgrade the stack by hand; `none`: development build, no check) |
+| GET | `/api/updates` | Update status: `version` (hub), `gateway`, `storage`, `latest` (latest release), `checkedAt`, `checkError`, `updateAvailable`, `hubUpdate` (`manual`: upgrade the stack by hand; `none`: development build, no check), and `stack` (`managed`: the hub runs gateway and storage itself; then `state` `building`, `running` or `failed`, and `error`) |
+| POST | `/api/updates/stack/retry` | Build and start the hub's containers again now; 202. 409 if the hub does not manage them |
 | POST | `/api/updates/check` | Ask GitHub for the latest release now; returns the update status, with a failed check in `checkError`. Within 30 seconds of the last check it returns that result without asking again. 409 on a development build |
-| GET | `/api/settings` | Client endpoint, storage endpoint, ports, listen address, guest MTU, node token, plus `setupComplete`, `devices` (device count), `storageEndpoint` (effective) and `vmsWithDisks` |
-| PUT | `/api/settings` | Partial update of `clients.endpoint`, `storage.endpoint` (`host:port` or empty), `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
+| GET | `/api/settings` | Client endpoint, storage endpoint, ports, listen address, guest MTU, node token, plus `setupComplete`, `devices` (device count), `storageEndpoint` (effective), `vmsWithDisks` and `stackManaged` (the hub runs gateway and storage itself) |
+| PUT | `/api/settings` | Partial update of `clients.endpoint`, `storage.endpoint` (`host:port` or empty), `storage.local` (run the storage server on the hub; 409 if the hub does not manage its containers, or when switching off while a VM has a disk attached), `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |

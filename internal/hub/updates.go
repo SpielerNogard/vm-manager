@@ -41,7 +41,8 @@ type UpdateStatus struct {
 	CheckError      string     `json:"checkError,omitempty"`
 	UpdateAvailable bool       `json:"updateAvailable"`
 	// HubUpdate is "none" on a dev build and "manual" otherwise: the operator upgrades the stack.
-	HubUpdate string `json:"hubUpdate"`
+	HubUpdate string     `json:"hubUpdate"`
+	Stack     StackState `json:"stack"`
 }
 
 func NewUpdates() *Updates {
@@ -116,8 +117,8 @@ func (u *Updates) Run(ctx context.Context) {
 	}
 }
 
-func (u *Updates) Status(r *Registry) UpdateStatus {
-	st := UpdateStatus{Version: version.Version, Gateway: r.GatewayVersion(), Storage: r.Storage().Version, HubUpdate: "none"}
+func (u *Updates) Status(r *Registry, s *Stack) UpdateStatus {
+	st := UpdateStatus{Version: version.Version, Gateway: r.GatewayVersion(), Storage: r.Storage().Version, HubUpdate: "none", Stack: s.State()}
 	if !version.Released(version.Version) {
 		return st
 	}

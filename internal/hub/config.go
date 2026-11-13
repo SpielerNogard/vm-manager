@@ -31,6 +31,8 @@ type Config struct {
 		// Endpoint is the host:port nodes use for NBD; empty means clients.endpoint with Port.
 		Endpoint string `json:"endpoint,omitempty"`
 		Port     int    `json:"port"`
+		// Local makes a hub that manages its stack run the storage server in Docker.
+		Local bool `json:"local,omitempty"`
 	} `json:"storage"`
 }
 
