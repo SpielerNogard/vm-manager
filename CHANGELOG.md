@@ -1,3 +1,9 @@
+## v0.3.0 (2026-11-13)
+
+### Feat
+
+- cloud-hypervisor provider for Linux nodes (#17)
+
 ## v0.2.0 (2026-11-12)
 
 ### Feat
