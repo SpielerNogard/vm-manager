@@ -163,9 +163,12 @@ async function deleteNode() {
           <span v-else-if="node.updateAvailable && !node.updatable" class="text-base-content/60">{{ t('node.updateByHand') }}</span>
         </div>
         <div v-if="updateRequestError" role="alert" class="alert alert-error alert-soft mt-3 text-sm">{{ updateRequestError }}</div>
-        <div v-if="node.updateError" role="alert" class="alert alert-error alert-soft mt-3 flex-col items-start text-sm">
-          <span>{{ t('node.updateFailed') }}</span>
-          <pre class="font-token w-full text-xs break-all whitespace-pre-wrap">{{ node.updateError }}</pre>
+        <div v-if="node.updateError" role="alert" class="alert alert-error alert-soft mt-3 text-sm">
+          <!-- One child: the alert lays its children out as grid columns. -->
+          <div class="min-w-0 space-y-2">
+            <p>{{ t('node.updateFailed') }}</p>
+            <pre class="font-token text-xs break-words whitespace-pre-wrap">{{ node.updateError }}</pre>
+          </div>
         </div>
       </header>
 

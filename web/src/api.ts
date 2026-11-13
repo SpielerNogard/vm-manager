@@ -149,7 +149,9 @@ export interface Settings {
   underlay: { port: number }
   clients: { endpoint: string; port: number }
   guestMTU: number
-  storage: { endpoint?: string; port: number }
+  storage: { endpoint?: string; port: number; local?: boolean }
+  /** The hub runs gateway and storage itself, so storage.local can be set. */
+  stackManaged: boolean
   setupComplete: boolean
   devices: number
   storageEndpoint: string
@@ -164,11 +166,15 @@ export interface Updates {
   checkedAt?: string
   checkError?: string
   updateAvailable: boolean
-  /** none: development build, no check. manual: the operator upgrades the stack. */
-  hubUpdate: 'none' | 'manual'
+  /** none: development build, no check. manual: the operator upgrades the stack. self: the hub updates itself. */
+  hubUpdate: 'none' | 'manual' | 'self'
+  hubUpdating?: boolean
+  hubUpdateError?: string
+  /** The hub's own containers; managed is false when the hub runs in Docker Compose. */
+  stack: { managed: boolean; state?: 'building' | 'running' | 'failed'; error?: string }
 }
 
-export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string }; storage?: { endpoint?: string } }
+export type SettingsPatch = { token?: string; guestMTU?: number; clients?: { endpoint?: string }; storage?: { endpoint?: string; local?: boolean } }
 
 export interface CreateVMRequest {
   nodeId: string
@@ -206,6 +212,8 @@ export const api = {
   updateNode: (id: string) => request<void>('POST', `/api/nodes/${id}/update`),
   updates: () => request<Updates>('GET', '/api/updates'),
   checkUpdates: () => request<Updates>('POST', '/api/updates/check'),
+  applyHubUpdate: () => request<void>('POST', '/api/updates/apply'),
+  retryStack: () => request<void>('POST', '/api/updates/stack/retry'),
   nodeConfig: (id: string, host?: string) =>
     text(`/api/nodes/${id}/config${host ? `?host=${encodeURIComponent(host)}` : ''}`),
   installCommand: (id: string, host?: string) =>

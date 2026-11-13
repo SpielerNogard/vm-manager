@@ -309,8 +309,24 @@
       "devBuild": "Entwicklungs-Build: keine Update-Prüfung.",
       "manual": "Update verfügbar. VMM_VERSION={version} in deploy/.env setzen und im Checkout ausführen:",
       "upToDate": "Der Hub ist aktuell.",
-      "unavailable": "Der Hub hat seinen Update-Status nicht geliefert."
-    }
+      "unavailable": "Der Hub hat seinen Update-Status nicht geliefert.",
+      "updateHub": "Hub auf {version} aktualisieren",
+      "updatingHub": "Hub wird aktualisiert…",
+      "updateHubTitle": "Hub auf {version} aktualisieren?",
+      "updateHubBody": "Der Hub startet neu und baut seine Container neu. Nodes verbinden sich neu; das VM-Netz und angehängte Disks sind kurz unterbrochen. VMs laufen weiter.",
+      "hubUpdateFailed": "Das Hub-Update ist fehlgeschlagen: {error}",
+      "containers": "Container",
+      "stack": {
+        "building": "wird gebaut",
+        "running": "läuft",
+        "failed": "fehlgeschlagen"
+      },
+      "stackFailed": "Der Hub konnte seine Container nicht bauen oder starten. Die bisher laufenden Container laufen weiter.",
+      "retry": "Erneut versuchen"
+    },
+    "storageLocal": "Storage-Server auf diesem Hub betreiben",
+    "storageLocalHint": "Der Hub startet ihn in Docker; die Disks liegen im Docker-Volume vm-manager-disks.",
+    "portsHintHost": "in hub.json im Datenverzeichnis des Hubs einstellen; danach den Hub-Dienst neu starten"
   },
   "disks": {
     "add": "Disk hinzufügen",
