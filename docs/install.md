@@ -64,7 +64,7 @@ docker compose -f deploy/compose.yaml up -d --build
 
 For development, `make stack` builds the same images from the working tree instead (`VMM_BIN=source`, version `dev`). The image build needs BuildKit (default since Docker 23).
 
-On a Linux Docker host, load the kernel modules the gateway needs first: `modprobe -a openvswitch wireguard` (persist them in `/etc/modules-load.d/`); Docker Desktop on the Mac has them.
+On a Linux Docker host, load the kernel modules the gateway needs first: `modprobe -a openvswitch wireguard` (persist them in `/etc/modules-load.d/`); the hub installer does this for a hub on the host. OrbStack on the Mac ships both modules but does not load `openvswitch`: load it after every OrbStack start with `docker run --rm --privileged -v /lib/modules:/lib/modules:ro alpine modprobe -a openvswitch wireguard`, otherwise the gateway container restarts in a loop with "the Docker host kernel lacks the openvswitch module".
 
 No config is needed. On first start the hub creates `/data/hub.json` in the `data` volume with a random node token and an empty client endpoint. Open `http://<hub>:8080`: every page except **Settings** redirects there until the client endpoint is set (the API answers POST/PUT/DELETE with 409 meanwhile, except settings, node transport and gateway routes).
 
