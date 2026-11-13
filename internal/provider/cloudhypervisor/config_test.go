@@ -16,7 +16,7 @@ func TestArgs(t *testing.T) {
 		Attachments: []proto.DiskAttachment{{DiskID: "d1", URL: "nbd://h:1/d1.img"}}}}
 	got, err := args(f, "/fw", "/v/ch.sock", []string{"/v/root.img", "/dev/nbd0", "/v/seed.iso"})
 	want := []string{"--api-socket", "path=/v/ch.sock", "--firmware", "/fw", "--cpus", "boot=2", "--memory", "size=2048M",
-		"--disk", "path=/v/root.img", "path=/dev/nbd0", "path=/v/seed.iso,readonly=on",
+		"--disk", "path=/v/root.img,image_type=raw", "path=/dev/nbd0,image_type=raw", "path=/v/seed.iso,image_type=raw,readonly=on",
 		"--net", "tap=" + linuxvm.TapName("vm1", 0) + ",mac=06:00:c0:a8:40:05", "tap=" + linuxvm.TapName("vm1", 1) + ",mac=02:0a:c8:00:00:0a",
 		"--serial", "tty", "--console", "off"}
 	if err != nil || !slices.Equal(got, want) {

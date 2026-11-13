@@ -9,7 +9,7 @@ import (
 	"vm-manager/internal/provider/linuxvm"
 )
 
-const DefaultFirmware = "/usr/local/share/cloud-hypervisor/hypervisor-fw"
+const DefaultFirmware = "/usr/local/share/cloud-hypervisor/CLOUDHV.fd"
 
 type settings struct {
 	ImageURL string `json:"imageURL"`
@@ -50,7 +50,7 @@ func args(f node.VMFile, firmware, sock string, drives []string) ([]string, erro
 	a := []string{"--api-socket", "path=" + sock, "--firmware", firmware,
 		"--cpus", "boot=" + strconv.Itoa(f.Spec.CPUs), "--memory", "size=" + strconv.Itoa(f.Spec.MemoryMB) + "M", "--disk"}
 	for i, d := range order {
-		disk := "path=" + drives[i]
+		disk := "path=" + drives[i] + ",image_type=raw"
 		if d.ReadOnly {
 			disk += ",readonly=on"
 		}
