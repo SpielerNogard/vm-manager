@@ -20,7 +20,7 @@ func settingsServer(t *testing.T, c Config) (*httptest.Server, *ConfigStore, *Re
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg))
+	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, NewUpdates()))
 	t.Cleanup(srv.Close)
 	return srv, cfg, r
 }

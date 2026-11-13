@@ -16,3 +16,4 @@
 - WireGuard devices can only reach the VMs' management IPs and the gateway DNS. The hub API and the OVN databases are firewalled from them.
 - The hub stores device private keys, so configs can be downloaded again.
 - VMs cannot reach each other on the management network; they talk only via shared networks (see [Networks](networking.md#networks)). The NAT NIC (the first NIC, for internet: vz NAT on Macs, the `vmm0` bridge on Linux nodes) is still shared.
+- A released hub asks GitHub for the latest release at start, every six hours and on request (**Settings › Updates**), and keeps the answer in memory. A failed check only shows its error. Builds without a release version (`dev`) do not check.

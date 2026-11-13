@@ -119,7 +119,7 @@ func setupGuard(cfg *ConfigStore, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		p := req.URL.Path
 		mutating := req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions
-		exempt := p == "/api/settings" || strings.HasPrefix(p, "/api/settings/") || strings.HasPrefix(p, "/api/gateway/") || p == "/api/nodes/connect"
+		exempt := p == "/api/settings" || strings.HasPrefix(p, "/api/settings/") || strings.HasPrefix(p, "/api/gateway/") || strings.HasPrefix(p, "/api/updates/") || p == "/api/nodes/connect"
 		if mutating && strings.HasPrefix(p, "/api/") && !exempt && cfg.Get().Clients.Endpoint == "" {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "setup incomplete: set the client endpoint in settings"})
 			return

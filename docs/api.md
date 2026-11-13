@@ -9,6 +9,8 @@
 | GET | `/api/nodes/{id}/install-command?host=` | The one-line install command for the node (text); `host` as above |
 | GET | `/api/version` | The hub's version (`{"version"}`), no token needed |
 | GET | `/node/install.sh` | The node installer script, no token needed |
+| GET | `/api/updates` | Update status: `version` (hub), `gateway`, `storage`, `latest` (latest release), `checkedAt`, `checkError`, `updateAvailable`, and `hubUpdate` (`manual`: upgrade the stack by hand; `none`: development build, no check) |
+| POST | `/api/updates/check` | Ask GitHub for the latest release now; returns the update status, with a failed check in `checkError`. 409 on a development build |
 | GET | `/api/settings` | Client endpoint, storage endpoint, ports, listen address, guest MTU, node token, plus `setupComplete`, `devices` (device count), `storageEndpoint` (effective) and `vmsWithDisks` |
 | PUT | `/api/settings` | Partial update of `clients.endpoint`, `storage.endpoint` (`host:port` or empty), `token` (≥16 chars, no whitespace), `guestMTU` (576–9000); 400 on invalid; returns settings |
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |

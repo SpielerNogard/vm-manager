@@ -14,7 +14,7 @@ import (
 	"vm-manager/internal/version"
 )
 
-func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) http.Handler {
+func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u *Updates) http.Handler {
 	mux := http.NewServeMux()
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
@@ -58,6 +58,16 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore) ht
 	}
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"version": version.Version})
+	})
+	mux.HandleFunc("GET /api/updates", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, u.Status(r)) })
+	mux.HandleFunc("POST /api/updates/check", func(w http.ResponseWriter, req *http.Request) {
+		if !version.Released(version.Version) {
+			writeError(w, fmt.Errorf("%w: %v", ErrConflict, errDevBuild))
+			return
+		}
+		// A failed check is part of the status, not a failed request.
+		u.Check(req.Context())
+		writeJSON(w, http.StatusOK, u.Status(r))
 	})
 	mux.HandleFunc("GET /api/networks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, networkViews()) })
 	mux.HandleFunc("GET /api/networks/{id}", func(w http.ResponseWriter, req *http.Request) {
