@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"vm-manager/internal/proto"
 )
@@ -155,5 +156,16 @@ func TestUpdateOnlyOnce(t *testing.T) {
 	wg.Wait()
 	if n := requests.Load(); n != 1 {
 		t.Errorf("installer downloaded %d times, want 1", n)
+	}
+}
+
+func TestUpdateSilentWhenNodeStops(t *testing.T) {
+	// A successful installer stops this node, which also ends the installer's client process with an error.
+	a, sent, _, _ := updateAgent(t, http.StatusOK, "sleep 0.3; exit 143")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	a.update(ctx)
+	if len(*sent) != 0 {
+		t.Errorf("a stopping node reported %+v", *sent)
 	}
 }

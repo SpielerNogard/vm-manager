@@ -48,7 +48,9 @@ func (a *Agent) update(ctx context.Context) {
 		return
 	}
 	defer a.updateMu.Unlock()
-	if err := a.runInstaller(ctx); err != nil {
+	err := a.runInstaller(ctx)
+	// A node that is stopping was most likely stopped by the installer; its client process dies with it.
+	if err != nil && ctx.Err() == nil {
 		log.Printf("update: %v", err)
 		a.mu.Lock()
 		send := a.send
