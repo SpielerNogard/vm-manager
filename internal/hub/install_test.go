@@ -113,6 +113,10 @@ func TestInstallScriptHostSafety(t *testing.T) {
 	if strings.Contains(script, "curl -fsSL -o") || !strings.Contains(script, "--max-time") {
 		t.Error("downloads have no time limit")
 	}
+	// The node attaches disks with qemu-nbd, which holds writes while the storage server restarts; nbd-client loses them.
+	if !strings.Contains(script, "qemu-utils") {
+		t.Error("qemu-utils is not installed on Linux nodes")
+	}
 	if !strings.Contains(script, "--connect-timeout") {
 		t.Error("hub requests have no connect timeout")
 	}

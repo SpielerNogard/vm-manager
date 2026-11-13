@@ -49,9 +49,17 @@ func AttachNBD(vmDir, diskID, rawURL string) (string, error) {
 		if NBDConnected(dev) {
 			continue
 		}
-		// -persist makes nbd-client reconnect when the storage server restarts.
-		if err := chassisconf.Run("nbd-client", "-N", export, host, port, dev, "-persist"); err != nil {
+		// Not nbd-client: its -persist does not reconnect, and writes after a storage restart were lost without an error.
+		if err := chassisconf.Run("qemu-nbd", qemuNBDArgs(dev, host, port, export)...); err != nil {
 			return "", fmt.Errorf("disk %s: %w", diskID, err)
+		}
+		// qemu-nbd returns once its daemon runs, which is before the kernel has the device.
+		for i := 0; !NBDConnected(dev); i++ {
+			if i == 50 {
+				chassisconf.Run("qemu-nbd", "--disconnect", dev)
+				return "", fmt.Errorf("disk %s: %s not connected 5s after qemu-nbd started", diskID, dev)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 		return dev, os.WriteFile(NBDRecord(vmDir, diskID), []byte(dev+"\n"), 0o644)
 	}
@@ -67,7 +75,7 @@ func DetachNBD(vmDir, diskID string) error {
 		return err
 	}
 	if dev := strings.TrimSpace(string(b)); NBDConnected(dev) {
-		if err := chassisconf.Run("nbd-client", "-d", dev); err != nil {
+		if err := chassisconf.Run("qemu-nbd", "--disconnect", dev); err != nil {
 			return err
 		}
 		// The kernel tears the device down asynchronously; a restart must not find it half-connected.
