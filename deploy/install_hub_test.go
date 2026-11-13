@@ -87,7 +87,6 @@ func TestHubInstallerScript(t *testing.T) {
 		"$RELEASES/latest/download",
 		"After=network-online.target docker.service",
 		"dev.vm-manager.hub",
-		"modprobe -a openvswitch wireguard",
 		"--max-time",
 		// root's ~/.ssh is usually empty: the hub's default keys are those of the user who ran the installer.
 		"SUDO_USER",

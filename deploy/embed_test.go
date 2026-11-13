@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,25 @@ func TestStackFiles(t *testing.T) {
 	for _, f := range []string{"gateway.Dockerfile", "storage.Dockerfile"} {
 		if !strings.Contains(read(f), "ARG VMM_RELEASE_URL") {
 			t.Errorf("%s cannot build from another release URL", f)
+		}
+	}
+}
+
+func TestStacksLoadKernelModules(t *testing.T) {
+	stack, err := Stack.ReadFile("stack.compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose, err := os.ReadFile("compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// OrbStack ships openvswitch but does not load it; without it the gateway restarts in a loop.
+	for name, file := range map[string]string{"stack.compose.yaml": string(stack), "compose.yaml": string(compose)} {
+		for _, want := range []string{"modprobe -a openvswitch wireguard || true", "/lib/modules:/lib/modules:ro", "condition: service_completed_successfully"} {
+			if !strings.Contains(file, want) {
+				t.Errorf("%s lacks %q", name, want)
+			}
 		}
 	}
 }

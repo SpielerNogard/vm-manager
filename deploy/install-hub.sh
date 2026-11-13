@@ -90,10 +90,6 @@ install_linux() {
 	[ -n "$ssh_home" ] || ssh_home=$HOME
 	data=/var/lib/vm-manager-hub
 
-	say "loading the kernel modules the gateway needs"
-	$SUDO modprobe -a openvswitch wireguard || die "this kernel has no openvswitch or wireguard module; the gateway container needs both"
-	printf 'openvswitch\nwireguard\n' | $SUDO tee /etc/modules-load.d/vm-manager-hub.conf >/dev/null
-
 	say "installing the hub"
 	$SUDO install -m 0755 "$TMP/$BIN" /usr/local/bin/vm-manager-hub
 	$SUDO mkdir -p "$data"

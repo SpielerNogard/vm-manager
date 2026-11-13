@@ -39,7 +39,7 @@ The machine needs Docker with Compose v2 (Linux amd64/arm64, or an Apple Silicon
 curl -fsSL https://github.com/SpielerNogard/vm-manager/releases/latest/download/install-hub.sh | sh
 ```
 
-The installer downloads the hub of the latest release (verified against `SHA256SUMS`; `--version vX.Y.Z` picks another one), installs it as a service and starts it. On Linux it runs as root or with sudo and also loads the kernel modules the gateway needs (`openvswitch`, `wireguard`). Running it again updates the hub and keeps all data.
+The installer downloads the hub of the latest release (verified against `SHA256SUMS`; `--version vX.Y.Z` picks another one), installs it as a service and starts it. On Linux it runs as root or with sudo. Running it again updates the hub and keeps all data.
 
 | | Linux | macOS |
 |---|---|---|
@@ -64,7 +64,7 @@ docker compose -f deploy/compose.yaml up -d --build
 
 For development, `make stack` builds the same images from the working tree instead (`VMM_BIN=source`, version `dev`). The image build needs BuildKit (default since Docker 23).
 
-On a Linux Docker host, load the kernel modules the gateway needs first: `modprobe -a openvswitch wireguard` (persist them in `/etc/modules-load.d/`); the hub installer does this for a hub on the host. OrbStack on the Mac ships both modules but does not load `openvswitch`: load it after every OrbStack start with `docker run --rm --privileged -v /lib/modules:/lib/modules:ro alpine modprobe -a openvswitch wireguard`, otherwise the gateway container restarts in a loop with "the Docker host kernel lacks the openvswitch module".
+The gateway needs the kernel modules `openvswitch` and `wireguard` on the Docker host. Both ways of running load them before the gateway starts, with a small privileged container (`modules`), so nothing has to be loaded by hand, also not after an OrbStack restart. If the host kernel has neither the modules nor built-in support, the gateway container restarts in a loop with "the Docker host kernel lacks the openvswitch module".
 
 No config is needed. On first start the hub creates `/data/hub.json` in the `data` volume with a random node token and an empty client endpoint. Open `http://<hub>:8080`: every page except **Settings** redirects there until the client endpoint is set (the API answers POST/PUT/DELETE with 409 meanwhile, except settings, node transport and gateway routes).
 
