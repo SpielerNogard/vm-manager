@@ -1,3 +1,9 @@
+## v0.7.0 (2026-11-17)
+
+### Feat
+
+- serve GitHub, Claude Code and Linear credentials to VMs (#23)
+
 ## v0.6.0 (2026-11-13)
 
 ### Feat
