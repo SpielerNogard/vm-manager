@@ -4,10 +4,14 @@ umask 077
 url=${VMM_TOKENS_URL:-http://10.201.0.1:9002}
 user=${VMM_USER:-ubuntu}
 state=${VMM_STATE_DIR:-/var/lib/vmm}
-creds=${VMM_CLAUDE_CREDENTIALS:-/home/$user/.claude/.credentials.json}
-claude=${VMM_CLAUDE_BIN:-/home/$user/.local/bin/claude}
+home=$(getent passwd "$user" | cut -d: -f6)
+[ -n "$home" ] || exit 0
+creds=${VMM_CLAUDE_CREDENTIALS:-$home/.claude/.credentials.json}
+claude=${VMM_CLAUDE_BIN:-$home/.local/bin/claude}
 
+# runuser keeps root's environment, so claude would otherwise write its user config into root's home.
 as_user() {
+  set -- env HOME="$home" USER="$user" LOGNAME="$user" "$@"
   if [ "$(id -un)" = "$user" ]; then "$@"; else runuser -u "$user" -- "$@"; fi
 }
 
@@ -23,11 +27,14 @@ fetch() {
   case $token in '' | *[!A-Za-z0-9._~+/=-]*) [ "$code" = 200 ] && code=000 ;; esac
 }
 
-if [ "${VMM_SKIP_INSTALL-}" != 1 ]; then
+# Runs after the sync, so a hung download (killed by the unit's TimeoutStartSec) never holds back credentials.
+install_missing() {
+  [ "${VMM_SKIP_INSTALL-}" != 1 ] || return 0
   [ -x /usr/bin/gh ] || { apt-get -q update && DEBIAN_FRONTEND=noninteractive apt-get -q -y install gh; }
   [ -x "$claude" ] || as_user sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
-fi
-[ -x "$claude" ] || exit 0
+}
+
+[ -x "$claude" ] || { install_missing; exit 0; }
 
 mkdir -p "$state"
 fetch claude
@@ -64,4 +71,5 @@ case $code in
     fi
     ;;
 esac
+install_missing
 exit 0

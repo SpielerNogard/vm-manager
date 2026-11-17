@@ -16,6 +16,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/vmm-sync
+TimeoutStartSec=4min
 VMM_EOF
 cat >/etc/systemd/system/vmm-integrations.timer <<'VMM_EOF'
 [Unit]

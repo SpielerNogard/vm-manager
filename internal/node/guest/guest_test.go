@@ -108,8 +108,8 @@ func TestHelpersQuietWhenServiceDown(t *testing.T) {
 }
 
 type syncEnv struct {
-	creds, state, claudeLog string
-	env                     []string
+	creds, state, claudeLog, claudeHome string
+	env                                 []string
 }
 
 func newSyncEnv(t *testing.T, url string) syncEnv {
@@ -118,9 +118,9 @@ func newSyncEnv(t *testing.T, url string) syncEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := syncEnv{creds: filepath.Join(dir, "home", ".claude", ".credentials.json"), state: filepath.Join(dir, "state"), claudeLog: filepath.Join(dir, "claude.log")}
+	e := syncEnv{creds: filepath.Join(dir, "home", ".claude", ".credentials.json"), state: filepath.Join(dir, "state"), claudeLog: filepath.Join(dir, "claude.log"), claudeHome: filepath.Join(dir, "claude.home")}
 	stub := filepath.Join(dir, "claude")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"$*\" >> '"+e.claudeLog+"'\n"), 0o755); err != nil {
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"$*\" >> '"+e.claudeLog+"'\necho \"$HOME\" > '"+e.claudeHome+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	e.env = []string{"VMM_TOKENS_URL=" + url, "VMM_STATE_DIR=" + e.state, "VMM_CLAUDE_CREDENTIALS=" + e.creds,
@@ -235,12 +235,19 @@ func TestLinearSync(t *testing.T) {
 	if string(b) != want {
 		t.Fatalf("claude calls:\n%s\nwant:\n%s", b, want)
 	}
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home, _ := os.ReadFile(e.claudeHome); string(home) != u.HomeDir+"\n" {
+		t.Fatalf("claude ran with HOME %q, want %q", home, u.HomeDir)
+	}
 }
 
 func TestScriptInstallsHelpers(t *testing.T) {
 	requireShell(t)
 	s := Script()
-	for _, want := range []string{"/usr/local/bin/git-credential-vmm", "/usr/local/bin/gh", "/usr/local/bin/vmm-sync", "/etc/profile.d/vmm-linear.sh", "OnUnitActiveSec=5min"} {
+	for _, want := range []string{"/usr/local/bin/git-credential-vmm", "/usr/local/bin/gh", "/usr/local/bin/vmm-sync", "/etc/profile.d/vmm-linear.sh", "OnUnitActiveSec=5min", "TimeoutStartSec=4min"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script missing %q", want)
 		}
