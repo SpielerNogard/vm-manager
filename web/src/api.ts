@@ -196,7 +196,7 @@ export interface Integration {
   source: 'setup-token' | 'pat' | 'api-key'
   connected: boolean
   account: string
-  connectedAt: string
+  connectedAt?: string
 }
 
 async function text(path: string): Promise<string> {

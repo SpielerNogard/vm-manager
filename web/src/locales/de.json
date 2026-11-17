@@ -159,7 +159,7 @@
     "connectTitle": "{name} verbinden",
     "replaceTitle": "Geheimnis für {name} ersetzen",
     "disconnectTitle": "{name} trennen?",
-    "disconnectBody": "Das Geheimnis wird auf dem Hub gelöscht. Innerhalb von 5 Minuten erhalten VMs es nicht mehr und die Helfer entfernen, was sie geschrieben haben, doch eine VM kann eine Kopie behalten haben. Um den Zugriff vollständig zu entziehen, widerrufe den Token zusätzlich bei GitHub, Anthropic oder Linear.",
+    "disconnectBody": "Das Geheimnis wird auf dem Hub gelöscht, und der Token-Dienst gibt es ab sofort nicht mehr aus. Innerhalb von 5 Minuten entfernen die Helfer in den VMs, was sie geschrieben haben, doch eine VM kann eine Kopie behalten haben. Um den Zugriff vollständig zu entziehen, widerrufe den Token zusätzlich bei GitHub, Anthropic oder Linear.",
     "github": {
       "label": "GitHub",
       "secret": "Personal Access Token",
@@ -168,7 +168,7 @@
     "claude": {
       "label": "Claude",
       "secret": "Setup-Token",
-      "howto": "Führe claude setup-token auf einem Rechner aus, auf dem du angemeldet bist, und füge das Token ein."
+      "howto": "Führe claude setup-token auf einem Rechner aus, auf dem du angemeldet bist, und füge den Token ein."
     },
     "linear": {
       "label": "Linear",

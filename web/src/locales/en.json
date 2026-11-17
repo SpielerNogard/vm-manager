@@ -159,7 +159,7 @@
     "connectTitle": "Connect {name}",
     "replaceTitle": "Replace {name} secret",
     "disconnectTitle": "Disconnect {name}?",
-    "disconnectBody": "The secret is deleted from the hub. Within 5 minutes VMs stop receiving it and the helpers remove what they wrote, but a VM may have kept a copy. To fully revoke access, also revoke the token at GitHub, Anthropic or Linear.",
+    "disconnectBody": "The secret is deleted from the hub and the token service stops handing it out immediately. Within 5 minutes the helpers in the VMs remove what they wrote, but a VM may have kept a copy. To fully revoke access, also revoke the token at GitHub, Anthropic or Linear.",
     "github": {
       "label": "GitHub",
       "secret": "Personal access token",

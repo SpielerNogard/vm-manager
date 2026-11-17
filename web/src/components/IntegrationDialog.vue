@@ -14,8 +14,8 @@ const secret = ref('')
 const error = ref('')
 const busy = ref(false)
 
-watch(open, (isOpen) => {
-  if (!isOpen) return
+// Cleared on close too, so a cancelled or failed secret does not stay in memory.
+watch(open, () => {
   secret.value = ''
   error.value = ''
 })
@@ -26,8 +26,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    await api.setIntegration(i.name, i.source, secret.value)
-    secret.value = ''
+    await api.setIntegration(i.name, i.source, secret.value.trim())
     open.value = false
     emit('saved')
   } catch (e) {
