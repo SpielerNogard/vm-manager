@@ -14,25 +14,31 @@ const secret = ref('')
 const error = ref('')
 const busy = ref(false)
 
+// Bumped on every open and close, so a request answered after its dialog closed cannot close or mark a later one.
+let session = 0
+
 // Cleared on close too, so a cancelled or failed secret does not stay in memory.
 watch(open, () => {
+  session++
   secret.value = ''
   error.value = ''
+  busy.value = false
 })
 
 async function submit() {
   const i = props.integration
   if (!i) return
+  const mine = session
   error.value = ''
   busy.value = true
   try {
     await api.setIntegration(i.name, i.source, secret.value.trim())
-    open.value = false
+    if (mine === session) open.value = false
     emit('saved')
   } catch (e) {
-    error.value = (e as Error).message
+    if (mine === session) error.value = (e as Error).message
   } finally {
-    busy.value = false
+    if (mine === session) busy.value = false
   }
 }
 </script>
