@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -32,8 +33,8 @@ func main() {
 	if (*token == "") == (*tokenFile == "") {
 		log.Fatal("set exactly one of -token (or HUB_TOKEN) and -token-file")
 	}
-	if *hubURL == "" {
-		log.Fatal("-hub is required")
+	if err := checkHubURL(*hubURL); err != nil {
+		log.Fatal(err)
 	}
 	allow, err := netip.ParsePrefix(*allowCIDR)
 	if err != nil {
@@ -44,12 +45,12 @@ func main() {
 	defer stop()
 	if *health != "" {
 		go func() {
-			if err := watchHealth(ctx, *health, 10*time.Second, 3); err != nil {
+			if err := watchHealth(ctx, dialCheck(*health, 10*time.Second), 10*time.Second, 3); err != nil {
 				log.Fatal(err)
 			}
 		}()
 	}
-	srv := &http.Server{Addr: *listen, Handler: newHandler(*hubURL, hubToken(*token, *tokenFile), allow, &http.Client{Timeout: 5 * time.Second})}
+	srv := &http.Server{Addr: *listen, Handler: newHandler(*hubURL, hubToken(*token, *tokenFile), allow, hubClient()), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		srv.Close()
@@ -59,6 +60,8 @@ func main() {
 		log.Fatal(err)
 	}
 }
+
+var validName = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 func newHandler(hubURL string, hubToken func() (string, error), allow netip.Prefix, client *http.Client) http.Handler {
 	mux := http.NewServeMux()
@@ -73,13 +76,18 @@ func newHandler(hubURL string, hubToken func() (string, error), allow netip.Pref
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		name := req.PathValue("name")
+		if !validName.MatchString(name) {
+			http.NotFound(w, req)
+			return
+		}
 		tok, err := hubToken()
 		if err != nil {
 			log.Printf("hub token: %v", err)
 			http.Error(w, "hub token unavailable", http.StatusBadGateway)
 			return
 		}
-		target := strings.TrimRight(hubURL, "/") + "/api/tokens/" + url.PathEscape(req.PathValue("name")) + "?ip=" + url.QueryEscape(ip.Unmap().String())
+		target := strings.TrimRight(hubURL, "/") + "/api/tokens/" + name + "?ip=" + url.QueryEscape(ip.Unmap().String())
 		hubReq, err := http.NewRequestWithContext(req.Context(), http.MethodGet, target, nil)
 		if err != nil {
 			http.Error(w, "bad request", http.StatusBadGateway)
@@ -93,14 +101,20 @@ func newHandler(hubURL string, hubToken func() (string, error), allow netip.Pref
 			return
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusOK:
+		case http.StatusForbidden, http.StatusNotFound:
 			w.WriteHeader(resp.StatusCode)
+			return
+		default:
+			log.Printf("hub answered %s", resp.Status)
+			http.Error(w, "hub error", http.StatusBadGateway)
 			return
 		}
 		var body struct {
 			Token string `json:"token"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Token == "" {
 			http.Error(w, "unreadable hub response", http.StatusBadGateway)
 			return
 		}
@@ -110,7 +124,17 @@ func newHandler(hubURL string, hubToken func() (string, error), allow netip.Pref
 	return mux
 }
 
-func watchHealth(ctx context.Context, addr string, every time.Duration, failures int) error {
+func dialCheck(addr string, timeout time.Duration) func() error {
+	return func() error {
+		conn, err := net.DialTimeout("tcp", addr, timeout)
+		if err == nil {
+			conn.Close()
+		}
+		return err
+	}
+}
+
+func watchHealth(ctx context.Context, check func() error, every time.Duration, failures int) error {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	failed := 0
@@ -120,14 +144,13 @@ func watchHealth(ctx context.Context, addr string, every time.Duration, failures
 			return nil
 		case <-ticker.C:
 		}
-		conn, err := net.DialTimeout("tcp", addr, every)
+		err := check()
 		if err == nil {
-			conn.Close()
 			failed = 0
 			continue
 		}
 		if failed++; failed >= failures {
-			return fmt.Errorf("health check %s failed %d times: %w", addr, failed, err)
+			return fmt.Errorf("health check failed %d times: %w", failed, err)
 		}
 	}
 }
@@ -152,4 +175,23 @@ func hubToken(token, file string) func() (string, error) {
 		}
 		return cfg.Token, nil
 	}
+}
+
+// hubClient never follows redirects, so the hub token is only ever sent to -hub.
+func hubClient() *http.Client {
+	return &http.Client{
+		Timeout:       5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+func checkHubURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return err
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("-hub %q is not an http(s) URL with a host", s)
+	}
+	return nil
 }
