@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -90,5 +91,13 @@ func TestWatchHealthExits(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("watchHealth did not return")
+	}
+}
+
+func TestWatchHealthCancelIsClean(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := watchHealth(ctx, "127.0.0.1:1", 10*time.Millisecond, 3); err != nil {
+		t.Fatalf("got %v", err)
 	}
 }

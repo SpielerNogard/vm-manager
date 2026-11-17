@@ -43,7 +43,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *health != "" {
-		go func() { log.Fatal(watchHealth(ctx, *health, 10*time.Second, 3)) }()
+		go func() {
+			if err := watchHealth(ctx, *health, 10*time.Second, 3); err != nil {
+				log.Fatal(err)
+			}
+		}()
 	}
 	srv := &http.Server{Addr: *listen, Handler: newHandler(*hubURL, hubToken(*token, *tokenFile), allow, &http.Client{Timeout: 5 * time.Second})}
 	go func() {
@@ -113,7 +117,7 @@ func watchHealth(ctx context.Context, addr string, every time.Duration, failures
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case <-ticker.C:
 		}
 		conn, err := net.DialTimeout("tcp", addr, every)
