@@ -32,4 +32,4 @@ Networks are standalone objects (they can be empty) that give VMs private connec
 | DNS | `<vm>.<network>.internal` resolves to the VM's IP in that network. Devices resolve these names too but cannot reach the addresses. VMs can also resolve all networks' names but reach only their own |
 | Guest | Each network is an extra NIC configured by a netplan entry matched by MAC, DHCP from OVN, no default route. Guest interface names stay kernel names, e.g. `enp0s3` (vz), `ens4` (cloud-hypervisor) or `eth1` (firecracker) |
 
-Guests send only `*.internal` queries to the gateway (`10.201.0.1`, via the management NIC). The management network is built in and cannot be deleted; a network with members cannot be deleted either.
+Guests send only `*.internal` queries to the gateway (`10.201.0.1`, via the management NIC). The management network is built in and cannot be deleted; a network with members cannot be deleted either. VMs also reach the token service (`tokens` container, shares the gateway's namespace) at `10.201.0.1:9002` over the management NIC only; it answers sources in `10.200.0.0/16` only.

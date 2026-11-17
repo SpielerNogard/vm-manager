@@ -179,7 +179,7 @@ ethernets:
 	return userData, metaData, networkConfig
 }
 
-// DiskScript formats (only if blank), mounts and grows each attached disk; the guest runs it every boot from the seed.
+// DiskScript formats (only if blank), mounts and grows each attached disk and runs the integrations script; the guest runs it every boot from the seed.
 func DiskScript(f VMFile) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
@@ -213,6 +213,8 @@ for i in $(seq 300); do
 done
 VMM_READY
 systemd-run --no-block --collect --description='vmm ready probe' sh /run/vmm-ready.sh
+# Run from here, not from bootcmd: user-data is not re-read without a new instance-id, the seed is.
+[ -f /run/vmm-seed/vmm-integrations.sh ] && sh /run/vmm-seed/vmm-integrations.sh
 `, strings.ToLower(f.MAC), ReadyMarker)
 	return b.String()
 }

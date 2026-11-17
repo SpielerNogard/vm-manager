@@ -1076,3 +1076,59 @@ func TestNodeVersion(t *testing.T) {
 		t.Errorf("after restart n1 = %+v", n)
 	}
 }
+
+func TestCreateVMIsolated(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	q := validReq()
+	q.Isolated = true
+	vm, err := r.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !vm.Isolated {
+		t.Fatal("created VM is not isolated")
+	}
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(r.net, store, r.disks, r.cfg)
+	if got, ok := r2.vms[vm.ID]; !ok || !got.Isolated {
+		t.Fatalf("after reload = %+v", got)
+	}
+	q.Name, q.Isolated = "open", false
+	if vm, _ = r.CreateVM(q); vm.Isolated {
+		t.Fatal("VM without the flag is isolated")
+	}
+}
+
+func TestVMByMgmtIP(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	a, err := r.net.AddNetwork("a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := validReq()
+	q.NetworkIDs = []string{a.ID}
+	vm, err := r.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mgmtIP, netIP string
+	for _, n := range vm.NICs {
+		if n.Network == mgmtNetwork {
+			mgmtIP = n.IP
+		} else {
+			netIP = n.IP
+		}
+	}
+	if got, ok := r.VMByMgmtIP(mgmtIP); !ok || got.ID != vm.ID {
+		t.Fatalf("mgmt ip: got %+v ok=%v", got, ok)
+	}
+	if _, ok := r.VMByMgmtIP(netIP); ok {
+		t.Fatal("found a VM by its network NIC IP")
+	}
+	if _, ok := r.VMByMgmtIP("1.2.3.4"); ok {
+		t.Fatal("found a VM by an unknown IP")
+	}
+}

@@ -19,7 +19,7 @@
 | POST | `/api/settings/token` | Regenerate the node token (random); returns settings |
 | GET | `/api/vms` | VMs with state, desired power and IP |
 | GET | `/api/vms/{id}` | One VM, same fields as in the list; 404 if unknown |
-| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `sshKeyIds`, optional `networkIds`, optional `disks` (`diskId`, `mountPath`)). Also works for an offline node: the VM shows `pending` until the node connects |
+| POST | `/api/vms` | Create a VM (`nodeId`, `name`, `cpus`, `memoryMB`, `diskGB`, `sshKeyIds`, optional `networkIds`, optional `disks` (`diskId`, `mountPath`), optional `isolated` (default false; an isolated VM gets no tokens from the token lookup, and VMs carry `isolated: true` only when set)). Also works for an offline node: the VM shows `pending` until the node connects |
 | DELETE | `/api/vms/{id}` | Delete the VM and its root disk; attached disks are kept and become `releasing`. The node shuts a VM with disks down gracefully first (hard power-off after 10 s). Also works for an offline node: the VM is removed from the hub at once and the node deletes it when it reconnects |
 | PUT | `/api/vms/{id}/networks?restartAllowed=true` | Set the VM's full network list (`{"networkIds": [...]}`, required; `[]` detaches all). A VM whose desired power is running is restarted and needs `restartAllowed=true`, else 409. Stopped VMs need no flag |
 | PUT | `/api/vms/{id}/disks?restartAllowed=true` | Set the VM's full disk list (`{"disks": [{"diskId", "mountPath"}]}`, required; `[]` detaches all). A running VM is restarted and needs `restartAllowed=true`, else 409. Removed disks become `releasing` |
@@ -29,6 +29,9 @@
 | GET | `/api/keys` | Stored SSH public keys with type and fingerprint |
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
+| GET | `/api/integrations` | `github`, `claude` and `linear` with `connected`, `account` and, once connected, `connectedAt`. Never the secret |
+| PUT | `/api/integrations/{name}` | Connect or replace one (`source`, `secret`): `github` takes `pat`, `claude` `setup-token`, `linear` `api-key`. The hub checks the secret with the provider first; 400 if it is rejected |
+| DELETE | `/api/integrations/{name}` | Disconnect (204, also when it was not connected) |
 | GET | `/api/networks` | Networks with subnet and members (VM IDs), management network first, marked builtin |
 | GET | `/api/networks/{id}` | One network, same fields as in the list (`mgmt` included); 404 if unknown |
 | POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
@@ -45,4 +48,5 @@
 | DELETE | `/api/devices/{id}` | Remove a device |
 | GET | `/api/devices/{id}/config` | Download the device's WireGuard config |
 | GET | `/api/gateway/state` | Internal, token-protected: desired network state for the gateway |
+| GET | `/api/tokens/{name}?ip=` | Internal, token-protected: the secret of a connected integration for the VM with that management IP, as `{"token", "expiresAt"}` (`expiresAt` is empty for now). 403 for an `isolated` VM (whether or not the integration is connected), 404 for an unknown IP or an integration that is not connected |
 | POST | `/api/gateway/status` | Internal, token-protected: gateway status report |

@@ -14,8 +14,8 @@ const locked = (section: Section) => section !== 'settings' && settings.value?.s
 
 const route = useRoute()
 
-const counts: Record<Exclude<Section, 'settings'>, { value: unknown[] }> = { nodes, vms, keys, devices, networks, disks }
-const count = (section: Exclude<Section, 'settings'>) => counts[section].value.length
+const counts: Partial<Record<Section, { value: unknown[] }>> = { nodes, vms, keys, devices, networks, disks }
+const count = (section: Section) => counts[section]?.value.length
 const isActive = (section: Section) => route.name === section || route.meta.section === section
 </script>
 
@@ -41,7 +41,7 @@ const isActive = (section: Section) => route.name === section || route.meta.sect
           >
             <AppIcon :name="item.icon" class="opacity-70" />
             <span class="grow">{{ t(`nav.${item.name}.label`) }}</span>
-            <span v-if="item.name !== 'settings'" class="text-xs tabular-nums opacity-60">{{ count(item.name) }}</span>
+            <span v-if="counts[item.name]" class="text-xs tabular-nums opacity-60">{{ count(item.name) }}</span>
           </RouterLink>
         </li>
       </ul>

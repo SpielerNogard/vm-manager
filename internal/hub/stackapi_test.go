@@ -34,7 +34,7 @@ func stackAPI(t *testing.T, managed bool) (*httptest.Server, *ConfigStore, *Regi
 		go s.Run(ctx)
 		waitFor(t, "the stack to run", func() bool { return s.State().State == "running" })
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, NewUpdates(), s))
+	srv := httptest.NewServer(APIHandler(r, keys, newTestIntegrations(t), nm, cfg, NewUpdates(), s))
 	t.Cleanup(srv.Close)
 	return srv, cfg, r, runner
 }

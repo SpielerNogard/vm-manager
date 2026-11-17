@@ -171,6 +171,19 @@ func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
 	if !strings.Contains(boot, "LABEL=cidata") || !strings.Contains(boot, "sh /run/vmm-seed/vmm-disks.sh") {
 		t.Fatalf("bootcmd does not run vmm-disks.sh:\n%s", ud)
 	}
+	// User-data is only re-read with a new instance-id, so existing VMs get the helpers through vmm-disks.sh instead.
+	if strings.Contains(boot, "vmm-integrations.sh") {
+		t.Fatalf("bootcmd runs vmm-integrations.sh itself:\n%s", boot)
+	}
+}
+
+func TestDiskScriptRunsIntegrations(t *testing.T) {
+	s := DiskScript(VMFile{MAC: "52:54:00:12:34:56"})
+	run := "[ -f /run/vmm-seed/vmm-integrations.sh ] && sh /run/vmm-seed/vmm-integrations.sh"
+	i := strings.Index(s, run)
+	if i < 0 || i < strings.Index(s, "systemd-run") {
+		t.Fatalf("script does not run vmm-integrations.sh after the ready probe:\n%s", s)
+	}
 }
 
 func TestDiskScript(t *testing.T) {

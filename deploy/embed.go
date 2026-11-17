@@ -3,5 +3,5 @@ package deploy
 
 import "embed"
 
-//go:embed stack.compose.yaml gateway.Dockerfile storage.Dockerfile gateway-start.sh
+//go:embed stack.compose.yaml gateway.Dockerfile storage.Dockerfile tokens.Dockerfile gateway-start.sh
 var Stack embed.FS

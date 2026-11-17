@@ -26,7 +26,7 @@ interface DiskRow {
 
 const rows = ref<DiskRow[]>([])
 
-const form = ref<Omit<CreateVMRequest, 'disks'> & { networkIds: string[] }>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, sshKeyIds: [], networkIds: [] })
+const form = ref<Omit<CreateVMRequest, 'disks'> & { networkIds: string[] }>({ nodeId: '', name: '', cpus: 2, memoryMB: 2048, diskGB: 20, sshKeyIds: [], networkIds: [], isolated: false })
 const error = ref('')
 const busy = ref(false)
 
@@ -80,6 +80,7 @@ async function submit() {
     form.value.name = ''
     rows.value = []
     form.value.networkIds = []
+    form.value.isolated = false
     open.value = false
     await refresh()
   } catch (e) {
@@ -203,6 +204,14 @@ async function submit() {
             </span>
           </label>
         </fieldset>
+
+        <label class="col-span-2 flex cursor-pointer items-start gap-3">
+          <input v-model="form.isolated" type="checkbox" class="checkbox checkbox-sm mt-0.5" />
+          <span>
+            <span class="block text-sm font-medium">{{ t('create.isolated') }}</span>
+            <span class="text-base-content/60 block text-xs">{{ t('create.isolatedHint') }}</span>
+          </span>
+        </label>
 
         <div v-if="error" role="alert" class="alert alert-error alert-soft col-span-2 text-sm">{{ error }}</div>
         <div class="modal-action col-span-2 mt-0">

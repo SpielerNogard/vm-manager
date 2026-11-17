@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -43,7 +44,7 @@ func apiServerWith(t *testing.T, c Config) (*httptest.Server, *Registry, *NetMod
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, NewUpdates(), nil))
+	srv := httptest.NewServer(APIHandler(r, keys, newTestIntegrations(t), nm, cfg, NewUpdates(), nil))
 	t.Cleanup(srv.Close)
 	return srv, r, nm
 }
@@ -619,5 +620,119 @@ func TestInstallCommandEndpoint(t *testing.T) {
 	}
 	if status, _ := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"n3"}`); status != 400 {
 		t.Fatalf("create without provider: %d", status)
+	}
+}
+
+func TestIntegrationsAPI(t *testing.T) {
+	srv := apiServer(t)
+	do := func(method, path, body string) (*http.Response, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp, string(b)
+	}
+	resp, body := do("PUT", "/api/integrations/github", `{"source":"pat","secret":"ghp_x"}`)
+	if resp.StatusCode != 200 || strings.Contains(body, "ghp_x") {
+		t.Fatalf("put = %d %s", resp.StatusCode, body)
+	}
+	_, body = do("GET", "/api/integrations", "")
+	if !strings.Contains(body, `"connected":true`) || strings.Contains(body, "ghp_x") {
+		t.Fatalf("get = %s", body)
+	}
+	if resp, _ = do("DELETE", "/api/integrations/github", ""); resp.StatusCode != 204 {
+		t.Fatalf("delete = %d", resp.StatusCode)
+	}
+	if resp, _ = do("PUT", "/api/integrations/nope", `{"source":"pat","secret":"x"}`); resp.StatusCode != 400 {
+		t.Fatalf("unknown = %d", resp.StatusCode)
+	}
+}
+
+func tokenLookup(t *testing.T, srv *httptest.Server, token, ip string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest("GET", srv.URL+"/api/tokens/github?ip="+ip, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func tokenServer(t *testing.T, connect, isolated bool) (*httptest.Server, string) {
+	t.Helper()
+	cfg := newTestConfig(t, testAPIConfig())
+	nm := newTestNet(t)
+	r := NewRegistry(nm, newTestStore(t), newTestDisks(t), cfg)
+	r.NodeConnected(proto.Register{NodeID: "n1", Provider: "vz", CPUs: 4, MemoryMB: 8192}, &fakeNode{})
+	ints := newTestIntegrations(t)
+	if connect {
+		if _, err := ints.Set(context.Background(), "github", "pat", "ghp_secret"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := validReq()
+	q.Isolated = isolated
+	vm, err := r.CreateVM(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := LoadKeyStore(filepath.Join(t.TempDir(), "keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(APIHandler(r, keys, ints, nm, cfg, NewUpdates(), nil))
+	t.Cleanup(srv.Close)
+	return srv, vm.NICs[0].IP
+}
+
+func TestTokenLookup(t *testing.T) {
+	srv, ip := tokenServer(t, true, false)
+	s, body := tokenLookup(t, srv, "tok", ip)
+	if s != http.StatusOK || !strings.Contains(body, `"token":"ghp_secret"`) || !strings.Contains(body, `"expiresAt":""`) {
+		t.Fatalf("status = %d body = %s", s, body)
+	}
+}
+
+func TestTokenLookupNeedsToken(t *testing.T) {
+	srv, ip := tokenServer(t, true, false)
+	if s, _ := tokenLookup(t, srv, "", ip); s != http.StatusUnauthorized {
+		t.Fatalf("status = %d", s)
+	}
+}
+
+func TestTokenLookupUnknownIP(t *testing.T) {
+	srv, _ := tokenServer(t, true, false)
+	if s, _ := tokenLookup(t, srv, "tok", "1.2.3.4"); s != http.StatusNotFound {
+		t.Fatalf("status = %d", s)
+	}
+}
+
+func TestTokenLookupIsolated(t *testing.T) {
+	srv, ip := tokenServer(t, true, true)
+	s, body := tokenLookup(t, srv, "tok", ip)
+	if s != http.StatusForbidden || strings.Contains(body, "ghp_secret") {
+		t.Fatalf("status = %d body = %s", s, body)
+	}
+}
+
+func TestTokenLookupIsolatedNotConnected(t *testing.T) {
+	srv, ip := tokenServer(t, false, true)
+	if s, _ := tokenLookup(t, srv, "tok", ip); s != http.StatusForbidden {
+		t.Fatalf("status = %d", s)
+	}
+}
+
+func TestTokenLookupNotConnected(t *testing.T) {
+	srv, ip := tokenServer(t, false, false)
+	if s, _ := tokenLookup(t, srv, "tok", ip); s != http.StatusNotFound {
+		t.Fatalf("status = %d", s)
 	}
 }

@@ -173,6 +173,7 @@ func (s *Stack) writeProject(dir string) error {
 		"stack.compose.yaml": "compose.yaml",
 		"gateway.Dockerfile": "deploy/gateway.Dockerfile",
 		"storage.Dockerfile": "deploy/storage.Dockerfile",
+		"tokens.Dockerfile":  "deploy/tokens.Dockerfile",
 		"gateway-start.sh":   "deploy/gateway-start.sh",
 	} {
 		b, err := deploy.Stack.ReadFile(name)

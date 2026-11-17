@@ -71,3 +71,10 @@ func TestWriteSeedISOFailureKeepsOldSeed(t *testing.T) {
 		t.Fatalf("leftover files: %v", entries)
 	}
 }
+
+func TestSeedHasIntegrations(t *testing.T) {
+	files := GuestSeedFiles(VMFile{}, PrimaryNet{})
+	if s := string(files["vmm-integrations.sh"]); !strings.Contains(s, "vmm-integrations.timer") || !strings.Contains(s, "/usr/local/bin/git-credential-vmm") {
+		t.Fatalf("seed vmm-integrations.sh = %q", s)
+	}
+}

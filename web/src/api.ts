@@ -106,6 +106,7 @@ export interface VM {
   state: VMState
   power: 'running' | 'stopped'
   ip?: string
+  isolated?: boolean
   error?: string
 }
 
@@ -185,6 +186,17 @@ export interface CreateVMRequest {
   disks: { diskId: string; mountPath: string }[]
   sshKeyIds: string[]
   networkIds?: string[]
+  isolated?: boolean
+}
+
+export type IntegrationName = 'claude' | 'github' | 'linear'
+
+export interface Integration {
+  name: IntegrationName
+  source: 'setup-token' | 'pat' | 'api-key'
+  connected: boolean
+  account: string
+  connectedAt?: string
 }
 
 async function text(path: string): Promise<string> {
@@ -227,6 +239,10 @@ export const api = {
   keys: () => request<SSHKey[]>('GET', '/api/keys'),
   addKey: (name: string, publicKey: string) => request<SSHKey>('POST', '/api/keys', { name, publicKey }),
   deleteKey: (id: string) => request<void>('DELETE', `/api/keys/${id}`),
+  integrations: () => request<Integration[]>('GET', '/api/integrations'),
+  setIntegration: (name: string, source: string, secret: string) =>
+    request<Integration>('PUT', `/api/integrations/${name}`, { source, secret }),
+  deleteIntegration: (name: string) => request<void>('DELETE', `/api/integrations/${name}`),
   networks: () => request<Network[]>('GET', '/api/networks'),
   createNetwork: (req: { name: string; subnet?: string }) => request<Network>('POST', '/api/networks', req),
   deleteNetwork: (id: string) => request<void>('DELETE', `/api/networks/${id}`),

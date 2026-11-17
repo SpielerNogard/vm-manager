@@ -1,7 +1,7 @@
 VERSION ?= dev
 LDFLAGS = -X vm-manager/internal/version.Version=$(VERSION)
 
-.PHONY: web hub node node-linux storage test stack dist dist-darwin checksums
+.PHONY: web hub node node-linux storage tokens test stack dist dist-darwin checksums
 
 web:
 	npm --prefix web ci
@@ -14,6 +14,9 @@ hub:
 storage:
 	go build -ldflags "$(LDFLAGS)" -o bin/storage ./cmd/storage
 
+tokens:
+	go build -ldflags "$(LDFLAGS)" -o bin/tokens ./cmd/tokens
+
 node:
 	go build -ldflags "$(LDFLAGS)" -o bin/vm-manager-node ./cmd/node
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/netagent-linux-arm64 ./cmd/netagent
@@ -24,7 +27,7 @@ node-linux:
 
 # Release binaries as cmd/os/arch; the hub embeds web/dist, so run `make web` first.
 DIST_LINUX = hub/linux/amd64 hub/linux/arm64 gateway/linux/amd64 gateway/linux/arm64 \
-	storage/linux/amd64 storage/linux/arm64 node/linux/amd64 netagent/linux/arm64
+	storage/linux/amd64 storage/linux/arm64 tokens/linux/amd64 tokens/linux/arm64 node/linux/amd64 netagent/linux/arm64
 
 dist:
 	mkdir -p dist
