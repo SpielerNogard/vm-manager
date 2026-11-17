@@ -20,7 +20,7 @@
     },
     "integrations": {
       "label": "Integrations",
-      "blurb": "Connect GitHub, Claude and Linear once. VMs get short-lived access without ever holding the secret themselves, except isolated VMs, which get none."
+      "blurb": "Connect GitHub, Claude and Linear once. Every VM that is not isolated receives the secret itself and can use it as long as it is valid."
     },
     "devices": {
       "label": "Devices",
@@ -129,7 +129,7 @@
     "existingDisk": "Existing",
     "newDisk": "New",
     "isolated": "Isolated",
-    "isolatedHint": "The VM gets no GitHub, Claude or Linear access from the connected integrations."
+    "isolatedHint": "The VM does not receive integration tokens. Not a security boundary while the hub API has no login."
   },
   "keys": {
     "add": "Add key",
@@ -159,7 +159,7 @@
     "connectTitle": "Connect {name}",
     "replaceTitle": "Replace {name} secret",
     "disconnectTitle": "Disconnect {name}?",
-    "disconnectBody": "The secret is deleted from the hub. VMs lose access within 5 minutes.",
+    "disconnectBody": "The secret is deleted from the hub. Within 5 minutes VMs stop receiving it and the helpers remove what they wrote, but a VM may have kept a copy. To fully revoke access, also revoke the token at GitHub, Anthropic or Linear.",
     "github": {
       "label": "GitHub",
       "secret": "Personal access token",

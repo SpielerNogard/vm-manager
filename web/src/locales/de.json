@@ -20,7 +20,7 @@
     },
     "integrations": {
       "label": "Integrationen",
-      "blurb": "Verbinde GitHub, Claude und Linear einmalig. VMs erhalten kurzlebigen Zugriff, ohne das Geheimnis selbst zu speichern; isolierte VMs erhalten keinen."
+      "blurb": "Verbinde GitHub, Claude und Linear einmalig. Jede nicht isolierte VM erhält das Geheimnis selbst und kann es nutzen, solange es gültig ist."
     },
     "devices": {
       "label": "Geräte",
@@ -129,7 +129,7 @@
     "existingDisk": "Vorhanden",
     "newDisk": "Neu",
     "isolated": "Isoliert",
-    "isolatedHint": "Die VM erhält über die verbundenen Integrationen keinen Zugriff auf GitHub, Claude oder Linear."
+    "isolatedHint": "Die VM erhält keine Integrations-Tokens. Keine Sicherheitsgrenze, solange die Hub-API keinen Login hat."
   },
   "keys": {
     "add": "Key hinzufügen",
@@ -159,7 +159,7 @@
     "connectTitle": "{name} verbinden",
     "replaceTitle": "Geheimnis für {name} ersetzen",
     "disconnectTitle": "{name} trennen?",
-    "disconnectBody": "Das Geheimnis wird auf dem Hub gelöscht. VMs verlieren den Zugriff innerhalb von 5 Minuten.",
+    "disconnectBody": "Das Geheimnis wird auf dem Hub gelöscht. Innerhalb von 5 Minuten erhalten VMs es nicht mehr und die Helfer entfernen, was sie geschrieben haben, doch eine VM kann eine Kopie behalten haben. Um den Zugriff vollständig zu entziehen, widerrufe den Token zusätzlich bei GitHub, Anthropic oder Linear.",
     "github": {
       "label": "GitHub",
       "secret": "Personal Access Token",
