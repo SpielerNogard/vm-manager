@@ -43,7 +43,7 @@ func apiServerWith(t *testing.T, c Config) (*httptest.Server, *Registry, *NetMod
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, NewUpdates(), nil))
+	srv := httptest.NewServer(APIHandler(r, keys, newTestIntegrations(t), nm, cfg, NewUpdates(), nil))
 	t.Cleanup(srv.Close)
 	return srv, r, nm
 }
@@ -619,5 +619,33 @@ func TestInstallCommandEndpoint(t *testing.T) {
 	}
 	if status, _ := doJSON(t, "POST", srv.URL+"/api/nodes", `{"id":"n3"}`); status != 400 {
 		t.Fatalf("create without provider: %d", status)
+	}
+}
+
+func TestIntegrationsAPI(t *testing.T) {
+	srv := apiServer(t)
+	do := func(method, path, body string) (*http.Response, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp, string(b)
+	}
+	resp, body := do("PUT", "/api/integrations/github", `{"source":"pat","secret":"ghp_x"}`)
+	if resp.StatusCode != 200 || strings.Contains(body, "ghp_x") {
+		t.Fatalf("put = %d %s", resp.StatusCode, body)
+	}
+	_, body = do("GET", "/api/integrations", "")
+	if !strings.Contains(body, `"connected":true`) || strings.Contains(body, "ghp_x") {
+		t.Fatalf("get = %s", body)
+	}
+	if resp, _ = do("DELETE", "/api/integrations/github", ""); resp.StatusCode != 204 {
+		t.Fatalf("delete = %d", resp.StatusCode)
+	}
+	if resp, _ = do("PUT", "/api/integrations/nope", `{"source":"pat","secret":"x"}`); resp.StatusCode != 400 {
+		t.Fatalf("unknown = %d", resp.StatusCode)
 	}
 }

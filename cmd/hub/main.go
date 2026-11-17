@@ -34,6 +34,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	ints, err := hub.LoadIntegrationStore(filepath.Join(filepath.Dir(keysPath), "integrations.json"), hub.DefaultVerifiers())
+	if err != nil {
+		log.Fatal(err)
+	}
 	hubKeys, err := keys.LoadHubKeys(hub.HubKeyFiles(expandHome(*sshDir, home)))
 	if err != nil {
 		log.Fatal(err)
@@ -100,7 +104,7 @@ func main() {
 	case *manageStack:
 		log.Print("-stack ignored: a development build does not manage the stack (use make stack)")
 	}
-	mux.Handle("/api/", hub.APIHandler(r, keys, netModel, cfg, updates, stack))
+	mux.Handle("/api/", hub.APIHandler(r, keys, ints, netModel, cfg, updates, stack))
 	mux.Handle("/node/install.sh", hub.InstallScriptHandler())
 	mux.Handle("/", spa(dist))
 

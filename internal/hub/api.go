@@ -14,7 +14,7 @@ import (
 	"vm-manager/internal/version"
 )
 
-func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u *Updates, stack *Stack) http.Handler {
+func APIHandler(r *Registry, keys *KeyStore, ints *IntegrationStore, net *NetModel, cfg *ConfigStore, u *Updates, stack *Stack) http.Handler {
 	mux := http.NewServeMux()
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
@@ -398,6 +398,30 @@ func APIHandler(r *Registry, keys *KeyStore, net *NetModel, cfg *ConfigStore, u 
 	})
 	mux.HandleFunc("DELETE /api/keys/{id}", func(w http.ResponseWriter, req *http.Request) {
 		if err := keys.Delete(req.PathValue("id")); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /api/integrations", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, ints.List()) })
+	mux.HandleFunc("PUT /api/integrations/{name}", func(w http.ResponseWriter, req *http.Request) {
+		var q struct {
+			Source string `json:"source"`
+			Secret string `json:"secret"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&q); err != nil {
+			writeError(w, fmt.Errorf("%w: %v", ErrInvalid, err))
+			return
+		}
+		i, err := ints.Set(req.Context(), req.PathValue("name"), q.Source, q.Secret)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, i)
+	})
+	mux.HandleFunc("DELETE /api/integrations/{name}", func(w http.ResponseWriter, req *http.Request) {
+		if err := ints.Delete(req.PathValue("name")); err != nil {
 			writeError(w, err)
 			return
 		}

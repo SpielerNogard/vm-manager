@@ -106,7 +106,7 @@ func updatesServer(t *testing.T, c Config, u *Updates) (*httptest.Server, *Regis
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(APIHandler(r, keys, nm, cfg, u, nil))
+	srv := httptest.NewServer(APIHandler(r, keys, newTestIntegrations(t), nm, cfg, u, nil))
 	t.Cleanup(srv.Close)
 	return srv, r
 }

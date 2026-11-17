@@ -29,6 +29,9 @@
 | GET | `/api/keys` | Stored SSH public keys with type and fingerprint |
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
+| GET | `/api/integrations` | `github`, `claude` and `linear` with `connected`, `account`, `connectedAt`. Never the secret |
+| PUT | `/api/integrations/{name}` | Connect or replace one (`source`, `secret`): `github` takes `pat`, `claude` `setup-token`, `linear` `api-key`. The hub checks the secret with the provider first; 400 if it is rejected |
+| DELETE | `/api/integrations/{name}` | Disconnect (204, also when it was not connected) |
 | GET | `/api/networks` | Networks with subnet and members (VM IDs), management network first, marked builtin |
 | GET | `/api/networks/{id}` | One network, same fields as in the list (`mgmt` included); 404 if unknown |
 | POST | `/api/networks` | Create a network (`name`, optional `subnet`) |
