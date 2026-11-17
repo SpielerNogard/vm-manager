@@ -9,6 +9,8 @@ import (
 	"github.com/diskfs/go-diskfs/disk"
 	"github.com/diskfs/go-diskfs/filesystem"
 	"github.com/diskfs/go-diskfs/filesystem/iso9660"
+
+	"vm-manager/internal/node/guest"
 )
 
 const SeedISO = "seed.iso"
@@ -19,6 +21,7 @@ func GuestSeedFiles(f VMFile, primary PrimaryNet) map[string][]byte {
 	return map[string][]byte{
 		"user-data": []byte(userData), "meta-data": []byte(metaData),
 		"network-config": []byte(networkConfig), "vmm-disks.sh": []byte(DiskScript(f)),
+		"vmm-integrations.sh": []byte(guest.Script()),
 	}
 }
 

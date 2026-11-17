@@ -171,6 +171,10 @@ func TestCloudInitRunsDiskScriptEveryBoot(t *testing.T) {
 	if !strings.Contains(boot, "LABEL=cidata") || !strings.Contains(boot, "sh /run/vmm-seed/vmm-disks.sh") {
 		t.Fatalf("bootcmd does not run vmm-disks.sh:\n%s", ud)
 	}
+	disks, integ := strings.Index(boot, "sh /run/vmm-seed/vmm-disks.sh"), strings.Index(boot, "sh /run/vmm-seed/vmm-integrations.sh")
+	if integ < disks || integ > strings.Index(boot, "umount /run/vmm-seed") {
+		t.Fatalf("bootcmd does not run vmm-integrations.sh after vmm-disks.sh while the seed is mounted:\n%s", boot)
+	}
 }
 
 func TestDiskScript(t *testing.T) {

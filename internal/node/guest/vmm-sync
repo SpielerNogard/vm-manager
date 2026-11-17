@@ -1,0 +1,67 @@
+#!/bin/sh
+# Runs as root from vmm-integrations.timer: installs gh and Claude Code, syncs Claude credentials and the Linear MCP server.
+umask 077
+url=${VMM_TOKENS_URL:-http://10.201.0.1:9002}
+user=${VMM_USER:-ubuntu}
+state=${VMM_STATE_DIR:-/var/lib/vmm}
+creds=${VMM_CLAUDE_CREDENTIALS:-/home/$user/.claude/.credentials.json}
+claude=${VMM_CLAUDE_BIN:-/home/$user/.local/bin/claude}
+
+as_user() {
+  if [ "$(id -un)" = "$user" ]; then "$@"; else runuser -u "$user" -- "$@"; fi
+}
+
+sha() { sha256sum | cut -d' ' -f1; }
+
+body=$(mktemp) || exit 1
+trap 'rm -f "$body"' EXIT
+
+# Sets code (000 when unreachable) and token; a token with characters outside this set is not used.
+fetch() {
+  code=$(curl -fsS --max-time 3 -o "$body" -w '%{http_code}' "$url/v1/$1/token" 2>/dev/null)
+  token=$(cat "$body")
+  case $token in '' | *[!A-Za-z0-9._~+/=-]*) [ "$code" = 200 ] && code=000 ;; esac
+}
+
+if [ "${VMM_SKIP_INSTALL-}" != 1 ]; then
+  [ -x /usr/bin/gh ] || { apt-get -q update && DEBIAN_FRONTEND=noninteractive apt-get -q -y install gh; }
+  [ -x "$claude" ] || as_user sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
+fi
+[ -x "$claude" ] || exit 0
+
+mkdir -p "$state"
+fetch claude
+hashfile=$state/claude-credentials.sha256
+# Only a missing file or one this script wrote is ours to touch; a user's own /login stays.
+if [ ! -e "$creds" ] || { [ -f "$hashfile" ] && [ "$(sha <"$creds")" = "$(cat "$hashfile")" ]; }; then
+  case $code in
+    200)
+      json=$(printf '{"claudeAiOauth":{"accessToken":"%s","refreshToken":null,"expiresAt":null,"scopes":["user:inference"]}}' "$token")
+      as_user mkdir -p "$(dirname "$creds")"
+      tmp=$creds.vmm-new
+      printf '%s\n' "$json" >"$tmp" && chmod 600 "$tmp" && chown "$user:" "$tmp" && mv -f "$tmp" "$creds" &&
+        printf '%s\n' "$json" | sha >"$hashfile"
+      ;;
+    403 | 404) rm -f "$creds" "$hashfile" ;;
+  esac
+fi
+
+fetch linear
+hashfile=$state/linear.sha256
+case $code in
+  200)
+    h=$(printf '%s' "$token" | sha)
+    if [ "$h" != "$(cat "$hashfile" 2>/dev/null)" ]; then
+      [ -f "$hashfile" ] && as_user "$claude" mcp remove --scope user linear >/dev/null 2>&1
+      as_user "$claude" mcp add --transport http --scope user linear https://mcp.linear.app/mcp \
+        --header "Authorization: Bearer $token" >/dev/null 2>&1 && printf '%s\n' "$h" >"$hashfile"
+    fi
+    ;;
+  403 | 404)
+    if [ -f "$hashfile" ]; then
+      as_user "$claude" mcp remove --scope user linear >/dev/null 2>&1
+      rm -f "$hashfile"
+    fi
+    ;;
+esac
+exit 0

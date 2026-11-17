@@ -136,7 +136,7 @@ users:
   # Kernel and systemd output to the virtio console (console.log); takes effect from the second boot.
   - [sh, -c, 'test -f /etc/default/grub.d/99-vmm-console.cfg || { echo "GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT console=tty1 console=hvc0\"" > /etc/default/grub.d/99-vmm-console.cfg && update-grub; }']
   # The disk list lives in the seed, not in user-data, so a reseed changes it without a new instance-id.
-  - [sh, -c, 'mkdir -p /run/vmm-seed && mount -o ro LABEL=cidata /run/vmm-seed && { sh /run/vmm-seed/vmm-disks.sh; umount /run/vmm-seed; }']
+  - [sh, -c, 'mkdir -p /run/vmm-seed && mount -o ro LABEL=cidata /run/vmm-seed && { sh /run/vmm-seed/vmm-disks.sh; sh /run/vmm-seed/vmm-integrations.sh; umount /run/vmm-seed; }']
 # Reapplies network-config every boot so a reseeded NIC list takes effect.
 updates:
   network:
