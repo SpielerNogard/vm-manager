@@ -1,5 +1,5 @@
 #!/bin/sh
-if [ -z "${GH_TOKEN-}" ] && token=$(curl -fsS --max-time 3 "${VMM_TOKENS_URL:-http://10.201.0.1:9002}/v1/github/token" 2>/dev/null) && [ -n "$token" ]; then
+if [ -z "${GH_TOKEN-}" ] && token=$(curl -fsS --max-time 1 "${VMM_TOKENS_URL:-http://10.201.0.1:9002}/v1/github/token" 2>/dev/null) && [ -n "$token" ]; then
   GH_TOKEN=$token
   export GH_TOKEN
 fi

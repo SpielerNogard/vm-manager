@@ -2,6 +2,7 @@ package guest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -109,7 +111,7 @@ func TestHelpersQuietWhenServiceDown(t *testing.T) {
 
 type syncEnv struct {
 	creds, state, claudeLog, claudeHome, gitconfig string
-	env                                 []string
+	env                                            []string
 }
 
 func newSyncEnv(t *testing.T, url string) syncEnv {
@@ -355,5 +357,219 @@ func TestScriptInstallsHelpers(t *testing.T) {
 	}
 	if out, err := exec.Command("sh", "-n", "-c", s).CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v\n%s", err, out)
+	}
+}
+
+func TestCheckedRefusesMissingNewline(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("no panic for a file without a trailing newline")
+		}
+	}()
+	checked("x", []byte("echo hi"))
+}
+
+func TestCredentialHelperRejectsOddToken(t *testing.T) {
+	requireShell(t)
+	for _, tok := range []string{`a"b`, "a\nb", "a b"} {
+		svc := newTokenService(t, map[string]reply{"github": {200, tok}})
+		out, err := run(t, []string{"VMM_TOKENS_URL=" + svc.URL}, "protocol=https\nhost=github.com\n\n", "git-credential-vmm", "get")
+		if err != nil || out != "" {
+			t.Errorf("token %q: output %q, %v; want empty, exit 0", tok, out, err)
+		}
+	}
+}
+
+func TestClaudeSyncRejectsOddToken(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"claude": {200, "a\nb"}})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	if _, err := os.Stat(e.creds); !os.IsNotExist(err) {
+		t.Fatalf("credentials written for a token with a newline: %v", err)
+	}
+	svc.set("claude", reply{200, "sk-ant-oat01-x"})
+	e.sync(t)
+	before, _ := os.ReadFile(e.creds)
+	svc.set("claude", reply{200, `a"b`})
+	e.sync(t)
+	e.wantCreds(t, string(before))
+}
+
+func TestClaudeSyncKeepsForeignFileWithStaleHash(t *testing.T) {
+	requireShell(t)
+	for _, rp := range []reply{{200, "sk-ant-oat01-x"}, {code: 404}} {
+		svc := newTokenService(t, map[string]reply{"claude": rp})
+		e := newSyncEnv(t, svc.URL)
+		e.writeUserCreds(t)
+		if err := os.MkdirAll(e.state, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(e.state, "claude-credentials.sha256"), []byte("0123\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e.sync(t)
+		e.wantCreds(t, `{"user":"login"}`)
+	}
+}
+
+func TestClaudeSyncSkipsUnchangedToken(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"claude": {200, "sk-ant-oat01-x"}})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	before, err := os.Stat(e.creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sync(t)
+	after, err := os.Stat(e.creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("credentials rewritten although the token did not change")
+	}
+	svc.set("claude", reply{200, "sk-ant-oat01-y"})
+	e.sync(t)
+	e.sync(t)
+	b, _ := os.ReadFile(e.creds)
+	if !strings.Contains(string(b), "sk-ant-oat01-y") {
+		t.Fatalf("credentials = %s", b)
+	}
+	svc.set("claude", reply{code: 404})
+	e.sync(t)
+	if _, err := os.Stat(e.creds); !os.IsNotExist(err) {
+		t.Fatalf("own credentials not removed after a token change: %v", err)
+	}
+}
+
+func TestClaudeSyncHashWriteFailureKeepsOldFile(t *testing.T) {
+	requireShell(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only hash file")
+	}
+	svc := newTokenService(t, map[string]reply{"claude": {200, "sk-ant-oat01-x"}})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	before, _ := os.ReadFile(e.creds)
+	hashfile := filepath.Join(e.state, "claude-credentials.sha256")
+	if err := os.Chmod(hashfile, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	svc.set("claude", reply{200, "sk-ant-oat01-y"})
+	cmd := exec.Command("sh", "vmm-sync")
+	cmd.Env = append(os.Environ(), e.env...)
+	cmd.Run()
+	e.wantCreds(t, string(before))
+	if err := os.Chmod(hashfile, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc.set("claude", reply{code: 404})
+	e.sync(t)
+	if _, err := os.Stat(e.creds); !os.IsNotExist(err) {
+		t.Fatalf("own credentials no longer recognised: %v", err)
+	}
+}
+
+func TestSyncLogsMissingUser(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{})
+	e := newSyncEnv(t, svc.URL)
+	cmd := exec.Command("sh", "vmm-sync")
+	cmd.Env = append(append(os.Environ(), e.env...), "VMM_USER=vmm-no-such-user")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil || len(out) != 0 || strings.Count(stderr.String(), "\n") != 1 || !strings.Contains(stderr.String(), "vmm-no-such-user") {
+		t.Fatalf("out %q, stderr %q, %v", out, stderr.String(), err)
+	}
+}
+
+func TestLinearProfileGivesUpFast(t *testing.T) {
+	requireShell(t)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	start := time.Now()
+	cmd := exec.Command("sh", "-c", `. ./vmm-linear.sh; printf %s "${LINEAR_API_KEY-}"`)
+	cmd.Env = append(os.Environ(), "VMM_TOKENS_URL="+srv.URL)
+	out, err := cmd.Output()
+	if err != nil || len(out) != 0 {
+		t.Fatalf("out %q, %v", out, err)
+	}
+	if d := time.Since(start); d > 1800*time.Millisecond {
+		t.Fatalf("login shell waited %v", d)
+	}
+}
+
+func TestGitHubIncludeRemovalKeepsUserKeys(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"github": {code: 404}})
+	cases := []struct{ name, before, after string }{
+		{"user key below", "[user]\n\tname = me\n" + vmmInclude + "\tpath = /home/me/x\n[core]\n\teditor = vi\n", "[user]\n\tname = me\n[include]\n\tpath = /home/me/x\n[core]\n\teditor = vi\n"},
+		{"section follows", "[user]\n\tname = me\n" + vmmInclude + "[core]\n\teditor = vi\n", "[user]\n\tname = me\n[core]\n\teditor = vi\n"},
+		{"blank line then section", "[user]\n\tname = me\n" + vmmInclude + "\n[core]\n", "[user]\n\tname = me\n\n[core]\n"},
+		{"at end", "[user]\n\tname = me\n" + vmmInclude, "[user]\n\tname = me\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newSyncEnv(t, svc.URL)
+			if err := os.WriteFile(e.gitconfig, []byte(c.before), 0o640); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.Stat(e.gitconfig)
+			e.sync(t)
+			e.wantGitconfig(t, c.after)
+			after, err := os.Stat(e.gitconfig)
+			if err != nil || after.Mode().Perm() != 0o640 || os.SameFile(before, after) {
+				t.Fatalf("mode %v, same inode %v (want 0640, replaced by rename), %v", after.Mode(), os.SameFile(before, after), err)
+			}
+			if left, _ := filepath.Glob(e.gitconfig + ".*"); len(left) != 0 {
+				t.Fatalf("leftover files: %v", left)
+			}
+		})
+	}
+}
+
+func TestSyncAsOtherUser(t *testing.T) {
+	requireShell(t)
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to switch users")
+	}
+	if _, err := exec.LookPath("useradd"); err != nil {
+		t.Skip("useradd not installed")
+	}
+	name := fmt.Sprintf("vmmt%d", os.Getpid()%100000)
+	if out, err := exec.Command("useradd", "-m", "-s", "/bin/sh", name).CombinedOutput(); err != nil {
+		t.Fatalf("useradd: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("userdel", "-r", name).Run() })
+	u, err := user.Lookup(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := filepath.Join(u.HomeDir, "claude-stub")
+	homeLog := filepath.Join(u.HomeDir, "claude.home")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"$HOME\" > '"+homeLog+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := newTokenService(t, map[string]reply{"claude": {200, "sk-ant-oat01-x"}, "linear": {200, "lin_api_a"}})
+	env := []string{"VMM_TOKENS_URL=" + svc.URL, "VMM_STATE_DIR=" + t.TempDir(), "VMM_CLAUDE_BIN=" + stub,
+		"VMM_SKIP_INSTALL=1", "VMM_USER=" + name, "VMM_GITCONFIG=" + filepath.Join(t.TempDir(), "gitconfig")}
+	if out, err := run(t, env, "", "vmm-sync"); err != nil || out != "" {
+		t.Fatalf("vmm-sync: output %q, %v", out, err)
+	}
+	creds := filepath.Join(u.HomeDir, ".claude", ".credentials.json")
+	st, err := os.Stat(creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner := fmt.Sprint(st.Sys().(*syscall.Stat_t).Uid); owner != u.Uid || st.Mode().Perm() != 0o600 {
+		t.Fatalf("credentials owned by %s mode %v, want %s 0600", owner, st.Mode(), u.Uid)
+	}
+	if home, _ := os.ReadFile(homeLog); string(home) != u.HomeDir+"\n" {
+		t.Fatalf("claude ran with HOME %q, want %q", home, u.HomeDir)
 	}
 }

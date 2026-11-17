@@ -5,7 +5,7 @@ url=${VMM_TOKENS_URL:-http://10.201.0.1:9002}
 user=${VMM_USER:-ubuntu}
 state=${VMM_STATE_DIR:-/var/lib/vmm}
 home=$(getent passwd "$user" | cut -d: -f6)
-[ -n "$home" ] || exit 0
+[ -n "$home" ] || { echo "vmm-sync: no user $user, nothing to sync" >&2; exit 0; }
 creds=${VMM_CLAUDE_CREDENTIALS:-$home/.claude/.credentials.json}
 claude=${VMM_CLAUDE_BIN:-$home/.local/bin/claude}
 gitconfig=${VMM_GITCONFIG:-/etc/gitconfig}
@@ -30,11 +30,12 @@ fetch() {
   case $token in '' | *[!A-Za-z0-9._~+/=-]*) [ "$code" = 200 ] && code=000 ;; esac
 }
 
-# Runs after the sync, so a hung download (killed by the unit's TimeoutStartSec) never holds back credentials.
+# Runs after the sync, so a hung download never holds back credentials; side by side and bounded, so one never blocks the other.
 install_missing() {
   [ "${VMM_SKIP_INSTALL-}" != 1 ] || return 0
-  [ -x /usr/bin/gh ] || { apt-get -q update && DEBIAN_FRONTEND=noninteractive apt-get -q -y install gh; }
-  [ -x "$claude" ] || as_user sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
+  [ -x /usr/bin/gh ] || timeout 120 sh -c 'apt-get -q update && DEBIAN_FRONTEND=noninteractive apt-get -q -y install gh' &
+  [ -x "$claude" ] || as_user timeout 120 sh -c 'curl -fsSL https://claude.ai/install.sh | bash' &
+  wait
 }
 
 has_include() { awk -v p="$include_path" 'held && $0 == p { found = 1 } { held = $0 == "[include]" } END { exit !found }' "$gitconfig" 2>/dev/null; }
@@ -50,12 +51,22 @@ case $code in
     ;;
   403 | 404)
     if has_include; then
-      # cat back into the file keeps its owner and mode.
-      kept=$(mktemp) && awk -v p="$include_path" '
-        held && $0 == p { held = 0; next }
-        held { print "[include]" }
-        { held = $0 == "[include]" } !held
-        END { if (held) print "[include]" }' "$gitconfig" >"$kept" && cat "$kept" >"$gitconfig"
+      # Drops our path line, and its [include] header unless the user added keys below it; replaced by rename with the old owner and mode.
+      kept=$(mktemp "$gitconfig.XXXXXX") && awk -v p="$include_path" '
+        { l[NR] = $0 }
+        END {
+          for (i = 1; i <= NR; i++) {
+            if (l[i] == "[include]" && l[i + 1] == p) {
+              j = i + 2
+              while (j <= NR && l[j] ~ /^[ \t]*([#;].*)?$/) j++
+              if (j <= NR && l[j] !~ /^[ \t]*\[/) print l[i]
+              i++
+              continue
+            }
+            print l[i]
+          }
+        }' "$gitconfig" >"$kept" &&
+        chmod --reference="$gitconfig" "$kept" && chown --reference="$gitconfig" "$kept" && mv -f "$kept" "$gitconfig"
       rm -f "$kept"
     fi
     ;;
@@ -67,18 +78,26 @@ mkdir -p "$state"
 fetch claude
 hashfile=$state/claude-credentials.sha256
 # Only a missing file or one this script wrote is ours to touch; a user's own /login stays.
-if [ ! -e "$creds" ] || { [ -f "$hashfile" ] && [ "$(sha <"$creds")" = "$(cat "$hashfile")" ]; }; then
-  case $code in
-    200)
-      json=$(printf '{"claudeAiOauth":{"accessToken":"%s","refreshToken":null,"expiresAt":null,"scopes":["user:inference"]}}' "$token")
-      as_user mkdir -p "$(dirname "$creds")"
-      # Written as the user, so a link planted in their directory gets no root write.
-      printf '%s\n' "$json" | as_user sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat >"$t" && mv -f "$t" "$1"' sh "$creds" &&
-        printf '%s\n' "$json" | sha >"$hashfile"
-      ;;
-    403 | 404) rm -f "$creds" "$hashfile" ;;
-  esac
+# The file is read, written and removed as the user, so a link planted in their directory gets no root access.
+current=
+if as_user test -e "$creds"; then
+  current=$(as_user cat "$creds" 2>/dev/null | sha)
+  grep -qxF "$current" "$hashfile" 2>/dev/null || code=foreign
 fi
+case $code in
+  200)
+    json=$(printf '{"claudeAiOauth":{"accessToken":"%s","refreshToken":null,"expiresAt":null,"scopes":["user:inference"]}}' "$token")
+    h=$(printf '%s\n' "$json" | sha)
+    if [ "$h" != "$current" ]; then
+      as_user mkdir -p "$(dirname "$creds")"
+      # The new hash is added before the rename and the old one dropped after, so the file always matches a recorded hash.
+      printf '%s\n' "$h" >>"$hashfile" &&
+        printf '%s\n' "$json" | as_user sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat >"$t" && mv -f "$t" "$1"' sh "$creds" &&
+        printf '%s\n' "$h" >"$hashfile"
+    fi
+    ;;
+  403 | 404) as_user rm -f "$creds" && rm -f "$hashfile" ;;
+esac
 
 fetch linear
 hashfile=$state/linear.sha256

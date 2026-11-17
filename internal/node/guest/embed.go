@@ -35,8 +35,15 @@ func read(name string) string {
 	if err != nil {
 		panic(err) // embedded above, so only a build mistake gets here
 	}
+	return checked(name, b)
+}
+
+func checked(name string, b []byte) string {
 	if strings.Contains(string(b), eof) {
 		panic(name + " contains " + eof)
+	}
+	if !strings.HasSuffix(string(b), "\n") {
+		panic(name + " does not end in a newline, so the heredoc delimiter after it would not be found")
 	}
 	return string(b)
 }
