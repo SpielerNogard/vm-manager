@@ -18,6 +18,10 @@
       "label": "SSH keys",
       "blurb": "Stored public keys. Keys of the hub machine are always listed and preselected when you create a VM."
     },
+    "integrations": {
+      "label": "Integrations",
+      "blurb": "Connect GitHub, Claude and Linear once. VMs get short-lived access without ever holding the secret themselves, except isolated VMs, which get none."
+    },
     "devices": {
       "label": "Devices",
       "blurb": "WireGuard client devices. A device reaches every VM by its management hostname."
@@ -123,7 +127,9 @@
     "removeNetwork": "Remove network",
     "diskSource": "Disk source",
     "existingDisk": "Existing",
-    "newDisk": "New"
+    "newDisk": "New",
+    "isolated": "Isolated",
+    "isolatedHint": "The VM gets no GitHub, Claude or Linear access from the connected integrations."
   },
   "keys": {
     "add": "Add key",
@@ -141,6 +147,34 @@
     "deleteTitle": "Delete {name}?",
     "deleteBody": "The key will no longer be offered for new VMs. VMs already created with it keep it.",
     "deleteConfirm": "Delete key"
+  },
+  "integrations": {
+    "connected": "connected",
+    "notConnected": "not connected",
+    "since": "since {time}",
+    "connect": "Connect",
+    "replace": "Replace",
+    "disconnect": "Disconnect",
+    "save": "Save",
+    "connectTitle": "Connect {name}",
+    "replaceTitle": "Replace {name} secret",
+    "disconnectTitle": "Disconnect {name}?",
+    "disconnectBody": "The secret is deleted from the hub. VMs lose access within 5 minutes.",
+    "github": {
+      "label": "GitHub",
+      "secret": "Personal access token",
+      "howto": "Fine-grained personal access token with Contents (read/write), Pull requests, Issues and Metadata, optionally Workflows."
+    },
+    "claude": {
+      "label": "Claude",
+      "secret": "Setup token",
+      "howto": "Run claude setup-token on a machine where you are signed in and paste the token."
+    },
+    "linear": {
+      "label": "Linear",
+      "secret": "API key",
+      "howto": "Linear Settings › API › create a personal API key."
+    }
   },
   "node": {
     "notFound": "No node named {id}.",

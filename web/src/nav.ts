@@ -1,6 +1,6 @@
 // One list for the router and the sidebar, so a nav entry never points at a missing route.
 
-export type Section = 'nodes' | 'vms' | 'keys' | 'devices' | 'networks' | 'disks' | 'settings'
+export type Section = 'nodes' | 'vms' | 'keys' | 'integrations' | 'devices' | 'networks' | 'disks' | 'settings'
 
 export interface NavItem {
   name: Section
@@ -26,6 +26,7 @@ export const NAV: NavGroup[] = [
     group: 'access',
     items: [
       { name: 'keys', path: '/keys', icon: 'key' },
+      { name: 'integrations', path: '/integrations', icon: 'plug' },
       { name: 'devices', path: '/devices', icon: 'shield' },
       { name: 'networks', path: '/networks', icon: 'network' },
     ],

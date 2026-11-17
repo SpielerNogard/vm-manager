@@ -18,6 +18,10 @@
       "label": "SSH-Keys",
       "blurb": "Gespeicherte Public Keys. Keys der Hub-Maschine stehen immer hier und sind beim Anlegen vorausgewählt."
     },
+    "integrations": {
+      "label": "Integrationen",
+      "blurb": "Verbinde GitHub, Claude und Linear einmalig. VMs erhalten kurzlebigen Zugriff, ohne das Geheimnis selbst zu speichern; isolierte VMs erhalten keinen."
+    },
     "devices": {
       "label": "Geräte",
       "blurb": "WireGuard-Client-Geräte. Ein Gerät erreicht jede VM über ihren Management-Hostnamen."
@@ -123,7 +127,9 @@
     "removeNetwork": "Netzwerk entfernen",
     "diskSource": "Disk-Quelle",
     "existingDisk": "Vorhanden",
-    "newDisk": "Neu"
+    "newDisk": "Neu",
+    "isolated": "Isoliert",
+    "isolatedHint": "Die VM erhält über die verbundenen Integrationen keinen Zugriff auf GitHub, Claude oder Linear."
   },
   "keys": {
     "add": "Key hinzufügen",
@@ -141,6 +147,34 @@
     "deleteTitle": "{name} löschen?",
     "deleteBody": "Der Key steht danach für neue VMs nicht mehr zur Auswahl. VMs, die schon mit ihm angelegt wurden, behalten ihn.",
     "deleteConfirm": "Key löschen"
+  },
+  "integrations": {
+    "connected": "verbunden",
+    "notConnected": "nicht verbunden",
+    "since": "seit {time}",
+    "connect": "Verbinden",
+    "replace": "Ersetzen",
+    "disconnect": "Trennen",
+    "save": "Speichern",
+    "connectTitle": "{name} verbinden",
+    "replaceTitle": "Geheimnis für {name} ersetzen",
+    "disconnectTitle": "{name} trennen?",
+    "disconnectBody": "Das Geheimnis wird auf dem Hub gelöscht. VMs verlieren den Zugriff innerhalb von 5 Minuten.",
+    "github": {
+      "label": "GitHub",
+      "secret": "Personal Access Token",
+      "howto": "Fine-grained Personal Access Token mit Contents (Lesen/Schreiben), Pull requests, Issues und Metadata, optional Workflows."
+    },
+    "claude": {
+      "label": "Claude",
+      "secret": "Setup-Token",
+      "howto": "Führe claude setup-token auf einem Rechner aus, auf dem du angemeldet bist, und füge das Token ein."
+    },
+    "linear": {
+      "label": "Linear",
+      "secret": "API-Key",
+      "howto": "Linear Settings › API › persönlichen API-Key erstellen."
+    }
   },
   "node": {
     "notFound": "Keine Node mit dem Namen {id}.",
