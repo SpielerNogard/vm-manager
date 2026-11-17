@@ -28,6 +28,7 @@ type VMSpec struct {
 	SSHPublicKeys []string         `json:"sshPublicKeys"`
 	NICs          []NIC            `json:"nics"`
 	Attachments   []DiskAttachment `json:"attachments,omitempty"`
+	Isolated      bool             `json:"isolated,omitempty"`
 }
 
 type DiskAttachment struct {

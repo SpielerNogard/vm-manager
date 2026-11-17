@@ -125,6 +125,7 @@ type CreateVMRequest struct {
 	SSHKeyIDs  []string        `json:"sshKeyIds"`
 	NetworkIDs []string        `json:"networkIds"`
 	Disks      []AttachRequest `json:"disks"`
+	Isolated   bool            `json:"isolated"`
 	// SSHPublicKeys is resolved from SSHKeyIDs by the API.
 	SSHPublicKeys []string `json:"-"`
 }
@@ -529,7 +530,7 @@ func (r *Registry) CreateVM(req CreateVMRequest) (VM, error) {
 	}
 	vm := &VM{
 		VMSpec: proto.VMSpec{ID: id, Name: req.Name, CPUs: req.CPUs, MemoryMB: req.MemoryMB, DiskGB: req.DiskGB,
-			SSHPublicKeys: req.SSHPublicKeys, NICs: nics, Attachments: atts},
+			SSHPublicKeys: req.SSHPublicKeys, NICs: nics, Attachments: atts, Isolated: req.Isolated},
 		NodeID: n.ID, Provider: n.Provider, State: proto.StatePending, Power: proto.PowerRunning, generation: 1,
 	}
 	if err := r.store.PutVM(vm.stored()); err != nil {
@@ -905,6 +906,19 @@ func (r *Registry) VMs() []VM {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+func (r *Registry) VMByMgmtIP(ip string) (VM, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, vm := range r.vms {
+		for _, n := range vm.NICs {
+			if n.Network == mgmtNetwork && n.IP == ip {
+				return *vm, true
+			}
+		}
+	}
+	return VM{}, false
 }
 
 func (r *Registry) free(n *nodeEntry) (cpus, memMB int) {

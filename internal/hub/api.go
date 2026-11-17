@@ -27,6 +27,18 @@ func APIHandler(r *Registry, keys *KeyStore, ints *IntegrationStore, net *NetMod
 		}
 	}
 	mux.HandleFunc("GET /api/gateway/state", authed(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, r.GatewayState()) }))
+	mux.HandleFunc("GET /api/tokens/{name}", authed(func(w http.ResponseWriter, req *http.Request) {
+		vm, ok := r.VMByMgmtIP(req.URL.Query().Get("ip"))
+		secret, connected := ints.Secret(req.PathValue("name"))
+		switch {
+		case !ok || !connected:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		case vm.Isolated:
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "vm is isolated"})
+		default:
+			writeJSON(w, http.StatusOK, map[string]string{"token": secret, "expiresAt": ""})
+		}
+	}))
 	mux.HandleFunc("POST /api/gateway/status", authed(func(w http.ResponseWriter, req *http.Request) {
 		var s GatewayStatus
 		if err := json.NewDecoder(req.Body).Decode(&s); err != nil {
