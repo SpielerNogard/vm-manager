@@ -74,7 +74,7 @@ func TestStackEnsureWritesProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(s.DataDir, "stack")
-	for _, f := range []string{"compose.yaml", "deploy/gateway.Dockerfile", "deploy/storage.Dockerfile", "deploy/gateway-start.sh"} {
+	for _, f := range []string{"compose.yaml", "deploy/gateway.Dockerfile", "deploy/storage.Dockerfile", "deploy/tokens.Dockerfile", "deploy/gateway-start.sh"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Error(err)
 		}

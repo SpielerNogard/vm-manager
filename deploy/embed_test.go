@@ -22,6 +22,8 @@ func TestStackFiles(t *testing.T) {
 		"${DATA_DIR}:/data:ro",
 		"name: vm-manager-disks",
 		"profiles: [storage]",
+		"network_mode: \"service:gateway\"",
+		"deploy/tokens.Dockerfile",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("stack.compose.yaml lacks %q", want)
@@ -33,7 +35,10 @@ func TestStackFiles(t *testing.T) {
 	if !strings.Contains(read("gateway-start.sh"), `"${HUB_URL:-http://127.0.0.1:8080}"`) {
 		t.Error("gateway-start.sh does not take the hub address from HUB_URL")
 	}
-	for _, f := range []string{"gateway.Dockerfile", "storage.Dockerfile"} {
+	if !strings.Contains(read("gateway-start.sh"), "--dport 9002 -j ACCEPT") {
+		t.Error("gateway-start.sh does not let VMs reach the token service")
+	}
+	for _, f := range []string{"gateway.Dockerfile", "storage.Dockerfile", "tokens.Dockerfile"} {
 		if !strings.Contains(read(f), "ARG VMM_RELEASE_URL") {
 			t.Errorf("%s cannot build from another release URL", f)
 		}

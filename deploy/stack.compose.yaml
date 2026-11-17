@@ -33,6 +33,19 @@ services:
       - ovn:/var/lib/ovn
       - ovs:/etc/openvswitch
       - ${DATA_DIR}:/data:ro
+  tokens:
+    build:
+      context: .
+      dockerfile: deploy/tokens.Dockerfile
+      args:
+        VMM_VERSION: ${VMM_VERSION}
+        VMM_RELEASE_URL: ${VMM_RELEASE_URL:-}
+    restart: unless-stopped
+    depends_on: [gateway]
+    network_mode: "service:gateway"
+    command: ["-hub", "http://host.docker.internal:${HUB_PORT}", "-token-file", "/data/hub.json"]
+    volumes:
+      - ${DATA_DIR}:/data:ro
   storage:
     build:
       context: .

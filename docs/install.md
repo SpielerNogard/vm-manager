@@ -26,6 +26,7 @@ There are two ways to run the hub:
 |---|---|---|
 | Hub | binary on the host, run as a service | container |
 | Gateway | container, started and rebuilt by the hub | container |
+| Token service | container, started and rebuilt by the hub with the gateway (`tokens`) | container (`tokens`) |
 | Storage server (optional) | container, started and rebuilt by the hub (**Settings › Networking**) | container, compose profile `storage` |
 | Data | directory on the host | Docker volume `data` |
 | Hub update | one click in **Settings › Updates** | by hand, see [Upgrading](#upgrading) |
