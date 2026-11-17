@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs as root from vmm-integrations.timer: installs gh and Claude Code, syncs Claude credentials and the Linear MCP server.
+# Runs as root from vmm-integrations.timer: installs gh and Claude Code, syncs the GitHub git config, Claude credentials and the Linear MCP server.
 umask 077
 url=${VMM_TOKENS_URL:-http://10.201.0.1:9002}
 user=${VMM_USER:-ubuntu}
@@ -8,6 +8,8 @@ home=$(getent passwd "$user" | cut -d: -f6)
 [ -n "$home" ] || exit 0
 creds=${VMM_CLAUDE_CREDENTIALS:-$home/.claude/.credentials.json}
 claude=${VMM_CLAUDE_BIN:-$home/.local/bin/claude}
+gitconfig=${VMM_GITCONFIG:-/etc/gitconfig}
+include_path='	path = /etc/vmm/gitconfig'
 
 # runuser keeps root's environment, so claude would otherwise write its user config into root's home.
 as_user() {
@@ -22,6 +24,7 @@ trap 'rm -f "$body"' EXIT
 
 # Sets code (000 when unreachable) and token; a token with characters outside this set is not used.
 fetch() {
+  : >"$body"
   code=$(curl -fsS --max-time 3 -o "$body" -w '%{http_code}' "$url/v1/$1/token" 2>/dev/null)
   token=$(cat "$body")
   case $token in '' | *[!A-Za-z0-9._~+/=-]*) [ "$code" = 200 ] && code=000 ;; esac
@@ -34,6 +37,30 @@ install_missing() {
   [ -x "$claude" ] || as_user sh -c 'curl -fsSL https://claude.ai/install.sh | bash'
 }
 
+has_include() { awk -v p="$include_path" 'held && $0 == p { found = 1 } { held = $0 == "[include]" } END { exit !found }' "$gitconfig" 2>/dev/null; }
+
+# Rewrites git@github.com: remotes to https only while a token is served, so other VMs keep stock SSH git.
+fetch github
+case $code in
+  200)
+    if ! has_include; then
+      [ -s "$gitconfig" ] && [ -n "$(tail -c1 "$gitconfig")" ] && echo >>"$gitconfig"
+      (umask 022 && printf '[include]\n%s\n' "$include_path" >>"$gitconfig")
+    fi
+    ;;
+  403 | 404)
+    if has_include; then
+      # cat back into the file keeps its owner and mode.
+      kept=$(mktemp) && awk -v p="$include_path" '
+        held && $0 == p { held = 0; next }
+        held { print "[include]" }
+        { held = $0 == "[include]" } !held
+        END { if (held) print "[include]" }' "$gitconfig" >"$kept" && cat "$kept" >"$gitconfig"
+      rm -f "$kept"
+    fi
+    ;;
+esac
+
 [ -x "$claude" ] || { install_missing; exit 0; }
 
 mkdir -p "$state"
@@ -45,8 +72,8 @@ if [ ! -e "$creds" ] || { [ -f "$hashfile" ] && [ "$(sha <"$creds")" = "$(cat "$
     200)
       json=$(printf '{"claudeAiOauth":{"accessToken":"%s","refreshToken":null,"expiresAt":null,"scopes":["user:inference"]}}' "$token")
       as_user mkdir -p "$(dirname "$creds")"
-      tmp=$creds.vmm-new
-      printf '%s\n' "$json" >"$tmp" && chmod 600 "$tmp" && chown "$user:" "$tmp" && mv -f "$tmp" "$creds" &&
+      # Written as the user, so a link planted in their directory gets no root write.
+      printf '%s\n' "$json" | as_user sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat >"$t" && mv -f "$t" "$1"' sh "$creds" &&
         printf '%s\n' "$json" | sha >"$hashfile"
       ;;
     403 | 404) rm -f "$creds" "$hashfile" ;;

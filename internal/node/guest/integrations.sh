@@ -5,7 +5,6 @@ cat >/etc/vmm/gitconfig <<'VMM_EOF'
 [url "https://github.com/"]
 	insteadOf = git@github.com:
 VMM_EOF
-grep -qF 'path = /etc/vmm/gitconfig' /etc/gitconfig 2>/dev/null || printf '[include]\n\tpath = /etc/vmm/gitconfig\n' >>/etc/gitconfig
 
 cat >/etc/systemd/system/vmm-integrations.service <<'VMM_EOF'
 [Unit]

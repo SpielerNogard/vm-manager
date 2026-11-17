@@ -108,7 +108,7 @@ func TestHelpersQuietWhenServiceDown(t *testing.T) {
 }
 
 type syncEnv struct {
-	creds, state, claudeLog, claudeHome string
+	creds, state, claudeLog, claudeHome, gitconfig string
 	env                                 []string
 }
 
@@ -118,13 +118,13 @@ func newSyncEnv(t *testing.T, url string) syncEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := syncEnv{creds: filepath.Join(dir, "home", ".claude", ".credentials.json"), state: filepath.Join(dir, "state"), claudeLog: filepath.Join(dir, "claude.log"), claudeHome: filepath.Join(dir, "claude.home")}
+	e := syncEnv{creds: filepath.Join(dir, "home", ".claude", ".credentials.json"), state: filepath.Join(dir, "state"), claudeLog: filepath.Join(dir, "claude.log"), claudeHome: filepath.Join(dir, "claude.home"), gitconfig: filepath.Join(dir, "gitconfig")}
 	stub := filepath.Join(dir, "claude")
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho \"$*\" >> '"+e.claudeLog+"'\necho \"$HOME\" > '"+e.claudeHome+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	e.env = []string{"VMM_TOKENS_URL=" + url, "VMM_STATE_DIR=" + e.state, "VMM_CLAUDE_CREDENTIALS=" + e.creds,
-		"VMM_CLAUDE_BIN=" + stub, "VMM_SKIP_INSTALL=1", "VMM_USER=" + u.Username, "HOME=" + filepath.Join(dir, "home")}
+		"VMM_CLAUDE_BIN=" + stub, "VMM_SKIP_INSTALL=1", "VMM_USER=" + u.Username, "VMM_GITCONFIG=" + e.gitconfig, "HOME=" + filepath.Join(dir, "home")}
 	return e
 }
 
@@ -244,6 +244,104 @@ func TestLinearSync(t *testing.T) {
 	}
 }
 
+const vmmInclude = "[include]\n\tpath = /etc/vmm/gitconfig\n"
+
+func (e syncEnv) wantGitconfig(t *testing.T, want string) {
+	t.Helper()
+	b, err := os.ReadFile(e.gitconfig)
+	if err != nil || string(b) != want {
+		t.Fatalf("gitconfig = %q, %v; want %q", b, err, want)
+	}
+	if _, err := exec.LookPath("git"); err == nil {
+		cmd := exec.Command("git", "config", "-f", e.gitconfig, "--list")
+		cmd.Dir = filepath.Dir(e.gitconfig)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config --list: %v\n%s", err, out)
+		}
+	}
+}
+
+func TestGitHubIncludeFollowsToken(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"github": {200, "ghp_x"}})
+	e := newSyncEnv(t, svc.URL)
+	own := "[user]\n\tname = me\n[include]\n\tpath = /home/me/.gitextra"
+	if err := os.WriteFile(e.gitconfig, []byte(own), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.sync(t)
+	e.wantGitconfig(t, own+"\n"+vmmInclude)
+	e.sync(t)
+	e.wantGitconfig(t, own+"\n"+vmmInclude)
+
+	svc.set("github", reply{code: 404})
+	e.sync(t)
+	e.wantGitconfig(t, own+"\n")
+
+	svc.set("github", reply{200, "ghp_x"})
+	e.sync(t)
+	svc.set("github", reply{code: 403})
+	e.sync(t)
+	e.wantGitconfig(t, own+"\n")
+}
+
+func TestGitHubIncludeUnreachableNoChange(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"github": {200, "ghp_x"}})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	e.wantGitconfig(t, vmmInclude)
+	if st, _ := os.Stat(e.gitconfig); st.Mode().Perm() != 0o644 {
+		t.Fatalf("mode = %v, want world-readable", st.Mode())
+	}
+	svc.Close()
+	e.sync(t)
+	e.wantGitconfig(t, vmmInclude)
+}
+
+func TestGitHubIncludeNotCreatedWithoutToken(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	if _, err := os.Stat(e.gitconfig); !os.IsNotExist(err) {
+		t.Fatalf("gitconfig created without a token: %v", err)
+	}
+}
+
+func TestSyncIgnoresPreviousBody(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"claude": {200, "sk-ant-oat01-x"}, "linear": {200, ""}})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	if b, _ := os.ReadFile(e.claudeLog); len(b) != 0 {
+		t.Fatalf("empty linear reply used a previous body: %s", b)
+	}
+}
+
+func TestClaudeSyncIgnoresPlantedSymlink(t *testing.T) {
+	requireShell(t)
+	svc := newTokenService(t, map[string]reply{"claude": {200, "sk-ant-oat01-x"}})
+	e := newSyncEnv(t, svc.URL)
+	target := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(target, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(e.creds), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, e.creds+".vmm-new"); err != nil {
+		t.Fatal(err)
+	}
+	e.sync(t)
+	if b, _ := os.ReadFile(target); string(b) != "keep" {
+		t.Fatalf("symlink target overwritten: %q", b)
+	}
+	if st, err := os.Lstat(e.creds); err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0o600 {
+		t.Fatalf("credentials not a 600 regular file: %v, %v", st, err)
+	}
+}
+
 func TestScriptInstallsHelpers(t *testing.T) {
 	requireShell(t)
 	s := Script()
@@ -251,6 +349,9 @@ func TestScriptInstallsHelpers(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("script missing %q", want)
 		}
+	}
+	if strings.Contains(s, ">>/etc/gitconfig") {
+		t.Error("script includes /etc/vmm/gitconfig unconditionally; vmm-sync manages it")
 	}
 	if out, err := exec.Command("sh", "-n", "-c", s).CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v\n%s", err, out)
