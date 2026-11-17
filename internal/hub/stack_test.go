@@ -79,6 +79,9 @@ func TestStackEnsureWritesProject(t *testing.T) {
 			t.Error(err)
 		}
 	}
+	if b, err := os.ReadFile(filepath.Join(dir, "compose.yaml")); err != nil || !strings.Contains(string(b), "\n  tokens:\n") {
+		t.Errorf("stack compose.yaml has no tokens service (err %v)", err)
+	}
 	if fi, err := os.Stat(filepath.Join(dir, "deploy/gateway-start.sh")); err == nil && fi.Mode()&0o111 == 0 {
 		t.Error("gateway-start.sh is not executable")
 	}
