@@ -91,7 +91,7 @@ case $code in
     if [ "$h" != "$current" ]; then
       as_user mkdir -p "$(dirname "$creds")"
       # The new hash is added before the rename and the old one dropped after, so the file always matches a recorded hash.
-      printf '%s\n' "$h" >>"$hashfile" &&
+      { grep -qxF "$h" "$hashfile" 2>/dev/null || printf '%s\n' "$h" >>"$hashfile"; } &&
         printf '%s\n' "$json" | as_user sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat >"$t" && mv -f "$t" "$1"' sh "$creds" &&
         printf '%s\n' "$h" >"$hashfile"
     fi

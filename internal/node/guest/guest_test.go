@@ -573,3 +573,51 @@ func TestSyncAsOtherUser(t *testing.T) {
 		t.Fatalf("claude ran with HOME %q, want %q", home, u.HomeDir)
 	}
 }
+
+func TestClaudeSyncFailedWriteAddsHashOnce(t *testing.T) {
+	requireShell(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only directory")
+	}
+	svc := newTokenService(t, map[string]reply{"claude": {200, "sk-ant-oat01-x"}})
+	e := newSyncEnv(t, svc.URL)
+	e.sync(t)
+	dir := filepath.Dir(e.creds)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	svc.set("claude", reply{200, "sk-ant-oat01-y"})
+	for range 2 {
+		cmd := exec.Command("sh", "vmm-sync")
+		cmd.Env = append(os.Environ(), e.env...)
+		cmd.Run()
+	}
+	b, err := os.ReadFile(filepath.Join(e.state, "claude-credentials.sha256"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	seen := map[string]int{}
+	for _, l := range lines {
+		if seen[l]++; seen[l] > 1 {
+			t.Fatalf("hash recorded twice: %q", b)
+		}
+	}
+}
+
+func TestCredentialHelperGivesUpFast(t *testing.T) {
+	requireShell(t)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	start := time.Now()
+	out, err := run(t, []string{"VMM_TOKENS_URL=" + srv.URL}, "protocol=https\nhost=github.com\n\n", "git-credential-vmm", "get")
+	if err != nil || out != "" {
+		t.Fatalf("output %q, %v", out, err)
+	}
+	if d := time.Since(start); d > 1800*time.Millisecond {
+		t.Fatalf("git waited %v", d)
+	}
+}
