@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,5 +124,49 @@ func TestClaudePrefix(t *testing.T) {
 	}
 	if _, err := v(context.Background(), "abc"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func stubProvider(t *testing.T, status int, body string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	oldGH, oldLin := githubUserURL, linearURL
+	githubUserURL, linearURL = srv.URL, srv.URL
+	t.Cleanup(func() { githubUserURL, linearURL = oldGH, oldLin })
+}
+
+func TestProviderVerifiers(t *testing.T) {
+	cases := []struct {
+		name, verifier string
+		status         int
+		body           string
+		account, errIn string
+	}{
+		{"github ok", "github", 200, `{"login":"octo"}`, "octo", ""},
+		{"github 401", "github", 401, `{"message":"Bad credentials"}`, "", "Bad credentials"},
+		{"github html 200", "github", 200, `<html>portal</html>`, "", "unreadable"},
+		{"github 500 no body", "github", 500, ``, "", "500"},
+		{"linear ok", "linear", 200, `{"data":{"viewer":{"Email":"a@b.c"}}}`, "a@b.c", ""},
+		{"linear errors", "linear", 200, `{"errors":[{"Message":"Authentication required"}]}`, "", "Authentication required"},
+		{"linear data null", "linear", 200, `{"data":null}`, "", "no viewer email"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			stubProvider(t, c.status, c.body)
+			got, err := DefaultVerifiers()[c.verifier](context.Background(), "secret")
+			if c.errIn == "" {
+				if err != nil || got != c.account {
+					t.Fatalf("got %q, %v", got, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.errIn) {
+				t.Fatalf("err = %v, want %q", err, c.errIn)
+			}
+		})
 	}
 }

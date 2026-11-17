@@ -173,6 +173,9 @@ func verifyGitHub(ctx context.Context, secret string) (string, error) {
 	if err := callProvider(ctx, req, &out, func() string { return out.Message }); err != nil {
 		return "", err
 	}
+	if out.Login == "" {
+		return "", errors.New("provider response has no login")
+	}
 	return out.Login, nil
 }
 
@@ -199,6 +202,9 @@ func verifyLinear(ctx context.Context, secret string) (string, error) {
 	if err := callProvider(ctx, req, &out, msg); err != nil {
 		return "", err
 	}
+	if out.Data.Viewer.Email == "" {
+		return "", errors.New("provider response has no viewer email")
+	}
 	return out.Data.Viewer.Email, nil
 }
 
@@ -211,12 +217,15 @@ func callProvider(ctx context.Context, req *http.Request, out any, msg func() st
 		return err
 	}
 	defer resp.Body.Close()
-	json.NewDecoder(resp.Body).Decode(out)
+	decodeErr := json.NewDecoder(resp.Body).Decode(out)
 	if m := msg(); m != "" {
 		return errors.New(m)
 	}
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("provider answered %s", resp.Status)
+	}
+	if decodeErr != nil {
+		return fmt.Errorf("unreadable provider response: %w", decodeErr)
 	}
 	return nil
 }
