@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func stubVerifiers(account string, err error) map[string]Verifier {
@@ -28,11 +29,14 @@ func newTestIntegrations(t *testing.T) *IntegrationStore {
 
 func TestSetPersistsAndHidesSecret(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "integrations.json")
-	s, _ := LoadIntegrationStore(path, stubVerifiers("octo", nil))
+	s, err := LoadIntegrationStore(path, stubVerifiers("octo", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Set(context.Background(), "github", "pat", "ghp_x"); err != nil {
 		t.Fatal(err)
 	}
-	s, err := LoadIntegrationStore(path, stubVerifiers("", nil))
+	s, err = LoadIntegrationStore(path, stubVerifiers("", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +89,11 @@ func TestSetRejectsWrongSourceAndName(t *testing.T) {
 }
 
 func TestSetVerifierError(t *testing.T) {
-	s, _ := LoadIntegrationStore(filepath.Join(t.TempDir(), "i.json"), stubVerifiers("", errors.New("Bad credentials")))
-	_, err := s.Set(context.Background(), "github", "pat", "x")
+	s, err := LoadIntegrationStore(filepath.Join(t.TempDir(), "i.json"), stubVerifiers("", errors.New("Bad credentials")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Set(context.Background(), "github", "pat", "x")
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "Bad credentials") {
 		t.Fatalf("err = %v", err)
 	}
@@ -97,7 +104,9 @@ func TestSetVerifierError(t *testing.T) {
 
 func TestDeleteDisconnects(t *testing.T) {
 	s := newTestIntegrations(t)
-	s.Set(context.Background(), "github", "pat", "x")
+	if _, err := s.Set(context.Background(), "github", "pat", "x"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Delete("github"); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +123,30 @@ func TestDeleteDisconnects(t *testing.T) {
 	}
 	if err := s.Delete("slack"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSetWithoutVerifier(t *testing.T) {
+	s, err := LoadIntegrationStore(filepath.Join(t.TempDir(), "i.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(context.Background(), "github", "pat", "x"); err == nil {
+		t.Fatal("expected an error without a verifier")
+	}
+}
+
+func TestListOmitsUnsetConnectedAt(t *testing.T) {
+	s := newTestIntegrations(t)
+	if _, err := s.Set(context.Background(), "github", "pat", "x"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(s.List())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), `"connectedAt"`); n != 1 || strings.Contains(string(b), "0001-01-01") {
+		t.Fatalf("connectedAt %d times: %s", n, b)
 	}
 }
 
@@ -153,6 +186,9 @@ func TestProviderVerifiers(t *testing.T) {
 		{"linear ok", "linear", 200, `{"data":{"viewer":{"Email":"a@b.c"}}}`, "a@b.c", ""},
 		{"linear errors", "linear", 200, `{"errors":[{"Message":"Authentication required"}]}`, "", "Authentication required"},
 		{"linear data null", "linear", 200, `{"data":null}`, "", "no viewer email"},
+		{"linear html 200", "linear", 200, `<html>portal</html>`, "", "unreadable"},
+		{"linear 401", "linear", 401, `{}`, "", "401"},
+		{"github body over 1 MiB", "github", 200, `{"login":"octo","pad":"` + strings.Repeat("x", 1<<20) + `"}`, "", "unreadable"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -168,5 +204,18 @@ func TestProviderVerifiers(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, c.errIn)
 			}
 		})
+	}
+}
+
+func TestProviderTimeout(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	oldURL, oldTimeout := githubUserURL, providerTimeout
+	githubUserURL, providerTimeout = srv.URL, 50*time.Millisecond
+	t.Cleanup(func() { githubUserURL, providerTimeout = oldURL, oldTimeout })
+	if _, err := DefaultVerifiers()["github"](context.Background(), "secret"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v", err)
 	}
 }

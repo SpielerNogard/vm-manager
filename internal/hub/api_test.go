@@ -666,7 +666,7 @@ func tokenLookup(t *testing.T, srv *httptest.Server, token, ip string) (int, str
 	return resp.StatusCode, string(b)
 }
 
-func tokenServer(t *testing.T, connect bool, isolated bool) (*httptest.Server, string) {
+func tokenServer(t *testing.T, connect, isolated bool) (*httptest.Server, string) {
 	t.Helper()
 	cfg := newTestConfig(t, testAPIConfig())
 	nm := newTestNet(t)
@@ -720,6 +720,13 @@ func TestTokenLookupIsolated(t *testing.T) {
 	s, body := tokenLookup(t, srv, "tok", ip)
 	if s != http.StatusForbidden || strings.Contains(body, "ghp_secret") {
 		t.Fatalf("status = %d body = %s", s, body)
+	}
+}
+
+func TestTokenLookupIsolatedNotConnected(t *testing.T) {
+	srv, ip := tokenServer(t, false, true)
+	if s, _ := tokenLookup(t, srv, "tok", ip); s != http.StatusForbidden {
+		t.Fatalf("status = %d", s)
 	}
 }
 

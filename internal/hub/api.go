@@ -31,10 +31,10 @@ func APIHandler(r *Registry, keys *KeyStore, ints *IntegrationStore, net *NetMod
 		vm, ok := r.VMByMgmtIP(req.URL.Query().Get("ip"))
 		secret, connected := ints.Secret(req.PathValue("name"))
 		switch {
+		case ok && vm.Isolated:
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "vm is isolated"})
 		case !ok || !connected:
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		case vm.Isolated:
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "vm is isolated"})
 		default:
 			writeJSON(w, http.StatusOK, map[string]string{"token": secret, "expiresAt": ""})
 		}

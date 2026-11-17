@@ -1088,9 +1088,13 @@ func TestCreateVMIsolated(t *testing.T) {
 	if !vm.Isolated {
 		t.Fatal("created VM is not isolated")
 	}
-	stored := r.store.VMs()
-	if len(stored) != 1 || !stored[0].Spec.Isolated {
-		t.Fatalf("stored = %+v", stored)
+	store, err := LoadVMStore(r.store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := NewRegistry(r.net, store, r.disks, r.cfg)
+	if got, ok := r2.vms[vm.ID]; !ok || !got.Isolated {
+		t.Fatalf("after reload = %+v", got)
 	}
 	q.Name, q.Isolated = "open", false
 	if vm, _ = r.CreateVM(q); vm.Isolated {

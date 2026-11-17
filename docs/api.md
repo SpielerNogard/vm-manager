@@ -29,7 +29,7 @@
 | GET | `/api/keys` | Stored SSH public keys with type and fingerprint |
 | POST | `/api/keys` | Store a key (`name`, `publicKey`) |
 | DELETE | `/api/keys/{id}` | Remove a stored key. VMs that already have it keep it |
-| GET | `/api/integrations` | `github`, `claude` and `linear` with `connected`, `account`, `connectedAt`. Never the secret |
+| GET | `/api/integrations` | `github`, `claude` and `linear` with `connected`, `account` and, once connected, `connectedAt`. Never the secret |
 | PUT | `/api/integrations/{name}` | Connect or replace one (`source`, `secret`): `github` takes `pat`, `claude` `setup-token`, `linear` `api-key`. The hub checks the secret with the provider first; 400 if it is rejected |
 | DELETE | `/api/integrations/{name}` | Disconnect (204, also when it was not connected) |
 | GET | `/api/networks` | Networks with subnet and members (VM IDs), management network first, marked builtin |
@@ -48,5 +48,5 @@
 | DELETE | `/api/devices/{id}` | Remove a device |
 | GET | `/api/devices/{id}/config` | Download the device's WireGuard config |
 | GET | `/api/gateway/state` | Internal, token-protected: desired network state for the gateway |
-| GET | `/api/tokens/{name}?ip=` | Internal, token-protected: the secret of a connected integration for the VM with that management IP, as `{"token", "expiresAt"}` (`expiresAt` is empty for now). 404 for an unknown IP or an integration that is not connected, 403 for an `isolated` VM |
+| GET | `/api/tokens/{name}?ip=` | Internal, token-protected: the secret of a connected integration for the VM with that management IP, as `{"token", "expiresAt"}` (`expiresAt` is empty for now). 403 for an `isolated` VM (whether or not the integration is connected), 404 for an unknown IP or an integration that is not connected |
 | POST | `/api/gateway/status` | Internal, token-protected: gateway status report |

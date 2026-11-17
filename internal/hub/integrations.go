@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -21,7 +22,7 @@ type Integration struct {
 	Source      string    `json:"source"`
 	Connected   bool      `json:"connected"`
 	Account     string    `json:"account"`
-	ConnectedAt time.Time `json:"connectedAt"`
+	ConnectedAt time.Time `json:"connectedAt,omitzero"`
 }
 
 // Verifier checks a secret against the provider and returns the account it belongs to.
@@ -89,7 +90,11 @@ func (s *IntegrationStore) Set(ctx context.Context, name, source, secret string)
 	if secret == "" {
 		return Integration{}, fmt.Errorf("%w: secret is required", ErrInvalid)
 	}
-	account, err := s.verify[name](ctx, secret)
+	verify := s.verify[name]
+	if verify == nil {
+		return Integration{}, fmt.Errorf("no verifier for integration %q", name)
+	}
+	account, err := verify(ctx, secret)
 	if err != nil {
 		return Integration{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -158,6 +163,8 @@ func DefaultVerifiers() map[string]Verifier {
 var (
 	githubUserURL = "https://api.github.com/user"
 	linearURL     = "https://api.linear.app/graphql"
+
+	providerTimeout = 10 * time.Second
 )
 
 func verifyGitHub(ctx context.Context, secret string) (string, error) {
@@ -210,14 +217,14 @@ func verifyLinear(ctx context.Context, secret string) (string, error) {
 
 // callProvider decodes the JSON reply into out; a non-2xx status or a non-empty msg() is an error.
 func callProvider(ctx context.Context, req *http.Request, out any, msg func() string) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, providerTimeout)
 	defer cancel()
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	decodeErr := json.NewDecoder(resp.Body).Decode(out)
+	decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out)
 	if m := msg(); m != "" {
 		return errors.New(m)
 	}
